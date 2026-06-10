@@ -30,7 +30,11 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es" className={`${epilogue.variable} ${mulish.variable}`}>
-      <body>{children}</body>
+      <body>
+        <div className="main-layout-wrapper">
+          {children}
+        </div>
+      </body>
     </html>
   );
 }
