@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CONFIG } from "../data/config";
 import ReferencesGallery from "../components/ReferencesGallery";
@@ -60,6 +63,66 @@ function QobuzIcon() {
 }
 
 export default function Home() {
+  const [videoLoaded, setVideoLoaded] = useState(false);
+  const heroRef = useRef(null);
+  const videoRef = useRef(null);
+
+  // Defer video loading to ensure initial page speed remains ultra-fast
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVideoLoaded(true);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // IntersectionObserver to pause/play the video based on visibility
+  useEffect(() => {
+    if (!videoLoaded) return;
+    const videoElement = videoRef.current;
+    const heroElement = heroRef.current;
+    if (!videoElement || !heroElement) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            videoElement.play().catch((err) => {
+              console.log("Video playback was interrupted or blocked:", err);
+            });
+          } else {
+            videoElement.pause();
+          }
+        });
+      },
+      {
+        threshold: 0.05,
+      }
+    );
+
+    observer.observe(heroElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [videoLoaded]);
+
+  // Handle smooth scroll to top when clicking logo
+  const handleLogoClick = (e) => {
+    if (window.location.pathname === "/") {
+      e.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (window.location.hash) {
+        window.history.pushState(null, "", "/");
+      }
+    }
+  };
+
+  // Immediate pause of the video when a section navigation button is clicked
+  const handleSectionLinkClick = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+    }
+  };
+
   // Get prices dynamically to display starting values
   const getStartingPrice = (serviceKey) => {
     const service = CONFIG.services[serviceKey];
@@ -78,14 +141,14 @@ export default function Home() {
       {/* HEADER / NAVBAR */}
       <header className="site-header">
         <div className="container header-container">
-          <Link href="/" className="logo-area">
+          <Link href="/" className="logo-area" onClick={handleLogoClick}>
             <WaveLogo />
             <span className="logo-text">{CONFIG.appName}</span>
           </Link>
           <nav className="main-nav">
-            <a href="#servicios" className="nav-link">Servicios</a>
-            <a href="#opiniones" className="nav-link">Referencias</a>
-            <a href="#pagos" className="nav-link">Métodos de Pago</a>
+            <a href="#servicios" className="nav-link" onClick={handleSectionLinkClick}>Servicios</a>
+            <a href="#opiniones" className="nav-link" onClick={handleSectionLinkClick}>Referencias</a>
+            <a href="#pagos" className="nav-link" onClick={handleSectionLinkClick}>Métodos de Pago</a>
           </nav>
           <a
             href={`https://wa.me/${CONFIG.whatsappNumber}?text=Hola!%20Me%20gustaría%20saber%20más%20sobre%20las%20cuentas%20premium.`}
@@ -100,7 +163,21 @@ export default function Home() {
       </header>
 
       {/* HERO SECTION */}
-      <section className="hero-section section-padding">
+      <section ref={heroRef} className="hero-section section-padding">
+        {videoLoaded && (
+          <div className="hero-video-bg-wrap">
+            <video
+              ref={videoRef}
+              src="/video/video-1.mp4"
+              loop
+              muted
+              playsInline
+              autoPlay
+              className="hero-video-bg"
+            />
+            <div className="hero-video-overlay"></div>
+          </div>
+        )}
         <div className="container hero-container">
           <div className="hero-content">
             <span className="badge badge-gold hero-badge">Premium a Bajo Costo</span>
@@ -111,7 +188,7 @@ export default function Home() {
               Ofrecemos cuentas 100% estables de <strong>Tidal</strong>, <strong>Deezer</strong> y <strong>Qobuz</strong> con garantía total. Activa tu cuenta hoy mismo de forma fácil y segura.
             </p>
             <div className="hero-actions">
-              <a href="#servicios" className="btn btn-primary">Ver Planes Disponibles</a>
+              <a href="#servicios" className="btn btn-primary" onClick={handleSectionLinkClick}>Ver Planes Disponibles</a>
               <a href={CONFIG.whatsappChannelUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
                 <WhatsAppIcon />
                 <span>Canal de WhatsApp</span>
@@ -151,6 +228,11 @@ export default function Home() {
             </div>
           </div>
         </div>
+        <a href="#servicios" className="hero-scroll-down" onClick={handleSectionLinkClick} aria-label="Desplazarse a Servicios">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="scroll-arrow-icon">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </a>
       </section>
 
       {/* SERVICES SECTION */}
@@ -317,7 +399,7 @@ export default function Home() {
 
           {/* Helper indicator to scroll to image references */}
           <div className="gallery-scroll-indicator-wrap">
-            <a href="#referencias" className="gallery-scroll-indicator">
+            <a href="#referencias" className="gallery-scroll-indicator" onClick={handleSectionLinkClick}>
               <span>Capturas de pantalla y comentarios de clientes</span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="indicator-arrow">
                 <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -391,18 +473,18 @@ export default function Home() {
       <footer className="site-footer">
         <div className="container footer-grid">
           <div className="footer-brand">
-            <div className="logo-area">
+            <Link href="/" className="logo-area" onClick={handleLogoClick}>
               <WaveLogo />
               <span className="logo-text">{CONFIG.appName}</span>
-            </div>
+            </Link>
             <p className="brand-tagline">{CONFIG.tagline}</p>
           </div>
           
           <div className="footer-links-group">
             <h4>Enlaces Rápidos</h4>
-            <a href="#servicios">Servicios</a>
-            <a href="#opiniones">Referencias</a>
-            <a href="#pagos">Métodos de Pago</a>
+            <a href="#servicios" onClick={handleSectionLinkClick}>Servicios</a>
+            <a href="#opiniones" onClick={handleSectionLinkClick}>Referencias</a>
+            <a href="#pagos" onClick={handleSectionLinkClick}>Métodos de Pago</a>
           </div>
 
           <div className="footer-links-group">
