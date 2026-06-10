@@ -61,7 +61,7 @@ html {
 }
 
 section[id] {
-  scroll-margin-top: 70px;
+  scroll-margin-top: 80px;
 }
 
 /* --- TYPOGRAPHY --- */
@@ -106,12 +106,12 @@ a {
 }
 
 .section-padding {
-  padding: 50px 0;
+  padding: 80px 0 100px 0;
 }
 
 @media (max-width: 768px) {
   .section-padding {
-    padding: 40px 0;
+    padding: 60px 0 80px 0;
   }
 }
 
@@ -319,7 +319,7 @@ a {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(8, 8, 10, 0.7);
+  background: rgba(8, 8, 10, 0.85);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--glass-border);
@@ -593,7 +593,7 @@ a {
     min-height: 64px;
   }
   .service-features-list {
-    min-height: 100px;
+    min-height: 180px;
   }
 }
 
