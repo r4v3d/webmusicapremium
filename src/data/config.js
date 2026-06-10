@@ -43,9 +43,10 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "tidal-1m", duration: "1 Mes", pricePen: "S/. 4.00", priceUsd: "2.50", popular: false },
-        { id: "tidal-3m", duration: "6 Meses", pricePen: "S/. 15.00", priceUsd: "6.50", popular: true },
-        { id: "tidal-6m", duration: "12 Meses", pricePen: "S/. 25.00", priceUsd: "11.50", popular: false }
+        { id: "tidal-1m", duration: "1 Mes", pricePen: "S/. 4.00", priceUsd: "1.19", popular: false },
+        { id: "tidal-2m", duration: "2 Meses", pricePen: "S/. 6.00", priceUsd: "1.79", popular: false },
+        { id: "tidal-6m", duration: "6 Meses", pricePen: "S/. 15.00", priceUsd: "4.49", popular: false },
+        { id: "tidal-12m", duration: "12 Meses", pricePen: "S/. 25.00", priceUsd: "7.49", popular: true }
       ]
     },
     deezer: {
@@ -63,9 +64,10 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "deezer-1m", duration: "1 Mes", pricePen: "S/. 6.00", priceUsd: "2.70", popular: false },
-        { id: "deezer-3m", duration: "2 Meses", pricePen: "S/. 9.00", priceUsd: "7.00", popular: true },
-        { id: "deezer-6m", duration: "12 Meses", pricePen: "S/. 45.00", priceUsd: "13.00", popular: false }
+        { id: "deezer-1m", duration: "1 Mes", pricePen: "S/. 6.00", priceUsd: "1.79", popular: false },
+        { id: "deezer-2m", duration: "2 Meses", pricePen: "S/. 9.00", priceUsd: "2.69", popular: false },
+        { id: "deezer-6m", duration: "6 Meses", pricePen: "S/. 25.00", priceUsd: "7.29", popular: false },
+        { id: "deezer-12m", duration: "12 Meses", pricePen: "S/. 45.00", priceUsd: "13.29", popular: true }
       ]
     },
     qobuz: {
@@ -83,9 +85,7 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "qobuz-1m", duration: "1 Mes", pricePen: "S/. 12.00", priceUsd: "3.50", popular: false },
-        { id: "qobuz-3m", duration: "3 Meses", pricePen: "S/. 32.00", priceUsd: "9.00", popular: true },
-        { id: "qobuz-6m", duration: "6 Meses", pricePen: "S/. 60.00", priceUsd: "17.00", popular: false }
+        { id: "qobuz-1m", duration: "1 Mes", pricePen: "S/. 9.00", priceUsd: "2.69", popular: true },
       ]
     }
   },

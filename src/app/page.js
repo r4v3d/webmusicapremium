@@ -93,7 +93,7 @@ export default function Home() {
             className="btn btn-secondary nav-btn"
           >
             <WhatsAppIcon />
-            <span>Chatear por WhatsApp</span>
+            <span className="nav-btn-text">Chatear por WhatsApp</span>
           </a>
         </div>
       </header>
