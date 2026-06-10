@@ -61,13 +61,7 @@ html {
 }
 
 #servicios, #opiniones, #referencias, #pagos {
-  scroll-margin-top: 110px !important;
-}
-
-@media (max-width: 768px) {
-  #servicios, #opiniones, #referencias, #pagos {
-    scroll-margin-top: 80px !important;
-  }
+  scroll-margin-top: 58px !important;
 }
 
 /* --- TYPOGRAPHY --- */
@@ -112,13 +106,7 @@ a {
 }
 
 .section-padding {
-  padding: 80px 0 150px 0;
-}
-
-@media (max-width: 768px) {
-  .section-padding {
-    padding: 60px 0 80px 0;
-  }
+  padding: 60px 0;
 }
 
 /* --- BUTTONS --- */
