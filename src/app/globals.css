@@ -60,8 +60,14 @@ html {
   scroll-behavior: smooth;
 }
 
-section[id] {
-  scroll-margin-top: 80px;
+#servicios, #opiniones, #pagos {
+  scroll-margin-top: 100px !important;
+}
+
+@media (max-width: 768px) {
+  #servicios, #opiniones, #pagos {
+    scroll-margin-top: 80px !important;
+  }
 }
 
 /* --- TYPOGRAPHY --- */
@@ -364,6 +370,22 @@ a {
 }
 
 /* --- HERO SECTION --- */
+.hero-section {
+  min-height: calc(100vh - 58px);
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 40px 0 !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1024px) {
+  .hero-section {
+    min-height: auto;
+    padding: 60px 0 !important;
+  }
+}
+
 .hero-container {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
