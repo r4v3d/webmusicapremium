@@ -254,11 +254,57 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
               </div>
               <h1 className="success-title">¡Pago Confirmado!</h1>
               <p className="success-subtitle">
-                Hemos verificado tu pago correctamente. Tu cuenta premium de <strong>{order.service.toUpperCase()} ({order.duration})</strong> está lista para ser activada.
+                Hemos verificado tu pago correctamente. Tu cuenta premium de <strong>{order.service.toUpperCase()} ({order.duration})</strong> ha sido activada.
               </p>
+
+              {/* ACCOUNT CREDENTIALS BOX (IF ASSIGNED FROM STOCK) */}
+              {order.assignedAccount ? (
+                <div className="assigned-credentials-card glass-panel text-left">
+                  <h3>Tus Datos de Acceso Premium</h3>
+                  <p className="credentials-info-hint">Inicia sesión en la app oficial de {order.service.toUpperCase()} con estos datos:</p>
+                  
+                  <div className="credentials-row">
+                    <span className="cred-label">Usuario / Correo:</span>
+                    <div className="cred-value-wrap">
+                      <code>{order.assignedAccount.split(":")[0]}</code>
+                      <button
+                        onClick={() => handleCopyToClipboard(order.assignedAccount.split(":")[0], "cred_user")}
+                        className="btn-copy-mini"
+                      >
+                        <CopyIcon />
+                        <span>{copiedText === "cred_user" ? "Copiado!" : "Copiar"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {order.assignedAccount.includes(":") && (
+                    <div className="credentials-row">
+                      <span className="cred-label">Contraseña:</span>
+                      <div className="cred-value-wrap">
+                        <code>{order.assignedAccount.split(":")[1]}</code>
+                        <button
+                          onClick={() => handleCopyToClipboard(order.assignedAccount.split(":")[1], "cred_pass")}
+                          className="btn-copy-mini"
+                        >
+                          <CopyIcon />
+                          <span>{copiedText === "cred_pass" ? "Copiado!" : "Copiar"}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="no-credentials-assigned-card glass-panel">
+                  <p>Estamos preparando las credenciales de tu cuenta. Te enviaremos un correo de confirmación de inmediato o puedes contactarnos por WhatsApp para agilizar la entrega.</p>
+                </div>
+              )}
 
               <div className="success-details-card">
                 <h3>Detalles de la Orden</h3>
+                <div className="detail-row">
+                  <span>ID de Pedido:</span>
+                  <strong>#{order.orderId}</strong>
+                </div>
                 <div className="detail-row">
                   <span>Plataforma:</span>
                   <strong>{order.service.toUpperCase()} Premium</strong>
@@ -274,7 +320,7 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
                   </strong>
                 </div>
                 <div className="detail-row">
-                  <span>Correo de Entrega:</span>
+                  <span>Correo registrado:</span>
                   <strong>{order.email}</strong>
                 </div>
               </div>
@@ -287,7 +333,7 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
                   className="btn btn-whatsapp"
                 >
                   <WhatsAppIcon />
-                  <span>Pedir Entrega Inmediata</span>
+                  <span>Pedir Soporte / Entrega por WhatsApp</span>
                 </a>
                 <Link href="/" className="btn btn-secondary">
                   Volver a la Página Principal
@@ -979,6 +1025,60 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
           .success-panel {
             padding: 30px 20px;
           }
+        }
+
+        /* --- ASSIGNED CREDENTIALS STYLES --- */
+        .assigned-credentials-card {
+          padding: 24px;
+          margin-bottom: 30px;
+          border-left: 4px solid var(--accent-gold);
+          background: rgba(255, 255, 255, 0.02);
+        }
+        .assigned-credentials-card h3 {
+          font-size: 1.15rem;
+          margin-bottom: 8px;
+          color: var(--accent-gold);
+        }
+        .credentials-info-hint {
+          font-size: 0.8rem;
+          color: var(--text-dim);
+          margin-bottom: 16px;
+        }
+        .credentials-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+          font-size: 0.9rem;
+          gap: 16px;
+        }
+        .credentials-row:last-child {
+          margin-bottom: 0;
+        }
+        .cred-label {
+          color: var(--text-muted);
+          font-weight: 500;
+        }
+        .cred-value-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .cred-value-wrap code {
+          font-family: monospace;
+          background: rgba(0, 0, 0, 0.3);
+          padding: 6px 12px;
+          border-radius: 4px;
+          border: 1px solid var(--glass-border);
+          color: #ffffff;
+        }
+        .no-credentials-assigned-card {
+          padding: 24px;
+          margin-bottom: 30px;
+          background: rgba(255, 255, 255, 0.01);
+          color: var(--text-muted);
+          font-size: 0.9rem;
+          line-height: 1.6;
         }
       `}</style>
     </div>

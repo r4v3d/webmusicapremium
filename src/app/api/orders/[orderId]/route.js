@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-
-// Reference global database
-global.ordersDb = global.ordersDb || {};
+import { getOrderById, updateOrder, assignStockAccount } from "../../../../lib/db";
 
 export async function GET(req, { params }) {
   try {
     const { orderId } = await params;
-    const order = global.ordersDb[orderId];
+    const order = await getOrderById(orderId);
 
     if (!order) {
       return NextResponse.json(
@@ -25,11 +23,11 @@ export async function GET(req, { params }) {
   }
 }
 
-// POST endpoint to update status (simulated webhook/update)
+// POST endpoint to update status (simulated checkout / admin approval)
 export async function POST(req, { params }) {
   try {
     const { orderId } = await params;
-    const order = global.ordersDb[orderId];
+    const order = await getOrderById(orderId);
 
     if (!order) {
       return NextResponse.json(
@@ -48,12 +46,20 @@ export async function POST(req, { params }) {
       );
     }
 
-    // Update order status in memory
-    global.ordersDb[orderId].status = status;
-    global.ordersDb[orderId].updatedAt = new Date().toISOString();
+    const updatedFields = { status };
+
+    // If status is changing to 'paid', auto-assign a stock account if available
+    if (status === "paid" && order.status !== "paid") {
+      const assigned = await assignStockAccount(orderId, order.service);
+      if (assigned) {
+        updatedFields.assignedAccount = assigned;
+      }
+    }
+
+    const updatedOrder = await updateOrder(orderId, updatedFields);
 
     return NextResponse.json(
-      { message: `Estado del pedido actualizado a ${status}.`, order: global.ordersDb[orderId] },
+      { message: `Estado del pedido actualizado a ${status}.`, order: updatedOrder },
       { status: 200 }
     );
   } catch (error) {

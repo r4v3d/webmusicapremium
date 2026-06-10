@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-
-// Initialize a global store in Node.js to persist orders during runtime
-global.ordersDb = global.ordersDb || {};
+import { createOrder } from "../../../lib/db";
 
 export async function POST(req) {
   try {
@@ -26,7 +24,7 @@ export async function POST(req) {
       );
     }
 
-    // Generate unique order ID: MPB-XXXX
+    // Generate unique order ID: MPB-XXXXXX
     const orderId = `MPB-${Math.floor(100000 + Math.random() * 900000)}`;
 
     // Create Order Object
@@ -42,11 +40,12 @@ export async function POST(req) {
       whatsapp,
       paymentMethod,
       status: "pending", // pending, paid, expired, failed
+      assignedAccount: null,
       createdAt: new Date().toISOString(),
     };
 
-    // Store in global object
-    global.ordersDb[orderId] = newOrder;
+    // Save to database
+    await createOrder(newOrder);
 
     return NextResponse.json(
       { orderId, message: "Pedido creado con éxito." },

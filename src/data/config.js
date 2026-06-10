@@ -2,6 +2,7 @@ export const CONFIG = {
   appName: "Música Premium Barato",
   tagline: "Disfruta de la mejor calidad de sonido sin pagar de más",
   description: "Cuentas premium de Tidal, Deezer y Qobuz al mejor precio del mercado. Soporte garantizado y activación inmediata.",
+  adminPasswordDefault: "admin1234", // Contraseña por defecto del panel (reemplazar o usar variable de entorno ADMIN_PASSWORD)
   whatsappNumber: "51923282640", // Reemplaza con tu número de WhatsApp real (código de país + número, ej: 51999999999)
   whatsappChannelUrl: "https://whatsapp.com/channel/0029VaqrOWcEKyZHhnDyhY14", // Reemplaza con el enlace de tu canal de WhatsApp
   socials: {
