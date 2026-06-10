@@ -117,5 +117,10 @@ export const CONFIG = {
       date: "Hace 3 días",
       image: "/images/testimonio-3.png"
     }
+  ],
+  referenceImages: [
+    "/images/ref-1.png",
+    "/images/ref-2.png",
+    "/images/ref-3.png"
   ]
 };

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CONFIG } from "../data/config";
+import ReferencesGallery from "../components/ReferencesGallery";
 
 // --- SVG Icons Components ---
 function WaveLogo() {
@@ -314,46 +315,8 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Reference Image placeholders for user to put screenshot proofs later */}
-          <div className="reference-images-block">
-            <h3 className="reference-block-title">Capturas de Chat y Comprobantes</h3>
-            <p className="reference-block-subtitle">Evidencia de atención rápida y clientes felices (actualiza estas imágenes en `/public/images/references/`):</p>
-            <div className="image-references-grid">
-              <div className="image-placeholder-card glass-panel">
-                <div className="placeholder-icon">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                </div>
-                <span>Captura Cliente Yape</span>
-                <p>Carga una captura aquí como `/public/images/ref-yape.png`</p>
-              </div>
-              <div className="image-placeholder-card glass-panel">
-                <div className="placeholder-icon">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                </div>
-                <span>Captura Activación Tidal</span>
-                <p>Carga una captura aquí como `/public/images/ref-tidal.png`</p>
-              </div>
-              <div className="image-placeholder-card glass-panel">
-                <div className="placeholder-icon">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                </div>
-                <span>Pago Binance Confirmado</span>
-                <p>Carga una captura aquí como `/public/images/ref-binance.png`</p>
-              </div>
-            </div>
-          </div>
+          {/* Reference Image Gallery */}
+          <ReferencesGallery images={CONFIG.referenceImages} />
         </div>
       </section>
 
