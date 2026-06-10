@@ -21,9 +21,8 @@ export async function GET() {
     // Helper to extract numeric value from price strings (e.g. "S/. 22.00" -> 22)
     const parsePrice = (priceStr) => {
       if (!priceStr) return 0;
-      const numStr = priceStr.replace(/[^0-9.]/g, "");
-      const val = parseFloat(numStr);
-      return isNaN(val) ? 0 : val;
+      const match = priceStr.match(/\d+(\.\d+)?/);
+      return match ? parseFloat(match[0]) : 0;
     };
 
     let totalRevenuePen = 0;
