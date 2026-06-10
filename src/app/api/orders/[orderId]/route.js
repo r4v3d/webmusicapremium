@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOrderById, updateOrder, assignStockAccount } from "../../../../lib/db";
+import { sendOrderEmail } from "../../../../lib/email";
 
 export async function GET(req, { params }) {
   try {
@@ -57,6 +58,11 @@ export async function POST(req, { params }) {
     }
 
     const updatedOrder = await updateOrder(orderId, updatedFields);
+
+    // If order was successfully paid, trigger email notification asynchronously
+    if (status === "paid" && order.status !== "paid" && updatedOrder) {
+      sendOrderEmail(updatedOrder).catch(err => console.error("Async email send error:", err));
+    }
 
     return NextResponse.json(
       { message: `Estado del pedido actualizado a ${status}.`, order: updatedOrder },
