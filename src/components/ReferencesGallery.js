@@ -43,6 +43,32 @@ export default function ReferencesGallery({ images = [] }) {
     setLightboxIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
   };
 
+  // Swipe gestures for mobile devices
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const minSwipeDistance = 50;
+
+  const handleTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+    if (isLeftSwipe) {
+      navigateRight();
+    } else if (isRightSwipe) {
+      navigateLeft();
+    }
+  };
+
   // Determine which images to show based on expansion state
   const visibleImages = expanded ? images : images.slice(0, 6);
   const hasMore = images.length > 6;
@@ -122,7 +148,13 @@ export default function ReferencesGallery({ images = [] }) {
 
       {/* Lightbox Modal */}
       {lightboxIndex !== null && (
-        <div className="lightbox-overlay" onClick={closeLightbox}>
+        <div
+          className="lightbox-overlay"
+          onClick={closeLightbox}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
             <button className="lightbox-close-btn" onClick={closeLightbox} aria-label="Cerrar">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -138,14 +170,19 @@ export default function ReferencesGallery({ images = [] }) {
             </button>
 
             <div className="lightbox-image-container">
-              <img
-                src={images[lightboxIndex]}
-                alt={getReferenceLabel(images[lightboxIndex], lightboxIndex)}
-                className="lightbox-main-img"
-                onContextMenu={(e) => e.preventDefault()}
-                onDragStart={(e) => e.preventDefault()}
-              />
-              <div className="lightbox-watermark-overlay" onContextMenu={(e) => e.preventDefault()}></div>
+              <div className="lightbox-hint-label">
+                Toca la derecha o desliza para ver más referencias
+              </div>
+              <div className="lightbox-image-wrapper">
+                <img
+                  src={images[lightboxIndex]}
+                  alt={getReferenceLabel(images[lightboxIndex], lightboxIndex)}
+                  className="lightbox-main-img"
+                  onContextMenu={(e) => e.preventDefault()}
+                  onDragStart={(e) => e.preventDefault()}
+                />
+                <div className="lightbox-watermark-overlay" onContextMenu={(e) => e.preventDefault()}></div>
+              </div>
               <span className="lightbox-counter-label">
                 {lightboxIndex + 1} de {images.length}
               </span>

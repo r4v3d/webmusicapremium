@@ -843,9 +843,25 @@ a {
   flex-direction: column;
   align-items: center;
 }
+.lightbox-hint-label {
+  font-family: var(--font-title);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  text-align: center;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.lightbox-image-wrapper {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 75vh;
+}
 .lightbox-main-img {
   max-width: 100%;
-  max-height: 80vh;
+  max-height: 75vh;
   object-fit: contain;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
@@ -855,17 +871,18 @@ a {
   -webkit-user-select: none;
   user-select: none;
   pointer-events: none;
+  display: block;
 }
 .lightbox-watermark-overlay {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 36px;
+  width: 100%;
+  height: 100%;
   border-radius: var(--radius-md);
   pointer-events: auto;
   z-index: 10;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 250 250'><text x='50%' y='50%' fill='rgba(255, 255, 255, 0.12)' font-size='12' font-family='sans-serif' font-weight='bold' text-anchor='middle' transform='rotate(-30, 125, 125)'>Whatsapp: +51 923 282 640</text></svg>");
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22220%22%20height=%22220%22%20viewBox=%220%200%20250%20250%22%3E%3Ctext%20x=%22125%22%20y=%22125%22%20fill=%22%23ffffff%22%20fill-opacity=%220.12%22%20font-size=%2212%22%20font-family=%22sans-serif%22%20font-weight=%22bold%22%20text-anchor=%22middle%22%20transform=%22rotate(-30,%20125,%20125)%22%3EWhatsapp:%20%2B51%20923%20282%20640%3C/text%3E%3C/svg%3E");
   background-repeat: repeat;
 }
 .lightbox-counter-label {
