@@ -79,7 +79,10 @@ export default function AdminDashboardPage() {
         router.push("/admin/login");
         return;
       }
-      if (!statsRes.ok) throw new Error("Error de servidor o conexión con base de datos.");
+      if (!statsRes.ok) {
+        const errData = await statsRes.json().catch(() => ({}));
+        throw new Error(errData.message || "Error de servidor o conexión con base de datos.");
+      }
       const statsData = await statsRes.json();
       setStats(statsData);
       setAuthorized(true);
@@ -100,7 +103,7 @@ export default function AdminDashboardPage() {
 
     } catch (error) {
       console.error(error);
-      setDbError("Error al cargar la información. Si estás en Vercel, asegúrate de configurar tu variable MONGODB_URI en la configuración del proyecto.");
+      setDbError(error.message || "Error al cargar la información.");
     } finally {
       setLoading(false);
     }

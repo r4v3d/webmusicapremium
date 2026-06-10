@@ -13,6 +13,6 @@ export async function GET() {
     return NextResponse.json(orders, { status: 200 });
   } catch (error) {
     console.error("Fetch Admin Orders Error:", error);
-    return NextResponse.json({ message: "Error al cargar la lista de pedidos." }, { status: 500 });
+    return NextResponse.json({ message: `Error al cargar pedidos: ${error.message}` }, { status: 500 });
   }
 }

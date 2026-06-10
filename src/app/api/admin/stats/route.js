@@ -55,6 +55,6 @@ export async function GET() {
 
   } catch (error) {
     console.error("Fetch Stats Error:", error);
-    return NextResponse.json({ message: "Error interno al cargar estadísticas." }, { status: 500 });
+    return NextResponse.json({ message: `Error de base de datos: ${error.message}` }, { status: 500 });
   }
 }

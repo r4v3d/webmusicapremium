@@ -13,7 +13,7 @@ export async function GET() {
     return NextResponse.json(stock, { status: 200 });
   } catch (error) {
     console.error("Fetch Stock Error:", error);
-    return NextResponse.json({ message: "Error al cargar el stock." }, { status: 500 });
+    return NextResponse.json({ message: `Error al cargar el stock: ${error.message}` }, { status: 500 });
   }
 }
 
@@ -81,7 +81,7 @@ export async function POST(req) {
 
   } catch (error) {
     console.error("Import Stock Error:", error);
-    return NextResponse.json({ message: "Error interno al importar stock." }, { status: 500 });
+    return NextResponse.json({ message: `Error al importar stock: ${error.message}` }, { status: 500 });
   }
 }
 
@@ -101,6 +101,6 @@ export async function DELETE(req) {
     return NextResponse.json({ success: true, message: "Cuenta de stock eliminada." }, { status: 200 });
   } catch (error) {
     console.error("Delete Stock Error:", error);
-    return NextResponse.json({ message: "Error al eliminar la cuenta de stock." }, { status: 500 });
+    return NextResponse.json({ message: `Error al eliminar la cuenta de stock: ${error.message}` }, { status: 500 });
   }
 }
