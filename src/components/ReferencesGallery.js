@@ -76,6 +76,8 @@ export default function ReferencesGallery({ images = [] }) {
                     alt={getReferenceLabel(path, index)}
                     className="reference-screenshot-img"
                     onError={() => handleImageError(index)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    onDragStart={(e) => e.preventDefault()}
                     loading="lazy"
                   />
                   <div className="image-hover-overlay">
@@ -140,7 +142,10 @@ export default function ReferencesGallery({ images = [] }) {
                 src={images[lightboxIndex]}
                 alt={getReferenceLabel(images[lightboxIndex], lightboxIndex)}
                 className="lightbox-main-img"
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
               />
+              <div className="lightbox-watermark-overlay" onContextMenu={(e) => e.preventDefault()}></div>
               <span className="lightbox-counter-label">
                 {lightboxIndex + 1} de {images.length}
               </span>
