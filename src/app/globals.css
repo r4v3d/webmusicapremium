@@ -61,7 +61,7 @@ html {
 }
 
 #servicios, #opiniones, #referencias, #pagos {
-  scroll-margin-top: 100px !important;
+  scroll-margin-top: 110px !important;
 }
 
 @media (max-width: 768px) {
@@ -112,7 +112,7 @@ a {
 }
 
 .section-padding {
-  padding: 80px 0 100px 0;
+  padding: 80px 0 150px 0;
 }
 
 @media (max-width: 768px) {
@@ -325,7 +325,7 @@ a {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(8, 8, 10, 0.85);
+  background: rgba(8, 8, 10, 0.95);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--glass-border);
