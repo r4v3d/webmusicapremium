@@ -119,8 +119,18 @@ export const CONFIG = {
     }
   ],
   referenceImages: [
-    "/images/ref-1.png",
-    "/images/ref-2.png",
-    "/images/ref-3.png"
+    "/images/ref-1.jpg",
+    "/images/ref-2.jpg",
+    "/images/ref-3.jpg",
+    "/images/ref-4.jpg",
+    "/images/ref-5.jpg",
+    "/images/ref-6.jpg",
+    "/images/ref-7.jpg",
+    "/images/ref-8.jpg",
+    "/images/ref-9.jpg",
+    "/images/ref-10.jpg",
+    "/images/ref-11.jpg",
+    "/images/ref-12.jpg",
+    "/images/ref-13.jpg"
   ]
 };
