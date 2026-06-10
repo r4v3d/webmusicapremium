@@ -315,7 +315,12 @@ export default function Home() {
             ))}
           </div>
 
-          {/* Reference Image Gallery */}
+        </div>
+      </section>
+
+      {/* REFERENCE IMAGES SECTION */}
+      <section id="referencias" className="reference-images-section section-padding">
+        <div className="container">
           <ReferencesGallery images={CONFIG.referenceImages} />
         </div>
       </section>

@@ -60,12 +60,12 @@ html {
   scroll-behavior: smooth;
 }
 
-#servicios, #opiniones, #pagos {
+#servicios, #opiniones, #referencias, #pagos {
   scroll-margin-top: 100px !important;
 }
 
 @media (max-width: 768px) {
-  #servicios, #opiniones, #pagos {
+  #servicios, #opiniones, #referencias, #pagos {
     scroll-margin-top: 80px !important;
   }
 }
@@ -369,19 +369,27 @@ a {
   padding: 8px 20px;
 }
 
-/* --- HERO SECTION --- */
+/* --- HERO SECTION & SECTION VIEWPORT CENTERING (DESKTOP) --- */
+@media (min-width: 1025px) {
+  .hero-section,
+  .services-section,
+  .testimonials-section,
+  .reference-images-section,
+  .payments-section {
+    min-height: calc(100vh - 58px);
+    display: flex;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
 .hero-section {
-  min-height: calc(100vh - 58px);
-  display: flex;
-  align-items: center;
-  width: 100%;
   padding: 40px 0 !important;
-  box-sizing: border-box;
 }
 
 @media (max-width: 1024px) {
   .hero-section {
-    min-height: auto;
     padding: 60px 0 !important;
   }
 }
@@ -689,9 +697,9 @@ a {
 
 /* REFERENCE IMAGES BLOCK */
 .reference-images-block {
-  margin-top: 80px;
-  border-top: 1px dashed var(--glass-border);
-  padding-top: 60px;
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
 }
 .reference-block-title {
   text-align: center;
