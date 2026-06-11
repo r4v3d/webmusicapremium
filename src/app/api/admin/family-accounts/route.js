@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getFamilyAccounts, createFamilyAccount, deleteFamilyAccount, getMemberProfiles, createMemberProfile } from "../../../../lib/db";
+import { getFamilyAccounts, createFamilyAccount, updateFamilyAccount, deleteFamilyAccount, getMemberProfiles, createMemberProfile } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -96,5 +96,40 @@ export async function DELETE(req) {
   } catch (error) {
     console.error("Delete Family Account Error:", error);
     return NextResponse.json({ message: `Error al eliminar cuenta familiar: ${error.message}` }, { status: 500 });
+  }
+}
+
+export async function PUT(req) {
+  try {
+    const isAuth = await checkAdminAuth();
+    if (!isAuth) {
+      return NextResponse.json({ message: "No autorizado." }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { id, service, masterEmail, password, notes, ownerRenewalDate, renewalCost, renewalCurrency } = body;
+
+    if (!id) {
+      return NextResponse.json({ message: "ID de cuenta familiar requerido." }, { status: 400 });
+    }
+
+    const updated = await updateFamilyAccount(id, {
+      service,
+      masterEmail,
+      password,
+      notes,
+      ownerRenewalDate,
+      renewalCost,
+      renewalCurrency
+    });
+
+    if (!updated) {
+      return NextResponse.json({ message: "Cuenta familiar no encontrada." }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, account: updated }, { status: 200 });
+  } catch (error) {
+    console.error("Update Family Account Error:", error);
+    return NextResponse.json({ message: `Error al actualizar cuenta familiar: ${error.message}` }, { status: 500 });
   }
 }

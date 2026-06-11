@@ -132,7 +132,10 @@ function formatMemberProfile(slot, clientData = null, familyAccountData = null) 
       masterEmail: slot.platform_accounts.account_email,
       password: slot.platform_accounts.account_password,
       notes: slot.platform_accounts.notes || "",
-      createdAt: slot.platform_accounts.created_at
+      createdAt: slot.platform_accounts.created_at,
+      ownerRenewalDate: slot.platform_accounts.owner_renewal_date,
+      renewalCost: Number(slot.platform_accounts.renewal_cost) || 0,
+      renewalCurrency: slot.platform_accounts.renewal_currency || "PEN"
     };
   } else if (familyAccountData) {
     familyAccount = familyAccountData;
@@ -537,7 +540,10 @@ export async function getFamilyAccounts() {
     masterEmail: acc.account_email,
     password: acc.account_password,
     notes: acc.notes || "",
-    createdAt: acc.created_at
+    createdAt: acc.created_at,
+    ownerRenewalDate: acc.owner_renewal_date,
+    renewalCost: Number(acc.renewal_cost) || 0,
+    renewalCurrency: acc.renewal_currency || "PEN"
   }));
 }
 
@@ -558,7 +564,10 @@ export async function getFamilyAccountById(id) {
     masterEmail: data.account_email,
     password: data.account_password,
     notes: data.notes || "",
-    createdAt: data.created_at
+    createdAt: data.created_at,
+    ownerRenewalDate: data.owner_renewal_date,
+    renewalCost: Number(data.renewal_cost) || 0,
+    renewalCurrency: data.renewal_currency || "PEN"
   };
 }
 
@@ -570,7 +579,10 @@ export async function createFamilyAccount(accountData) {
       platform_code: accountData.service,
       account_email: accountData.masterEmail,
       account_password: accountData.password,
-      notes: accountData.notes || ""
+      notes: accountData.notes || "",
+      owner_renewal_date: accountData.ownerRenewalDate || null,
+      renewal_cost: accountData.renewalCost || 0,
+      renewal_currency: accountData.renewalCurrency || "PEN"
     })
     .select()
     .single();
@@ -583,7 +595,10 @@ export async function createFamilyAccount(accountData) {
     masterEmail: data.account_email,
     password: data.account_password,
     notes: data.notes || "",
-    createdAt: data.created_at
+    createdAt: data.created_at,
+    ownerRenewalDate: data.owner_renewal_date,
+    renewalCost: Number(data.renewal_cost) || 0,
+    renewalCurrency: data.renewal_currency || "PEN"
   };
 
   await logEvent("family_account", data.id, "create", null, result, "Family account created");
@@ -597,6 +612,9 @@ export async function updateFamilyAccount(id, updatedFields) {
   if (updatedFields.masterEmail !== undefined) fields.account_email = updatedFields.masterEmail;
   if (updatedFields.password !== undefined) fields.account_password = updatedFields.password;
   if (updatedFields.notes !== undefined) fields.notes = updatedFields.notes;
+  if (updatedFields.ownerRenewalDate !== undefined) fields.owner_renewal_date = updatedFields.ownerRenewalDate;
+  if (updatedFields.renewalCost !== undefined) fields.renewal_cost = updatedFields.renewalCost;
+  if (updatedFields.renewalCurrency !== undefined) fields.renewal_currency = updatedFields.renewalCurrency;
   fields.updated_at = new Date().toISOString();
 
   const { data: oldData } = await supabase.from("platform_accounts").select("*").eq("id", id).maybeSingle();
@@ -617,7 +635,10 @@ export async function updateFamilyAccount(id, updatedFields) {
     masterEmail: data.account_email,
     password: data.account_password,
     notes: data.notes || "",
-    createdAt: data.created_at
+    createdAt: data.created_at,
+    ownerRenewalDate: data.owner_renewal_date,
+    renewalCost: Number(data.renewal_cost) || 0,
+    renewalCurrency: data.renewal_currency || "PEN"
   };
 
   await logEvent("family_account", id, "update", oldData, result, "Family account updated");

@@ -148,6 +148,96 @@ export default function AdminDashboardPage() {
   const [copiedId, setCopiedId] = useState("");
   const [stockFilter, setStockFilter] = useState("all");
 
+  // Renewals tab states
+  const [exchangeRateArsToUsd, setExchangeRateArsToUsd] = useState(0.0011);
+  const [exchangeRateUsdToPen, setExchangeRateUsdToPen] = useState(3.75);
+  const [renewalsSearch, setRenewalsSearch] = useState("");
+  const [renewalsPlatform, setRenewalsPlatform] = useState("all");
+  const [selectedRenewalDay, setSelectedRenewalDay] = useState(null);
+  const [renewalsPage, setRenewalsPage] = useState(1);
+  const [savingAccountId, setSavingAccountId] = useState("");
+  const [editingRates, setEditingRates] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedArsUsd = localStorage.getItem("tc_ars_usd");
+      const savedUsdPen = localStorage.getItem("tc_usd_pen");
+      if (savedArsUsd) setExchangeRateArsToUsd(Number(savedArsUsd));
+      if (savedUsdPen) setExchangeRateUsdToPen(Number(savedUsdPen));
+    }
+  }, []);
+
+  const handleSaveExchangeRates = (arsUsd, usdPen) => {
+    setExchangeRateArsToUsd(arsUsd);
+    setExchangeRateUsdToPen(usdPen);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("tc_ars_usd", arsUsd.toString());
+      localStorage.setItem("tc_usd_pen", usdPen.toString());
+    }
+  };
+
+  const handleFamilyAccountChange = (id, field, value) => {
+    setFamilyAccounts(prev => prev.map(acc => {
+      if (acc.id === id) {
+        return { ...acc, [field]: value };
+      }
+      return acc;
+    }));
+  };
+
+  const handleSaveRenewalInfo = async (accountId) => {
+    const acc = familyAccounts.find(a => a.id === accountId);
+    if (!acc) return;
+    
+    setSavingAccountId(accountId);
+    try {
+      const res = await fetch("/api/admin/family-accounts", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          id: accountId,
+          ownerRenewalDate: acc.ownerRenewalDate || null,
+          renewalCost: acc.renewalCost || 0,
+          renewalCurrency: acc.renewalCurrency || "PEN",
+          notes: acc.notes || ""
+        })
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Error al actualizar la cuenta titular.");
+      }
+      
+      alert("¡Cuenta titular actualizada con éxito!");
+      
+      // Refresh stats
+      const statsRes = await fetch("/api/admin/stats");
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+    } catch (err) {
+      console.error("Save Renewal Info Error:", err);
+      alert(err.message);
+    } finally {
+      setSavingAccountId("");
+    }
+  };
+
+  const getCostInPen = (cost, currency, platform) => {
+    const numericCost = Number(cost) || 0;
+    const cur = currency || (platform === 'tidal' || platform === 'deezer' ? 'ARS' : 'USD');
+    if (cur === 'ARS') {
+      return numericCost * exchangeRateArsToUsd * exchangeRateUsdToPen;
+    } else if (cur === 'USD') {
+      return numericCost * exchangeRateUsdToPen;
+    } else {
+      return numericCost;
+    }
+  };
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -736,6 +826,12 @@ export default function AdminDashboardPage() {
           >
             <PlusIcon />
             <span>Cargar Stock</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("renewals")}
+            className={`tab-btn ${activeTab === "renewals" ? "active" : ""}`}
+          >
+            <span>PAGO RENOVACIONES</span>
           </button>
         </nav>
 
@@ -1635,6 +1731,420 @@ export default function AdminDashboardPage() {
           </section>
         )}
 
+        {/* TAB: RENEWALS (PAGO RENOVACIONES) */}
+        {activeTab === "renewals" && (() => {
+          // Filter family accounts for renewals view
+          const filteredForRenewals = familyAccounts.filter(acc => {
+            if (renewalsPlatform !== "all" && acc.service !== renewalsPlatform) {
+              return false;
+            }
+            if (renewalsSearch) {
+              const q = renewalsSearch.toLowerCase();
+              const matchEmail = acc.masterEmail?.toLowerCase().includes(q);
+              const matchNotes = acc.notes?.toLowerCase().includes(q);
+              if (!matchEmail && !matchNotes) {
+                return false;
+              }
+            }
+            return true;
+          });
+
+          // Generate 30-day timeline
+          const today = new Date();
+          today.setHours(0,0,0,0);
+          
+          const timelineDays = [];
+          for (let i = 0; i < 30; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const dayVal = String(d.getDate()).padStart(2, '0');
+            const dateStr = `${year}-${month}-${dayVal}`;
+            
+            const dayAccounts = filteredForRenewals.filter(acc => acc.ownerRenewalDate === dateStr);
+            const count = dayAccounts.length;
+            
+            const totalCostPen = dayAccounts.reduce((sum, acc) => {
+              return sum + getCostInPen(acc.renewalCost, acc.renewalCurrency, acc.service);
+            }, 0);
+            
+            timelineDays.push({
+              dateStr,
+              label: d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+              isToday: i === 0,
+              count,
+              totalCostPen
+            });
+          }
+
+          // Filter by selected timeline day
+          const finalRenewalsList = selectedRenewalDay 
+            ? filteredForRenewals.filter(acc => acc.ownerRenewalDate === selectedRenewalDay)
+            : filteredForRenewals;
+
+          // Stats
+          const totalFilteredAccounts = finalRenewalsList.length;
+          const totalFilteredCostPen = finalRenewalsList.reduce((sum, acc) => {
+            return sum + getCostInPen(acc.renewalCost, acc.renewalCurrency, acc.service);
+          }, 0);
+
+          // Pagination
+          const itemsPerPage = 50;
+          const totalRenewalsPages = Math.ceil(finalRenewalsList.length / itemsPerPage) || 1;
+          const renewalsStartIdx = (renewalsPage - 1) * itemsPerPage;
+          const paginatedRenewals = finalRenewalsList.slice(renewalsStartIdx, renewalsStartIdx + itemsPerPage);
+
+          return (
+            <section className="renewals-section animate-fade-in">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <div>
+                  <h2 style={{ marginBottom: '4px' }}>Pago de Renovaciones</h2>
+                  <p className="section-instruction">
+                    Administración agrupada de costos mensuales y proyección de pagos de las cuentas titulares maestras.
+                  </p>
+                </div>
+              </div>
+
+              {/* STATS OVERVIEW FOR RENEWALS */}
+              <div className="stats-grid animate-fade-in" style={{ marginBottom: '24px' }}>
+                <div className="stat-card glass-panel border-cyan">
+                  <span className="stat-label">Total Cuentas Filtradas</span>
+                  <strong className="stat-value text-cyan">{totalFilteredAccounts}</strong>
+                </div>
+                <div className="stat-card glass-panel border-purple">
+                  <span className="stat-label">Costo Total Estimado (Soles)</span>
+                  <strong className="stat-value text-purple">S/. {totalFilteredCostPen.toFixed(2)}</strong>
+                </div>
+                {/* Exchange Rates Box */}
+                <div className="stat-card glass-panel border-gold">
+                  <span className="stat-label">Tipos de Cambio (TC)</span>
+                  {editingRates ? (
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '80px' }}>ARS a USD:</span>
+                        <input 
+                          type="number" 
+                          step="0.0001" 
+                          style={{ width: '90px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: '#fff', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}
+                          defaultValue={exchangeRateArsToUsd}
+                          id="newArsUsd"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '80px' }}>USD a PEN:</span>
+                        <input 
+                          type="number" 
+                          step="0.01" 
+                          style={{ width: '90px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: '#fff', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}
+                          defaultValue={exchangeRateUsdToPen}
+                          id="newUsdPen"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '4px' }}
+                          onClick={() => {
+                            const arsUsd = parseFloat(document.getElementById("newArsUsd").value) || 0.0011;
+                            const usdPen = parseFloat(document.getElementById("newUsdPen").value) || 3.75;
+                            handleSaveExchangeRates(arsUsd, usdPen);
+                            setEditingRates(false);
+                          }}
+                        >
+                          Aplicar
+                        </button>
+                        <button 
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '4px' }}
+                          onClick={() => setEditingRates(false)}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
+                      <div style={{ fontSize: '0.85rem' }}>1 ARS = <strong style={{ color: 'var(--accent-gold)' }}>{exchangeRateArsToUsd} USD</strong></div>
+                      <div style={{ fontSize: '0.85rem' }}>1 USD = <strong style={{ color: 'var(--accent-gold)' }}>{exchangeRateUsdToPen} PEN</strong></div>
+                      <button 
+                        onClick={() => setEditingRates(true)} 
+                        className="btn btn-secondary"
+                        style={{ marginTop: '8px', padding: '5px 12px', fontSize: '0.75rem', borderRadius: '4px', alignSelf: 'flex-start' }}
+                      >
+                        Modificar TC
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* TIMELINE */}
+              <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>Línea de Tiempo de Renovaciones (Proyección 30 días)</h3>
+                  {selectedRenewalDay && (
+                    <button 
+                      onClick={() => setSelectedRenewalDay(null)} 
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 12px', fontSize: '0.75rem', borderRadius: '4px' }}
+                    >
+                      Mostrar Todos los Días
+                    </button>
+                  )}
+                </div>
+                
+                <div className="timeline-container" style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '12px', WebkitOverflowScrolling: 'touch' }}>
+                  {timelineDays.map((day) => {
+                    const isSelected = selectedRenewalDay === day.dateStr;
+                    const maxCount = Math.max(...timelineDays.map(d => d.count), 1);
+                    const percent = (day.count / maxCount) * 100;
+                    
+                    return (
+                      <div 
+                        key={day.dateStr}
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedRenewalDay(null);
+                          } else {
+                            setSelectedRenewalDay(day.dateStr);
+                            setRenewalsPage(1);
+                          }
+                        }}
+                        style={{
+                          flex: '0 0 105px',
+                          background: isSelected ? 'rgba(6, 182, 212, 0.12)' : 'rgba(255, 255, 255, 0.02)',
+                          border: isSelected ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.05)',
+                          boxShadow: isSelected ? '0 0 10px rgba(6, 182, 212, 0.2)' : 'none',
+                          borderRadius: '8px',
+                          padding: '10px 6px',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          minHeight: '160px'
+                        }}
+                        className="timeline-day-card"
+                      >
+                        <div style={{ fontSize: '0.75rem', fontWeight: '600', color: day.isToday ? 'var(--accent-cyan)' : '#fff' }}>
+                          {day.label}
+                          {day.isToday && <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>HOY</div>}
+                        </div>
+                        
+                        {/* Bar */}
+                        <div style={{ height: '60px', width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', margin: '8px 0', background: 'rgba(255,255,255,0.01)', borderRadius: '4px' }}>
+                          <div 
+                            style={{ 
+                              height: `${percent}%`, 
+                              width: '12px', 
+                              background: isSelected ? 'linear-gradient(to top, var(--accent-cyan), #0891b2)' : 'linear-gradient(to top, rgba(255,255,255,0.1), rgba(255,255,255,0.25))', 
+                              borderRadius: '6px',
+                              transition: 'height 0.2s ease'
+                            }} 
+                          />
+                        </div>
+                        
+                        <div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: day.count > 0 ? '#fff' : 'var(--text-muted)' }}>
+                            {day.count} {day.count === 1 ? 'cuenta' : 'cuentas'}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: day.totalCostPen > 0 ? 'var(--accent-green, #10b981)' : 'var(--text-muted)' }}>
+                            S/. {day.totalCostPen.toFixed(1)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* LIST & CONTROLS */}
+              <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
+                  {/* Platform Filters */}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {["all", "tidal", "deezer", "qobuz"].map(plat => (
+                      <button
+                        key={plat}
+                        onClick={() => {
+                          setRenewalsPlatform(plat);
+                          setSelectedRenewalDay(null);
+                          setRenewalsPage(1);
+                        }}
+                        className={`btn ${renewalsPlatform === plat ? "btn-primary" : "btn-secondary"}`}
+                        style={{ padding: '6px 14px', fontSize: '0.8rem', textTransform: 'capitalize', borderRadius: '8px' }}
+                      >
+                        {plat === "all" ? "Todos" : plat}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Search Box */}
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: '1', maxWidth: '350px' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Buscar por correo o notas..."
+                      value={renewalsSearch}
+                      onChange={(e) => {
+                        setRenewalsSearch(e.target.value);
+                        setRenewalsPage(1);
+                      }}
+                      style={{ marginBottom: 0, padding: '8px 12px', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="bulk-table-container">
+                  <table className="bulk-table">
+                    <thead>
+                      <tr>
+                        <th>Plataforma</th>
+                        <th>Correo Titular</th>
+                        <th style={{ width: '160px' }}>Vencimiento Dueño</th>
+                        <th style={{ width: '220px' }}>Costo Proveedor</th>
+                        <th>Equivalencia Soles (PEN)</th>
+                        <th>Notas</th>
+                        <th style={{ width: '100px', textAlign: 'center' }}>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedRenewals.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                            No se encontraron cuentas titulares que coincidan con los filtros.
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedRenewals.map((acc) => {
+                          const cost = Number(acc.renewalCost) || 0;
+                          const currency = acc.renewalCurrency || (acc.service === "tidal" || acc.service === "deezer" ? "ARS" : "USD");
+                          const costInPen = getCostInPen(cost, currency, acc.service);
+
+                          return (
+                            <tr key={acc.id}>
+                              <td>
+                                <span className={`badge-service badge-${acc.service} family-service-tag`}>
+                                  {acc.service}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: '500', fontSize: '0.85rem' }}>
+                                {acc.masterEmail}
+                              </td>
+                              <td>
+                                <input
+                                  type="date"
+                                  className="form-input"
+                                  style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
+                                  value={acc.ownerRenewalDate || ""}
+                                  onChange={(e) => handleFamilyAccountChange(acc.id, "ownerRenewalDate", e.target.value)}
+                                />
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="form-input"
+                                    style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
+                                    value={acc.renewalCost}
+                                    onChange={(e) => handleFamilyAccountChange(acc.id, "renewalCost", parseFloat(e.target.value) || 0)}
+                                  />
+                                  <select
+                                    className="form-input form-select-input"
+                                    style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '80px', height: 'auto', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
+                                    value={currency}
+                                    onChange={(e) => handleFamilyAccountChange(acc.id, "renewalCurrency", e.target.value)}
+                                  >
+                                    <option value="ARS">ARS</option>
+                                    <option value="USD">USD</option>
+                                    <option value="PEN">PEN</option>
+                                  </select>
+                                </div>
+                              </td>
+                              <td style={{ fontSize: '0.85rem' }}>
+                                {currency === "ARS" ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>ARS {cost.toLocaleString('es-ES')}</span>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>USD {(cost * exchangeRateArsToUsd).toFixed(2)}</span>
+                                    <strong style={{ color: 'var(--accent-cyan)' }}>S/. {costInPen.toFixed(2)}</strong>
+                                  </div>
+                                ) : currency === "USD" ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>USD {cost.toFixed(2)}</span>
+                                    <strong style={{ color: 'var(--accent-cyan)' }}>S/. {costInPen.toFixed(2)}</strong>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <strong style={{ color: 'var(--accent-cyan)' }}>S/. {cost.toFixed(2)}</strong>
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
+                                  placeholder="Notas..."
+                                  value={acc.notes || ""}
+                                  onChange={(e) => handleFamilyAccountChange(acc.id, "notes", e.target.value)}
+                                />
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveRenewalInfo(acc.id)}
+                                  className={`btn btn-primary ${savingAccountId === acc.id ? "btn-disabled" : ""}`}
+                                  style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: '4px', width: '100%', minWidth: '80px' }}
+                                  disabled={savingAccountId === acc.id}
+                                >
+                                  {savingAccountId === acc.id ? "..." : "Guardar"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        }))
+                      }
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {totalRenewalsPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', padding: '10px 0', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setRenewalsPage(prev => Math.max(1, prev - 1))}
+                      className="btn btn-secondary"
+                      style={{ padding: '5px 14px', fontSize: '0.75rem', borderRadius: '6px' }}
+                      disabled={renewalsPage === 1}
+                    >
+                      Anterior
+                    </button>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Página <strong>{renewalsPage}</strong> de <strong>{totalRenewalsPages}</strong> ({finalRenewalsList.length} cuentas)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setRenewalsPage(prev => Math.min(totalRenewalsPages, prev + 1))}
+                      className="btn btn-secondary"
+                      style={{ padding: '5px 14px', fontSize: '0.75rem', borderRadius: '6px' }}
+                      disabled={renewalsPage === totalRenewalsPages}
+                    >
+                      Siguiente
+                    </button>
+                  </div>
+                )}
+              </div>
+            </section>
+          )})()}
       </div>
 
       {/* MODAL: ADD FAMILY ACCOUNT */}
