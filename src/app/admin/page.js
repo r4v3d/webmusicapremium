@@ -149,7 +149,7 @@ export default function AdminDashboardPage() {
   const [stockFilter, setStockFilter] = useState("all");
 
   // Renewals tab states
-  const [exchangeRateArsToUsd, setExchangeRateArsToUsd] = useState(0.0011);
+  const [exchangeRateUsdToArs, setExchangeRateUsdToArs] = useState(1400.0);
   const [exchangeRateUsdToPen, setExchangeRateUsdToPen] = useState(3.75);
   const [renewalsSearch, setRenewalsSearch] = useState("");
   const [renewalsPlatform, setRenewalsPlatform] = useState("all");
@@ -160,18 +160,18 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedArsUsd = localStorage.getItem("tc_ars_usd");
+      const savedUsdArs = localStorage.getItem("tc_usd_ars");
       const savedUsdPen = localStorage.getItem("tc_usd_pen");
-      if (savedArsUsd) setExchangeRateArsToUsd(Number(savedArsUsd));
+      if (savedUsdArs) setExchangeRateUsdToArs(Number(savedUsdArs));
       if (savedUsdPen) setExchangeRateUsdToPen(Number(savedUsdPen));
     }
   }, []);
 
-  const handleSaveExchangeRates = (arsUsd, usdPen) => {
-    setExchangeRateArsToUsd(arsUsd);
+  const handleSaveExchangeRates = (usdArs, usdPen) => {
+    setExchangeRateUsdToArs(usdArs);
     setExchangeRateUsdToPen(usdPen);
     if (typeof window !== "undefined") {
-      localStorage.setItem("tc_ars_usd", arsUsd.toString());
+      localStorage.setItem("tc_usd_ars", usdArs.toString());
       localStorage.setItem("tc_usd_pen", usdPen.toString());
     }
   };
@@ -230,7 +230,8 @@ export default function AdminDashboardPage() {
     const numericCost = Number(cost) || 0;
     const cur = currency || (platform === 'tidal' || platform === 'deezer' ? 'ARS' : 'USD');
     if (cur === 'ARS') {
-      return numericCost * exchangeRateArsToUsd * exchangeRateUsdToPen;
+      const costInUsd = exchangeRateUsdToArs > 0 ? (numericCost / exchangeRateUsdToArs) : 0;
+      return costInUsd * exchangeRateUsdToPen;
     } else if (cur === 'USD') {
       return numericCost * exchangeRateUsdToPen;
     } else {
@@ -1823,13 +1824,13 @@ export default function AdminDashboardPage() {
                   {editingRates ? (
                     <div style={{ marginTop: '10px' }}>
                       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '80px' }}>ARS a USD:</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '80px' }}>USD a ARS:</span>
                         <input 
                           type="number" 
-                          step="0.0001" 
+                          step="0.1" 
                           style={{ width: '90px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: '#fff', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem' }}
-                          defaultValue={exchangeRateArsToUsd}
-                          id="newArsUsd"
+                          defaultValue={exchangeRateUsdToArs}
+                          id="newUsdArs"
                         />
                       </div>
                       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
@@ -1848,9 +1849,9 @@ export default function AdminDashboardPage() {
                           className="btn btn-primary"
                           style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '4px' }}
                           onClick={() => {
-                            const arsUsd = parseFloat(document.getElementById("newArsUsd").value) || 0.0011;
+                            const usdArs = parseFloat(document.getElementById("newUsdArs").value) || 1400.0;
                             const usdPen = parseFloat(document.getElementById("newUsdPen").value) || 3.75;
-                            handleSaveExchangeRates(arsUsd, usdPen);
+                            handleSaveExchangeRates(usdArs, usdPen);
                             setEditingRates(false);
                           }}
                         >
@@ -1868,7 +1869,7 @@ export default function AdminDashboardPage() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
-                      <div style={{ fontSize: '0.85rem' }}>1 ARS = <strong style={{ color: 'var(--accent-gold)' }}>{exchangeRateArsToUsd} USD</strong></div>
+                      <div style={{ fontSize: '0.85rem' }}>1 USD = <strong style={{ color: 'var(--accent-gold)' }}>{exchangeRateUsdToArs} ARS</strong></div>
                       <div style={{ fontSize: '0.85rem' }}>1 USD = <strong style={{ color: 'var(--accent-gold)' }}>{exchangeRateUsdToPen} PEN</strong></div>
                       <button 
                         onClick={() => setEditingRates(true)} 
@@ -2073,7 +2074,7 @@ export default function AdminDashboardPage() {
                                 {currency === "ARS" ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                     <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>ARS {cost.toLocaleString('es-ES')}</span>
-                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>USD {(cost * exchangeRateArsToUsd).toFixed(2)}</span>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>USD {exchangeRateUsdToArs > 0 ? (cost / exchangeRateUsdToArs).toFixed(2) : '0.00'}</span>
                                     <strong style={{ color: 'var(--accent-cyan)' }}>S/. {costInPen.toFixed(2)}</strong>
                                   </div>
                                 ) : currency === "USD" ? (
