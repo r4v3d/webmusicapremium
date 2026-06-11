@@ -19,7 +19,7 @@ export const CONFIG = {
     plin: {
       name: "Jorge Pal**", // Reemplaza con tu nombre titular de Plin
       number: "923 282 640", // Reemplaza con tu número de Plin
-      qrImage: "/images/plin-qr.png" // Ruta de tu código QR de Plin (colócalo en /public/images/)
+      qrImage: "/images/plin-qr.jpg" // Ruta de tu código QR de Plin (colócalo en /public/images/)
     },
     binancePay: {
       payId: "99190804", // Reemplaza con tu Binance Pay ID
