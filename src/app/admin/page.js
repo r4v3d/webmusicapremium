@@ -137,6 +137,7 @@ export default function AdminDashboardPage() {
 
   // Import form states
   const [importService, setImportService] = useState("tidal");
+  const [importMode, setImportMode] = useState("master_accounts");
   const [rawInput, setRawInput] = useState("");
   const [importLoading, setImportLoading] = useState(false);
   const [importMessage, setImportMessage] = useState("");
@@ -517,10 +518,10 @@ export default function AdminDashboardPage() {
 
     setImportLoading(true);
     try {
-      const res = await fetch("/api/admin/stock", {
+      const res = await fetch("/api/admin/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service: importService, rawInput })
+        body: JSON.stringify({ service: importService, mode: importMode, rawInput })
       });
       const data = await res.json();
 
@@ -1520,15 +1521,29 @@ export default function AdminDashboardPage() {
         {/* TAB 3: LOAD STOCK */}
         {activeTab === "import" && (
           <section className="import-section animate-fade-in">
-            <h2>Carga Masiva de Stock (Google Sheets)</h2>
+            <h2>Carga Masiva e Importador de Datos</h2>
             <p className="section-instruction">
-              Puedes copiar directamente la columna de tus cuentas desde Google Sheets (ej: columna de correo y contraseña) y pegarlas en el cuadro. El sistema extraerá y guardará el stock automáticamente.
+              Permite cargar de manera masiva cuentas familiares maestras, perfiles de miembros activos asociados a clientes permanentes, o perfiles libres en stock desde Excel/Google Sheets.
             </p>
 
             {importMessage && <div className="success-alert">{importMessage}</div>}
             {importError && <div className="error-alert">{importError}</div>}
 
             <form onSubmit={handleImportStock} className="import-stock-form glass-panel">
+              <div className="form-group">
+                <label className="form-label">Tipo de Importación / Acción:</label>
+                <select
+                  value={importMode}
+                  onChange={(e) => setImportMode(e.target.value)}
+                  className="form-input form-select-input"
+                  required
+                >
+                  <option value="master_accounts">1. Cuentas Titulares Maestras (Familiares)</option>
+                  <option value="active_members">2. Perfiles de Clientes Activos (Cupos Ocupados)</option>
+                  <option value="stock_members">3. Perfiles de Miembros Disponibles (Stock)</option>
+                </select>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">Selecciona la plataforma:</label>
                 <select
@@ -1543,12 +1558,60 @@ export default function AdminDashboardPage() {
                 </select>
               </div>
 
+              {/* Format guidelines helper */}
+              <div className="import-guidelines glass-panel" style={{ padding: '15px', marginBottom: '20px', background: 'rgba(0,0,0,0.2)', fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <h4 style={{ color: 'var(--accent-cyan)', marginBottom: '8px', fontSize: '0.85rem' }}>Instrucciones de Formato:</h4>
+                {importMode === "master_accounts" && (
+                  <>
+                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel, o comas, puntos y comas, o barras |):</p>
+                    <code style={{ display: 'block', padding: '6px', background: 'rgba(0,0,0,0.4)', borderRadius: '4px', margin: '8px 0', color: 'var(--accent-gold)' }}>
+                      correo_titular [tab] contrasena [tab] notas (opcional) [tab] fecha_vencimiento (opcional, YYYY-MM-DD)
+                    </code>
+                    <ul style={{ paddingLeft: '16px', color: 'var(--text-muted)' }}>
+                      <li>Crea la cuenta familiar maestra con sus 5 ranuras libres por defecto.</li>
+                      <li>Si no se ingresa fecha de renovación, se calculará <strong>+30 días</strong> automáticamente.</li>
+                    </ul>
+                  </>
+                )}
+                {importMode === "active_members" && (
+                  <>
+                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel, o comas, puntos y comas, o barras |):</p>
+                    <code style={{ display: 'block', padding: '6px', background: 'rgba(0,0,0,0.4)', borderRadius: '4px', margin: '8px 0', color: 'var(--accent-gold)' }}>
+                      correo_miembro [tab] contrasena_miembro [tab] correo_titular [tab] apodo_cliente [tab] whatsapp_cliente [tab] precio_pen (opcional) [tab] fecha_vencimiento (opcional, YYYY-MM-DD)
+                    </code>
+                    <ul style={{ paddingLeft: '16px', color: 'var(--text-muted)' }}>
+                      <li>Busca o crea la cuenta familiar dueña (maestra).</li>
+                      <li>Busca o crea al <strong>Cliente Permanente</strong> usando su WhatsApp. Si es un WhatsApp nuevo, se asocia automáticamente y los anteriores pasan al historial.</li>
+                      <li>Actualiza una ranura libre o crea una nueva, asocia al cliente, define la suscripción y registra el pago.</li>
+                    </ul>
+                  </>
+                )}
+                {importMode === "stock_members" && (
+                  <>
+                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel, o comas, puntos y comas, o barras |):</p>
+                    <code style={{ display: 'block', padding: '6px', background: 'rgba(0,0,0,0.4)', borderRadius: '4px', margin: '8px 0', color: 'var(--accent-gold)' }}>
+                      correo_miembro [tab] contrasena_miembro [tab] correo_titular
+                    </code>
+                    <ul style={{ paddingLeft: '16px', color: 'var(--text-muted)' }}>
+                      <li>Importa perfiles de miembros listos para ser vendidos en el panel.</li>
+                      <li>Busca o crea la cuenta familiar dueña, y asocia el perfil en estado <strong>Disponible (free)</strong> con sus respectivas credenciales de acceso.</li>
+                    </ul>
+                  </>
+                )}
+              </div>
+
               <div className="form-group">
-                <label className="form-label">Pega las celdas de Google Sheets o CSV:</label>
+                <label className="form-label">Pega las celdas de Excel, Google Sheets o CSV:</label>
                 <textarea
                   className="form-input form-textarea"
                   rows={8}
-                  placeholder={`Ejemplo al pegar desde Google Sheets:\ncorreo1@gmail.com\tpassword123\ncorreo2@gmail.com\tpassword456\n\n(También se admite separar por dos puntos: correo@test.com:pass123)`}
+                  placeholder={
+                    importMode === "master_accounts"
+                      ? "ejemplo_titular@gmail.com\tclave123\tNotas del proveedor\t2026-07-15"
+                      : importMode === "active_members"
+                      ? "miembro1@gmail.com\tpassMember\ttitular@gmail.com\tJuan Gomez\t+51987654321\t15.0\t2026-07-20"
+                      : "miembro_stock@gmail.com\tclaveMiembro\ttitular_maestro@gmail.com"
+                  }
                   value={rawInput}
                   onChange={(e) => setRawInput(e.target.value)}
                   required
@@ -1561,7 +1624,7 @@ export default function AdminDashboardPage() {
                 className={`btn btn-primary import-submit-btn ${importLoading ? "btn-disabled" : ""}`}
                 disabled={importLoading}
               >
-                {importLoading ? "Procesando importación..." : "Importar y Cargar Stock"}
+                {importLoading ? "Procesando importación masiva..." : "Ejecutar Importación"}
               </button>
             </form>
           </section>
