@@ -101,6 +101,17 @@ export default function AdminDashboardPage() {
   const [clientSearchQuery, setClientSearchQuery] = useState("");
   const [isClientsLoading, setIsClientsLoading] = useState(false);
 
+  // Bulk table states
+  const [tableSearchQuery, setTableSearchQuery] = useState("");
+  const [tablePlatformFilter, setTablePlatformFilter] = useState("all");
+  const [tableStatusFilter, setTableStatusFilter] = useState("all");
+  const [tableExpiryFilter, setTableExpiryFilter] = useState("all");
+  const [selectedSlotIds, setSelectedSlotIds] = useState([]);
+  const [bulkAction, setBulkAction] = useState("status_active");
+  const [bulkPriceValue, setBulkPriceValue] = useState("");
+  const [bulkDateValue, setBulkDateValue] = useState("");
+  const [isBulkLoading, setIsBulkLoading] = useState(false);
+
   // Modals state
   const [showAddFamilyModal, setShowAddFamilyModal] = useState(false);
   const [addFamilyForm, setAddFamilyForm] = useState({
@@ -343,6 +354,95 @@ export default function AdminDashboardPage() {
     return memberships;
   };
 
+  const handleBulkAction = async () => {
+    if (selectedSlotIds.length === 0) return;
+    
+    let action = "";
+    let payload = { profileIds: selectedSlotIds };
+
+    if (bulkAction.startsWith("status_")) {
+      action = "update";
+      payload.status = bulkAction.replace("status_", "");
+    } else if (bulkAction === "extend_1") {
+      action = "extend";
+      payload.months = 1;
+    } else if (bulkAction === "extend_12") {
+      action = "extend";
+      payload.months = 12;
+    } else if (bulkAction === "update_price") {
+      if (!bulkPriceValue || isNaN(parseFloat(bulkPriceValue))) {
+        alert("Por favor ingresa un precio numérico válido.");
+        return;
+      }
+      action = "update";
+      payload.pricePen = parseFloat(bulkPriceValue);
+    } else if (bulkAction === "update_expiry") {
+      if (!bulkDateValue) {
+        alert("Por favor selecciona una fecha de vencimiento.");
+        return;
+      }
+      action = "update";
+      payload.renewalDate = bulkDateValue;
+    } else if (bulkAction === "clear_slots") {
+      if (!confirm(`¿Seguro que deseas liberar los ${selectedSlotIds.length} cupos seleccionados?\nEsta acción es irreversible y desconectará a los clientes de las ranuras.`)) {
+        return;
+      }
+      action = "clear";
+    } else {
+      alert("Acción en lote no soportada.");
+      return;
+    }
+
+    payload.action = action;
+    setIsBulkLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/member-profiles/bulk", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Error al realizar acción masiva.");
+
+      alert(`Operación masiva completada con éxito. Se actualizaron ${data.count || 0} perfiles.`);
+      setSelectedSlotIds([]);
+      await loadData();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setIsBulkLoading(false);
+    }
+  };
+
+  const getExpiryTag = (renewalDate) => {
+    if (!renewalDate) return { label: "Sin Fecha", className: "normal" };
+    const [ry, rm, rd] = renewalDate.split("-").map(Number);
+    const renewalTime = new Date(ry, rm - 1, rd).getTime();
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const diffDays = (renewalTime - today) / oneDay;
+
+    const formattedDate = new Date(ry, rm - 1, rd).toLocaleDateString();
+
+    if (diffDays < 0) {
+      return { label: `Vencido (${formattedDate})`, className: "expired" };
+    } else if (diffDays === 0) {
+      return { label: `Vence Hoy (${formattedDate})`, className: "today" };
+    } else if (diffDays <= 7) {
+      return { label: `Vence en ${Math.ceil(diffDays)}d (${formattedDate})`, className: "soon" };
+    } else {
+      return { label: formattedDate, className: "normal" };
+    }
+  };
+
+  const toggleSelectSlot = (id) => {
+    setSelectedSlotIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
   useEffect(() => {
     if (activeTab === "families" && activeSubTab === "directory") {
       handleSearchClients(clientSearchQuery);
@@ -451,6 +551,83 @@ export default function AdminDashboardPage() {
     if (stockFilter === "used") return item.isUsed;
     return item.service === stockFilter;
   });
+
+  // Flatten and filter slots for table list
+  const allSlots = familyAccounts.flatMap(acc => 
+    (acc.profiles || []).map(p => ({
+      ...p,
+      id: p._id || p.id,
+      service: acc.service,
+      masterEmail: acc.masterEmail,
+      masterPassword: acc.password,
+      familyAccount: acc
+    }))
+  );
+
+  const filteredSlots = allSlots.filter(slot => {
+    if (tableSearchQuery) {
+      const q = tableSearchQuery.toLowerCase();
+      const nickname = slot.clientId?.nickname?.toLowerCase() || "";
+      const phone = slot.clientId?.currentWhatsApp || "";
+      const email = slot.memberEmail?.toLowerCase() || "";
+      const masterEmail = slot.masterEmail?.toLowerCase() || "";
+      
+      const matches = nickname.includes(q) || phone.includes(q) || email.includes(q) || masterEmail.includes(q);
+      if (!matches) return false;
+    }
+
+    if (tablePlatformFilter !== "all" && slot.service !== tablePlatformFilter) {
+      return false;
+    }
+
+    if (tableStatusFilter !== "all" && slot.status !== tableStatusFilter) {
+      return false;
+    }
+
+    if (tableExpiryFilter !== "all") {
+      if (!slot.renewalDate) return false;
+      const [ry, rm, rd] = slot.renewalDate.split("-").map(Number);
+      const renewalTime = new Date(ry, rm - 1, rd).getTime();
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const oneDay = 24 * 60 * 60 * 1000;
+      const diffDays = (renewalTime - today) / oneDay;
+
+      if (tableExpiryFilter === "expired") {
+        if (diffDays >= 0) return false;
+      } else if (tableExpiryFilter === "today") {
+        if (diffDays !== 0) return false;
+      } else if (tableExpiryFilter === "7days") {
+        if (diffDays < 0 || diffDays > 7) return false;
+      } else if (tableExpiryFilter === "15days") {
+        if (diffDays < 0 || diffDays > 15) return false;
+      } else if (tableExpiryFilter === "30days") {
+        if (diffDays < 0 || diffDays > 30) return false;
+      }
+    }
+
+    return true;
+  });
+
+  const allVisibleSelected = filteredSlots.length > 0 && filteredSlots.every(s => selectedSlotIds.includes(s.id));
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = filteredSlots.map(s => s.id);
+    const allSelected = visibleIds.every(id => selectedSlotIds.includes(id));
+    if (allSelected) {
+      setSelectedSlotIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedSlotIds(prev => {
+        const newSelection = [...prev];
+        visibleIds.forEach(id => {
+          if (!newSelection.includes(id)) {
+            newSelection.push(id);
+          }
+        });
+        return newSelection;
+      });
+    }
+  };
 
   if (loading && !authorized) {
     return (
@@ -667,6 +844,12 @@ export default function AdminDashboardPage() {
                   Cuentas Familiares
                 </button>
                 <button
+                  onClick={() => setActiveSubTab("tableList")}
+                  className={`btn ${activeSubTab === "tableList" ? "btn-primary" : "btn-secondary"}`}
+                >
+                  Listado General (Tabla)
+                </button>
+                <button
                   onClick={() => {
                     setActiveSubTab("directory");
                     handleSearchClients(clientSearchQuery);
@@ -678,7 +861,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {activeSubTab === "familyAccounts" ? (
+            {activeSubTab === "familyAccounts" && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
                   <button onClick={() => setShowAddFamilyModal(true)} className="btn btn-primary">
@@ -856,7 +1039,263 @@ export default function AdminDashboardPage() {
                   </div>
                 )}
               </>
-            ) : (
+            )}
+
+            {activeSubTab === "tableList" && (
+              <div className="table-list-subtab animate-fade-in">
+                {/* Advanced Filters */}
+                <div className="table-filters-bar">
+                  <div className="search-input-wrap">
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Buscar por apodo, whatsapp, correo ranura o maestro..."
+                      value={tableSearchQuery}
+                      onChange={(e) => setTableSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  
+                  <select
+                    className="form-input form-select-input"
+                    value={tablePlatformFilter}
+                    onChange={(e) => setTablePlatformFilter(e.target.value)}
+                  >
+                    <option value="all">Todas las plataformas</option>
+                    <option value="tidal">Tidal</option>
+                    <option value="deezer">Deezer</option>
+                    <option value="qobuz">Qobuz</option>
+                  </select>
+
+                  <select
+                    className="form-input form-select-input"
+                    value={tableStatusFilter}
+                    onChange={(e) => setTableStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todos los estados</option>
+                    <option value="active">Activo</option>
+                    <option value="pending_payment">Falta Pago</option>
+                    <option value="expired">Vencido</option>
+                    <option value="free">Disponible</option>
+                  </select>
+
+                  <select
+                    className="form-input form-select-input"
+                    value={tableExpiryFilter}
+                    onChange={(e) => setTableExpiryFilter(e.target.value)}
+                  >
+                    <option value="all">Todos los vencimientos</option>
+                    <option value="expired">Vencidos (Ya expiró)</option>
+                    <option value="today">Vencen hoy</option>
+                    <option value="7days">Vencen en 7 días</option>
+                    <option value="15days">Vencen en 15 días</option>
+                    <option value="30days">Vencen en 30 días</option>
+                  </select>
+                </div>
+
+                {/* Table list of slots */}
+                {filteredSlots.length === 0 ? (
+                  <div className="empty-panel glass-panel text-center">
+                    <p>No se encontraron cupos/ranuras con los filtros seleccionados.</p>
+                  </div>
+                ) : (
+                  <div className="bulk-table-container">
+                    <table className="bulk-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>
+                            <label className="custom-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={allVisibleSelected}
+                                onChange={toggleSelectAllVisible}
+                              />
+                              <span className="checkmark"></span>
+                            </label>
+                          </th>
+                          <th>Plataforma</th>
+                          <th>Correo Maestro</th>
+                          <th>Correo Ranura</th>
+                          <th>Contraseña</th>
+                          <th>Cliente / WhatsApp</th>
+                          <th>Precio</th>
+                          <th>Vencimiento</th>
+                          <th>Estado</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredSlots.map(slot => {
+                          const isSelected = selectedSlotIds.includes(slot.id);
+                          const expiryInfo = getExpiryTag(slot.renewalDate);
+                          const statusNames = {
+                            active: "Activo",
+                            expired: "Vencido",
+                            pending_payment: "Falta Pago",
+                            free: "Disponible"
+                          };
+
+                          return (
+                            <tr key={slot.id} className={isSelected ? "selected" : ""}>
+                              <td>
+                                <label className="custom-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectSlot(slot.id)}
+                                  />
+                                  <span className="checkmark"></span>
+                                </label>
+                              </td>
+                              <td>
+                                <span className={`badge-service badge-${slot.service}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                                  {slot.service}
+                                </span>
+                              </td>
+                              <td style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.masterEmail}>
+                                {slot.masterEmail}
+                              </td>
+                              <td style={{ fontWeight: '600', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.memberEmail || "Disponible"}>
+                                {slot.memberEmail ? slot.memberEmail : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Disponible</span>}
+                              </td>
+                              <td>
+                                {slot.memberPassword ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <code style={{ fontSize: '0.75rem' }}>{slot.memberPassword}</code>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyToClipboard(slot.memberPassword, `tbl-pass-${slot.id}`)}
+                                      className="btn-mini-copy"
+                                      title="Copiar contraseña"
+                                    >
+                                      <CopyIcon />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td>
+                                {slot.clientId ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span style={{ fontWeight: '600' }}>👤 {slot.clientId.nickname || "Sin apodo"}</span>
+                                    <a
+                                      href={`https://wa.me/${slot.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="client-phone-link"
+                                      style={{ fontSize: '0.75rem' }}
+                                    >
+                                      {getCountryFlag(slot.clientId.currentWhatsApp)} {slot.clientId.currentWhatsApp}
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Sin Cliente</span>
+                                )}
+                              </td>
+                              <td>
+                                {slot.status !== "free" ? `S/. ${slot.pricePen}` : "-"}
+                              </td>
+                              <td>
+                                {slot.status !== "free" && slot.renewalDate ? (
+                                  <span className={`expiry-tag ${expiryInfo.className}`}>
+                                    {expiryInfo.label}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>-</span>
+                                )}
+                              </td>
+                              <td>
+                                <span className={`status-badge-mini ${slot.status}`}>
+                                  {statusNames[slot.status] || slot.status}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditSlotModal(slot)}
+                                  className="btn-slot-edit"
+                                  style={{ padding: '4px 8px', fontSize: '0.7rem' }}
+                                >
+                                  Editar
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Floating Actions Bar */}
+                <div className={`floating-bulk-bar ${selectedSlotIds.length > 0 ? "visible" : ""}`}>
+                  <div className="bulk-bar-selection-info">
+                    <strong>{selectedSlotIds.length}</strong>
+                    <span>perfiles seleccionados</span>
+                  </div>
+
+                  <div className="bulk-bar-actions">
+                    <div className="bulk-action-group">
+                      <select
+                        className="bulk-action-select"
+                        value={bulkAction}
+                        onChange={(e) => setBulkAction(e.target.value)}
+                      >
+                        <option value="status_active">Marcar como Activo</option>
+                        <option value="status_pending_payment">Marcar como Falta Pago</option>
+                        <option value="status_expired">Marcar como Vencido</option>
+                        <option value="extend_1">Extender +1 Mes</option>
+                        <option value="extend_12">Extender +12 Meses</option>
+                        <option value="update_price">Actualizar Precio</option>
+                        <option value="update_expiry">Actualizar Vencimiento</option>
+                      </select>
+                    </div>
+
+                    {bulkAction === "update_price" && (
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="Precio S/."
+                        className="bulk-action-input"
+                        value={bulkPriceValue}
+                        onChange={(e) => setBulkPriceValue(e.target.value)}
+                      />
+                    )}
+
+                    {bulkAction === "update_expiry" && (
+                      <input
+                        type="date"
+                        className="bulk-action-input"
+                        style={{ width: '130px' }}
+                        value={bulkDateValue}
+                        onChange={(e) => setBulkDateValue(e.target.value)}
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleBulkAction}
+                      className="bulk-action-btn-go"
+                      disabled={isBulkLoading}
+                    >
+                      {isBulkLoading ? "Aplicando..." : "Aplicar"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setBulkAction("clear_slots")}
+                      className="btn-bulk-danger"
+                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                      disabled={isBulkLoading}
+                    >
+                      Liberar Cupos
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === "directory" && (
               <div className="client-directory-panel glass-panel" style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
                 <div className="directory-sidebar">
                   <h3>Directorio</h3>

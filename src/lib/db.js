@@ -949,3 +949,55 @@ function parseDurationMonths(durationStr) {
   const match = durationStr.match(/\d+/);
   return match ? parseInt(match[0]) : 1;
 }
+
+// --- BULK OPERATIONS API ---
+
+export async function updateMemberProfilesBulk(ids, updatedFields) {
+  assertConfig();
+  const results = [];
+  for (const id of ids) {
+    const res = await updateMemberProfile(id, updatedFields);
+    results.push(res);
+  }
+  return results;
+}
+
+export async function extendMemberProfilesBulk(ids, monthsToAdd) {
+  assertConfig();
+  const results = [];
+  for (const id of ids) {
+    const slot = await getMemberProfileById(id);
+    if (!slot || slot.status === "free") continue;
+
+    // Calculate new date based on individual current renewal date
+    let baseDate = slot.renewalDate ? new Date(slot.renewalDate) : new Date();
+    const newRenewalDate = calculateRenewalDate(baseDate, monthsToAdd);
+    const renewalDateStr = newRenewalDate.toISOString().substring(0, 10);
+
+    const res = await updateMemberProfile(id, {
+      pricePen: slot.pricePen,
+      renewalDate: renewalDateStr,
+      status: slot.status
+    });
+    results.push(res);
+  }
+  return results;
+}
+
+export async function clearMemberProfilesBulk(ids) {
+  assertConfig();
+  const results = [];
+  for (const id of ids) {
+    const res = await updateMemberProfile(id, {
+      clientId: null,
+      memberEmail: "",
+      memberPassword: "",
+      pricePen: 0,
+      renewalDate: null,
+      status: "free"
+    });
+    results.push(res);
+  }
+  return results;
+}
+
