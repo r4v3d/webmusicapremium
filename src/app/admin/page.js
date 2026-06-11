@@ -5,7 +5,40 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CONFIG } from "../../data/config";
 
+// --- COUNTRY MAP & FLAG HELPER ---
+const COUNTRY_MAP = {
+  "51": { code: "PE", name: "Perú", flag: "🇵🇪" },
+  "54": { code: "AR", name: "Argentina", flag: "🇦🇷" },
+  "56": { code: "CL", name: "Chile", flag: "🇨🇱" },
+  "57": { code: "CO", name: "Colombia", flag: "🇨🇴" },
+  "52": { code: "MX", name: "México", flag: "🇲🇽" },
+  "34": { code: "ES", name: "España", flag: "🇪🇸" },
+  "58": { code: "VE", name: "Venezuela", flag: "🇻🇪" },
+  "591": { code: "BO", name: "Bolivia", flag: "🇧🇴" },
+  "593": { code: "EC", name: "Ecuador", flag: "🇪🇨" },
+  "502": { code: "GT", name: "Guatemala", flag: "🇬🇹" }
+};
+
+function getCountryFlag(phoneNumber) {
+  if (!phoneNumber) return "🌐";
+  const cleanPhone = phoneNumber.replace(/\D/g, "");
+  const prefix3 = cleanPhone.substring(0, 3);
+  if (COUNTRY_MAP[prefix3]) return COUNTRY_MAP[prefix3].flag;
+  const prefix2 = cleanPhone.substring(0, 2);
+  if (COUNTRY_MAP[prefix2]) return COUNTRY_MAP[prefix2].flag;
+  return "🌐";
+}
+
 // --- SVG Icons ---
+function CloseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+  );
+}
+
 function LogOutIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -52,10 +85,44 @@ export default function AdminDashboardPage() {
   const [orders, setOrders] = useState([]);
   const [stock, setStock] = useState([]);
   
-  // Tab control: "orders", "stock", "import"
+  // Tab control: "orders", "stock", "import", "families"
   const [activeTab, setActiveTab] = useState("orders");
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState("");
+
+  // Families & Clients state
+  const [familyAccounts, setFamilyAccounts] = useState([]);
+  const [isFamiliesLoading, setIsFamiliesLoading] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState("familyAccounts"); // "familyAccounts" | "directory"
+
+  // Client search/directory states
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [clientSearchQuery, setClientSearchQuery] = useState("");
+  const [isClientsLoading, setIsClientsLoading] = useState(false);
+
+  // Modals state
+  const [showAddFamilyModal, setShowAddFamilyModal] = useState(false);
+  const [addFamilyForm, setAddFamilyForm] = useState({
+    service: "tidal",
+    masterEmail: "",
+    password: "",
+    notes: ""
+  });
+  const [addFamilyLoading, setAddFamilyLoading] = useState(false);
+
+  const [showEditSlotModal, setShowEditSlotModal] = useState(false);
+  const [editSlotForm, setEditSlotForm] = useState({
+    profileId: "",
+    clientNickname: "",
+    clientWhatsApp: "",
+    memberEmail: "",
+    emailType: "admin",
+    memberPassword: "",
+    pricePen: 0,
+    renewalDate: "",
+    status: "free"
+  });
 
   // Import form states
   const [importService, setImportService] = useState("tidal");
@@ -101,13 +168,186 @@ export default function AdminDashboardPage() {
         setStock(stockData);
       }
 
+      // Fetch family accounts
+      setIsFamiliesLoading(true);
+      const familiesRes = await fetch("/api/admin/family-accounts");
+      if (familiesRes.ok) {
+        const familiesData = await familiesRes.json();
+        setFamilyAccounts(familiesData);
+      }
+
     } catch (error) {
       console.error(error);
       setDbError(error.message || "Error al cargar la información.");
     } finally {
       setLoading(false);
+      setIsFamiliesLoading(false);
     }
   };
+
+  const handleAddFamilySubmit = async (e) => {
+    e.preventDefault();
+    setAddFamilyLoading(true);
+    try {
+      const res = await fetch("/api/admin/family-accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addFamilyForm)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Error al crear la cuenta familiar");
+      
+      alert("¡Cuenta familiar creada con éxito! Se han generado 5 ranuras libres.");
+      setShowAddFamilyModal(false);
+      setAddFamilyForm({ service: "tidal", masterEmail: "", password: "", notes: "" });
+      await loadData();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setAddFamilyLoading(false);
+    }
+  };
+
+  const handleDeleteFamily = async (id, email) => {
+    if (!confirm(`¿Seguro que deseas eliminar la cuenta familiar ${email}? Esto eliminará permanentemente la cuenta y sus 5 ranuras asociadas.`)) return;
+    try {
+      const res = await fetch("/api/admin/family-accounts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        alert("Cuenta familiar eliminada.");
+        await loadData();
+      } else {
+        const data = await res.json();
+        alert(data.message || "Error al eliminar la cuenta.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error de red al eliminar la cuenta.");
+    }
+  };
+
+  const handleOpenEditSlotModal = (slot) => {
+    setEditSlotForm({
+      profileId: (slot._id || slot.id).toString(),
+      clientNickname: slot.clientId?.nickname || "",
+      clientWhatsApp: slot.clientId?.currentWhatsApp || "",
+      memberEmail: slot.memberEmail || "",
+      emailType: slot.emailType || "admin",
+      memberPassword: slot.memberPassword || "",
+      pricePen: slot.pricePen || 0,
+      renewalDate: slot.renewalDate ? new Date(slot.renewalDate).toISOString().substring(0, 10) : "",
+      status: slot.status || "free"
+    });
+    setShowEditSlotModal(true);
+  };
+
+  const handleCalculateRenewal = (months) => {
+    let baseDate = new Date();
+    if (editSlotForm.renewalDate) {
+      const [year, month, day] = editSlotForm.renewalDate.split("-").map(Number);
+      baseDate = new Date(year, month - 1, day);
+    }
+    const day = baseDate.getDate();
+    if (day === 31) {
+      baseDate.setDate(1);
+      baseDate.setMonth(baseDate.getMonth() + 1);
+    }
+    baseDate.setMonth(baseDate.getMonth() + months);
+    
+    const y = baseDate.getFullYear();
+    const m = String(baseDate.getMonth() + 1).padStart(2, '0');
+    const d = String(baseDate.getDate()).padStart(2, '0');
+    
+    setEditSlotForm(prev => ({
+      ...prev,
+      renewalDate: `${y}-${m}-${d}`
+    }));
+  };
+
+  const handleEditSlotSubmit = async (e) => {
+    e.preventDefault();
+    if (editSlotForm.status !== "free" && !editSlotForm.clientWhatsApp) {
+      alert("El WhatsApp del cliente es requerido para perfiles ocupados.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/admin/member-profiles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editSlotForm)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Error al actualizar la ranura.");
+      
+      alert("¡Ranura actualizada con éxito!");
+      setShowEditSlotModal(false);
+      await loadData();
+      if (activeSubTab === "directory") {
+        handleSearchClients(clientSearchQuery);
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleSearchClients = async (query = "") => {
+    setIsClientsLoading(true);
+    try {
+      const res = await fetch(`/api/admin/clients?query=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setClients(data);
+        if (data.length > 0) {
+          const exists = selectedClient && data.find(c => (c._id || c.id).toString() === (selectedClient._id || selectedClient.id).toString());
+          if (!exists) {
+            setSelectedClient(data[0]);
+          } else {
+            // update existing selected client ref with new data
+            setSelectedClient(data.find(c => (c._id || c.id).toString() === (selectedClient._id || selectedClient.id).toString()));
+          }
+        } else {
+          setSelectedClient(null);
+        }
+      }
+    } catch (e) {
+      console.error("Error searching clients:", e);
+    } finally {
+      setIsClientsLoading(false);
+    }
+  };
+
+  const getClientMemberships = (clientId) => {
+    if (!clientId) return [];
+    const memberships = [];
+    familyAccounts.forEach(acc => {
+      if (acc.profiles) {
+        acc.profiles.forEach(p => {
+          const pClientId = p.clientId?._id || p.clientId?.id || p.clientId;
+          if (pClientId && pClientId.toString() === clientId.toString()) {
+            memberships.push({
+              id: p._id || p.id,
+              service: acc.service,
+              masterEmail: acc.masterEmail,
+              memberEmail: p.memberEmail,
+              pricePen: p.pricePen,
+              renewalDate: p.renewalDate,
+              status: p.status
+            });
+          }
+        });
+      }
+    });
+    return memberships;
+  };
+
+  useEffect(() => {
+    if (activeTab === "families" && activeSubTab === "directory") {
+      handleSearchClients(clientSearchQuery);
+    }
+  }, [activeTab, activeSubTab]);
 
   useEffect(() => {
     loadData();
@@ -311,6 +551,12 @@ export default function AdminDashboardPage() {
             Pedidos ({orders.length})
           </button>
           <button
+            onClick={() => setActiveTab("families")}
+            className={`tab-btn ${activeTab === "families" ? "active" : ""}`}
+          >
+            Clientes y Familias
+          </button>
+          <button
             onClick={() => setActiveTab("stock")}
             className={`tab-btn ${activeTab === "stock" ? "active" : ""}`}
           >
@@ -409,6 +655,357 @@ export default function AdminDashboardPage() {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* TAB: FAMILIES & CLIENTS */}
+        {activeTab === "families" && (
+          <section className="families-section animate-fade-in">
+            <div className="section-header-filters" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2>Gestión de Clientes y Familias</h2>
+                <p className="section-instruction" style={{ margin: 0 }}>
+                  Administra las cuentas familiares dueñas y los perfiles de clientes vinculados.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setActiveSubTab("familyAccounts")}
+                  className={`btn ${activeSubTab === "familyAccounts" ? "btn-primary" : "btn-secondary"}`}
+                >
+                  Cuentas Familiares
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveSubTab("directory");
+                    handleSearchClients(clientSearchQuery);
+                  }}
+                  className={`btn ${activeSubTab === "directory" ? "btn-primary" : "btn-secondary"}`}
+                >
+                  Directorio de Clientes
+                </button>
+              </div>
+            </div>
+
+            {activeSubTab === "familyAccounts" ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+                  <button onClick={() => setShowAddFamilyModal(true)} className="btn btn-primary">
+                    <PlusIcon /> <span>Añadir Cuenta Familiar</span>
+                  </button>
+                </div>
+
+                {isFamiliesLoading && familyAccounts.length === 0 ? (
+                  <div className="admin-loading-screen" style={{ minHeight: '200px' }}>
+                    <span className="admin-spinner"></span>
+                    <p>Cargando cuentas familiares...</p>
+                  </div>
+                ) : familyAccounts.length === 0 ? (
+                  <div className="empty-panel glass-panel text-center">
+                    <p>No se han registrado cuentas familiares todavía. Haz clic en "Añadir Cuenta Familiar" para crear una.</p>
+                  </div>
+                ) : (
+                  <div className="families-grid-layout">
+                    {familyAccounts.map((acc) => {
+                      const accId = acc._id || acc.id;
+                      return (
+                        <div key={accId} className="family-card glass-panel border-purple">
+                          <div className="family-card-header">
+                            <div className="family-brand-info">
+                              <span className={`badge-service badge-${acc.service} family-service-tag`}>
+                                {acc.service}
+                              </span>
+                              <strong style={{ color: '#fff' }}>Familiar</strong>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteFamily(accId, acc.masterEmail)}
+                              className="btn-delete-stock"
+                              style={{ padding: '4px', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                              title="Eliminar Cuenta Familiar"
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
+
+                          <div className="family-master-credentials">
+                            <div className="cred-row">
+                              <span className="cred-label">Correo Dueño:</span>
+                              <div className="cred-value-wrap">
+                                <span className="cred-value">{acc.masterEmail}</span>
+                                <button
+                                  onClick={() => handleCopyToClipboard(acc.masterEmail, `master-email-${accId}`)}
+                                  className="btn-mini-copy"
+                                  title="Copiar correo dueño"
+                                >
+                                  <CopyIcon />
+                                  <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
+                                    {copiedId === `master-email-${accId}` ? "Copied" : ""}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                            <div className="cred-row">
+                              <span className="cred-label">Clave Maestro:</span>
+                              <div className="cred-value-wrap">
+                                <span className="cred-value">{acc.password}</span>
+                                <button
+                                  onClick={() => handleCopyToClipboard(acc.password, `master-pass-${accId}`)}
+                                  className="btn-mini-copy"
+                                  title="Copiar clave maestro"
+                                >
+                                  <CopyIcon />
+                                  <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
+                                    {copiedId === `master-pass-${accId}` ? "Copied" : ""}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                            {acc.notes && (
+                              <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+                                <strong>Notas:</strong> {acc.notes}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="family-slots-list">
+                            <h4 style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px' }}>Ranuras (Max 5 miembros)</h4>
+                            {acc.profiles && acc.profiles.map((p) => {
+                              const pId = p._id || p.id;
+                              const statusNames = {
+                                active: "Activo",
+                                expired: "Vencido",
+                                pending_payment: "Falta Pago",
+                                free: "Disponible"
+                              };
+                              return (
+                                <div key={pId} className="slot-item-row">
+                                  <div className="slot-row-header">
+                                    <div className="slot-email-wrap">
+                                      <span className="slot-email-text" title={p.memberEmail}>{p.memberEmail}</span>
+                                      <span className={`slot-badge-email-type ${p.emailType}`}>
+                                        {p.emailType === "admin" ? "Propio" : "Cliente"}
+                                      </span>
+                                      <button
+                                        onClick={() => handleCopyToClipboard(p.memberEmail, `slot-email-${pId}`)}
+                                        className="btn-mini-copy"
+                                        title="Copiar correo ranura"
+                                      >
+                                        <CopyIcon />
+                                      </button>
+                                    </div>
+                                    <span className={`status-badge-mini ${p.status}`}>{statusNames[p.status] || p.status}</span>
+                                  </div>
+
+                                  {p.status !== "free" && p.clientId && (
+                                    <div className="slot-client-info">
+                                      <span className="client-name-tag">👤 {p.clientId.nickname || "Sin apodo"}</span>
+                                      <a
+                                        href={`https://wa.me/${p.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="client-phone-link"
+                                      >
+                                        {getCountryFlag(p.clientId.currentWhatsApp)} {p.clientId.currentWhatsApp}
+                                      </a>
+                                    </div>
+                                  )}
+
+                                  <div className="slot-item-footer">
+                                    <span>Clave: <code>{p.memberPassword}</code>
+                                      <button
+                                        onClick={() => handleCopyToClipboard(p.memberPassword, `slot-pass-${pId}`)}
+                                        className="btn-mini-copy"
+                                        style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle' }}
+                                        title="Copiar clave"
+                                      >
+                                        <CopyIcon />
+                                      </button>
+                                    </span>
+                                    {p.status !== "free" && (
+                                      <span>
+                                        S/. {p.pricePen}
+                                        {p.renewalDate && ` | Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                                    <button
+                                      onClick={() => handleOpenEditSlotModal(p)}
+                                      className="btn-slot-edit"
+                                    >
+                                      Editar Ranura
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="client-directory-panel glass-panel" style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
+                <div className="directory-sidebar">
+                  <h3>Directorio</h3>
+                  <div className="search-input-wrap">
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Buscar por apodo, whatsapp o email..."
+                      value={clientSearchQuery}
+                      onChange={(e) => {
+                        setClientSearchQuery(e.target.value);
+                        handleSearchClients(e.target.value);
+                      }}
+                    />
+                  </div>
+
+                  {isClientsLoading && clients.length === 0 ? (
+                    <div className="admin-loading-screen" style={{ minHeight: '100px' }}>
+                      <span className="admin-spinner"></span>
+                    </div>
+                  ) : clients.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', marginTop: '12px' }}>
+                      No se encontraron clientes.
+                    </div>
+                  ) : (
+                    <div className="search-results-list">
+                      {clients.map((c) => {
+                        const cId = c._id || c.id;
+                        const isSelected = selectedClient && (selectedClient._id || selectedClient.id).toString() === cId.toString();
+                        return (
+                          <div
+                            key={cId}
+                            onClick={() => setSelectedClient(c)}
+                            className={`client-search-card glass-panel ${isSelected ? "active" : ""}`}
+                            style={{ borderRadius: 'var(--radius-sm)' }}
+                          >
+                            <div className="client-search-name">
+                              {getCountryFlag(c.currentWhatsApp)} {c.nickname || "Sin Apodo"}
+                            </div>
+                            <div className="client-search-phone">
+                              {c.currentWhatsApp}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="directory-detail-view">
+                  {selectedClient ? (
+                    <div className="client-detail-card glass-panel" style={{ height: '100%', borderRadius: 'var(--radius-lg)' }}>
+                      <div className="client-detail-header">
+                        <div className="client-main-name">
+                          {getCountryFlag(selectedClient.currentWhatsApp)} {selectedClient.nickname || "Cliente Sin Apodo"}
+                        </div>
+                      </div>
+
+                      <div className="client-detail-grid">
+                        <div>
+                          <h4 style={{ color: 'var(--accent-cyan)', marginBottom: '10px' }}>Datos de Contacto</h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                            <div>
+                              <span style={{ color: 'var(--text-muted)' }}>WhatsApp Principal: </span>
+                              <a
+                                href={`https://wa.me/${selectedClient.currentWhatsApp.replace(/[^0-9]/g, "")}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="client-phone-link"
+                                style={{ display: 'inline-flex', alignItems: 'center' }}
+                              >
+                                {selectedClient.currentWhatsApp}
+                              </a>
+                            </div>
+
+                            {selectedClient.pastWhatsApps && selectedClient.pastWhatsApps.length > 0 && (
+                              <div>
+                                <span style={{ color: 'var(--text-muted)' }}>WhatsApps Anteriores:</span>
+                                <ul style={{ margin: '4px 0 0 16px', padding: 0, listStyle: 'disc', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  {selectedClient.pastWhatsApps.map((phone, i) => (
+                                    <li key={i}>
+                                      <a
+                                        href={`https://wa.me/${phone.replace(/[^0-9]/g, "")}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="client-phone-link"
+                                        style={{ fontSize: '0.8rem' }}
+                                      >
+                                        {getCountryFlag(phone)} {phone}
+                                      </a>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {selectedClient.usedEmails && selectedClient.usedEmails.length > 0 && (
+                              <div>
+                                <span style={{ color: 'var(--text-muted)' }}>Correos Utilizados:</span>
+                                <ul style={{ margin: '4px 0 0 16px', padding: 0, listStyle: 'disc', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  {selectedClient.usedEmails.map((email, i) => (
+                                    <li key={i} style={{ fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: '#fff' }}>
+                                      {email}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 style={{ color: 'var(--accent-cyan)', marginBottom: '10px' }}>Planes / Membresías Activas e Históricas</h4>
+                          {getClientMemberships(selectedClient._id || selectedClient.id).length === 0 ? (
+                            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                              Este cliente no tiene ranuras activas o registradas en este momento.
+                            </div>
+                          ) : (
+                            <div className="history-items-list">
+                              {getClientMemberships(selectedClient._id || selectedClient.id).map((m) => {
+                                const statusNames = {
+                                  active: "Activo",
+                                  expired: "Vencido",
+                                  pending_payment: "Falta Pago",
+                                  free: "Disponible"
+                                };
+                                return (
+                                  <div key={m.id} className="history-item-row glass-panel" style={{ border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <div>
+                                      <span className={`badge-service badge-${m.service}`} style={{ fontSize: '0.65rem', marginRight: '6px', textTransform: 'uppercase' }}>
+                                        {m.service}
+                                      </span>
+                                      <span style={{ fontWeight: '600' }}>{m.memberEmail}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                      <span className={`status-badge-mini ${m.status}`} style={{ fontSize: '0.6rem' }}>
+                                        {statusNames[m.status]}
+                                      </span>
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        S/. {m.pricePen} {m.renewalDate && `| Vence: ${new Date(m.renewalDate).toLocaleDateString()}`}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="glass-panel text-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', minHeight: '300px' }}>
+                      Selecciona un cliente del directorio para ver sus detalles.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -520,6 +1117,222 @@ export default function AdminDashboardPage() {
         )}
 
       </div>
+
+      {/* MODAL: ADD FAMILY ACCOUNT */}
+      {showAddFamilyModal && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-container glass-panel">
+            <div className="modal-header-bar">
+              <h3>Añadir Cuenta Familiar</h3>
+              <button onClick={() => setShowAddFamilyModal(false)} className="btn-modal-close">
+                <CloseIcon />
+              </button>
+            </div>
+            <form onSubmit={handleAddFamilySubmit}>
+              <div className="modal-body-form">
+                <div className="form-group">
+                  <label className="form-label">Servicio / Plataforma:</label>
+                  <select
+                    className="form-input form-select-input"
+                    value={addFamilyForm.service}
+                    onChange={(e) => setAddFamilyForm(prev => ({ ...prev, service: e.target.value }))}
+                    required
+                  >
+                    <option value="tidal">Tidal</option>
+                    <option value="deezer">Deezer</option>
+                    <option value="qobuz">Qobuz</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Correo Dueño Maestro:</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={addFamilyForm.masterEmail}
+                    onChange={(e) => setAddFamilyForm(prev => ({ ...prev, masterEmail: e.target.value }))}
+                    required
+                    placeholder="ejemplo@dueño.com"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Contraseña Maestro:</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={addFamilyForm.password}
+                    onChange={(e) => setAddFamilyForm(prev => ({ ...prev, password: e.target.value }))}
+                    required
+                    placeholder="Clave de la cuenta maestro"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Notas Adicionales:</label>
+                  <textarea
+                    className="form-input form-textarea"
+                    rows={3}
+                    value={addFamilyForm.notes}
+                    onChange={(e) => setAddFamilyForm(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Notas o detalles del proveedor..."
+                  ></textarea>
+                </div>
+              </div>
+              <div className="modal-footer-actions">
+                <button type="button" onClick={() => setShowAddFamilyModal(false)} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={addFamilyLoading}>
+                  {addFamilyLoading ? "Creando..." : "Crear Familiar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT MEMBER SLOT */}
+      {showEditSlotModal && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-container glass-panel">
+            <div className="modal-header-bar">
+              <h3>Editar Ranura Miembro</h3>
+              <button onClick={() => setShowEditSlotModal(false)} className="btn-modal-close">
+                <CloseIcon />
+              </button>
+            </div>
+            <form onSubmit={handleEditSlotSubmit}>
+              <div className="modal-body-form">
+                
+                <div className="form-group">
+                  <label className="form-label">Estado de la Ranura:</label>
+                  <select
+                    className="form-input form-select-input"
+                    value={editSlotForm.status}
+                    onChange={(e) => setEditSlotForm(prev => ({ ...prev, status: e.target.value }))}
+                    required
+                  >
+                    <option value="free">Disponible (Libre)</option>
+                    <option value="active">Activo (Pagado)</option>
+                    <option value="pending_payment">Falta Pago (Pendiente)</option>
+                    <option value="expired">Vencido</option>
+                  </select>
+                </div>
+
+                {editSlotForm.status !== "free" && (
+                  <>
+                    <div className="form-row-double">
+                      <div className="form-group">
+                        <label className="form-label">Apodo del Cliente:</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={editSlotForm.clientNickname}
+                          onChange={(e) => setEditSlotForm(prev => ({ ...prev, clientNickname: e.target.value }))}
+                          placeholder="Ej. Juan Tidal"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">WhatsApp Contacto:</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={editSlotForm.clientWhatsApp}
+                          onChange={(e) => setEditSlotForm(prev => ({ ...prev, clientWhatsApp: e.target.value }))}
+                          required
+                          placeholder="Ej: +51999999999"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-row-double">
+                      <div className="form-group">
+                        <label className="form-label">Precio (S/.):</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          className="form-input"
+                          value={editSlotForm.pricePen}
+                          onChange={(e) => setEditSlotForm(prev => ({ ...prev, pricePen: e.target.value }))}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Fecha de Renovación:</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          value={editSlotForm.renewalDate}
+                          onChange={(e) => setEditSlotForm(prev => ({ ...prev, renewalDate: e.target.value }))}
+                        />
+                        <div className="calc-date-actions">
+                          <button
+                            type="button"
+                            onClick={() => handleCalculateRenewal(1)}
+                            className="btn-calc-action"
+                          >
+                            +1 Mes
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCalculateRenewal(12)}
+                            className="btn-calc-action"
+                          >
+                            +12 Meses
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label">Correo de Activación (Ranura):</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={editSlotForm.memberEmail}
+                    onChange={(e) => setEditSlotForm(prev => ({ ...prev, memberEmail: e.target.value }))}
+                    required
+                  />
+                </div>
+
+                <div className="form-row-double">
+                  <div className="form-group">
+                    <label className="form-label">Tipo de Correo:</label>
+                    <select
+                      className="form-input form-select-input"
+                      value={editSlotForm.emailType}
+                      onChange={(e) => setEditSlotForm(prev => ({ ...prev, emailType: e.target.value }))}
+                      required
+                    >
+                      <option value="admin">Propio (Mío)</option>
+                      <option value="client">Cliente (De él)</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Contraseña Perfil:</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={editSlotForm.memberPassword}
+                      onChange={(e) => setEditSlotForm(prev => ({ ...prev, memberPassword: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+
+              </div>
+              <div className="modal-footer-actions">
+                <button type="button" onClick={() => setShowEditSlotModal(false)} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
