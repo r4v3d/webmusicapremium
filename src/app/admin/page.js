@@ -986,7 +986,9 @@ export default function AdminDashboardPage() {
     
                                     {p.status !== "free" && p.clientId && (
                                       <div className="slot-client-info" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '2px' }}>
-                                        <span className="client-name-tag" style={{ fontSize: '0.75rem' }}>👤 {p.clientId.nickname || "Sin apodo"}</span>
+                                        <span className="client-name-tag" style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                          👤 {p.clientId.customerCode || "CLI-XXXXXX"}{p.clientId.nickname ? ` | ${p.clientId.nickname}` : ""}
+                                        </span>
                                         <a
                                           href={`https://wa.me/${p.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
                                           target="_blank"
@@ -1179,7 +1181,9 @@ export default function AdminDashboardPage() {
                               <td>
                                 {slot.clientId ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ fontWeight: '600' }}>👤 {slot.clientId.nickname || "Sin apodo"}</span>
+                                     <span style={{ fontWeight: '600' }}>
+                                       👤 {slot.clientId.customerCode || "CLI-XXXXXX"}{slot.clientId.nickname ? ` | ${slot.clientId.nickname}` : ""}
+                                     </span>
                                     <a
                                       href={`https://wa.me/${slot.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
                                       target="_blank"

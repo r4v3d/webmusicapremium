@@ -99,7 +99,7 @@ function formatClient(customer) {
     id: customer.id,
     _id: customer.id,
     customerCode: customer.customer_code,
-    nickname: customer.display_name || customer.customer_code || "Cliente",
+    nickname: customer.display_name || "",
     currentWhatsApp: primaryWhatsApp,
     pastWhatsApps,
     usedEmails,

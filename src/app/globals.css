@@ -3085,9 +3085,10 @@ a {
 
 .cred-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-bottom: 10px;
 }
 
 .cred-row:last-child {
@@ -3096,11 +3097,14 @@ a {
 
 .cred-label {
   color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .cred-value-wrap {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 6px;
 }
 
@@ -3108,6 +3112,8 @@ a {
   font-family: var(--font-body);
   font-weight: 600;
   color: #ffffff;
+  word-break: break-all;
+  font-size: 0.8rem;
 }
 
 .btn-mini-copy {
@@ -3133,24 +3139,13 @@ a {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .family-slots-row-layout {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 12px;
-}
-
-@media (max-width: 1400px) {
-  .family-slots-row-layout {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  }
-}
-
-@media (max-width: 600px) {
-  .family-slots-row-layout {
-    grid-template-columns: 1fr;
-  }
 }
 
 .slot-item-row {
