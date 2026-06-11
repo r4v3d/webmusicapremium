@@ -573,7 +573,8 @@ export default function AdminDashboardPage() {
       const email = slot.memberEmail?.toLowerCase() || "";
       const masterEmail = slot.masterEmail?.toLowerCase() || "";
       
-      const matches = nickname.includes(q) || phone.includes(q) || email.includes(q) || masterEmail.includes(q);
+      const code = slot.clientId?.customerCode?.toLowerCase() || "";
+      const matches = nickname.includes(q) || code.includes(q) || phone.includes(q) || email.includes(q) || masterEmail.includes(q);
       if (!matches) return false;
     }
 

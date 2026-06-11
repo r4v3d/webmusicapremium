@@ -98,7 +98,8 @@ function formatClient(customer) {
   return {
     id: customer.id,
     _id: customer.id,
-    nickname: customer.display_name,
+    customerCode: customer.customer_code,
+    nickname: customer.display_name || customer.customer_code || "Cliente",
     currentWhatsApp: primaryWhatsApp,
     pastWhatsApps,
     usedEmails,
@@ -311,7 +312,7 @@ export async function createClient(clientData) {
   const { data: customer, error } = await supabase
     .from("customers")
     .insert({
-      display_name: clientData.nickname || "Cliente Nuevo",
+      display_name: clientData.nickname || "",
       notes: clientData.notes || ""
     })
     .select()
@@ -461,9 +462,9 @@ export async function searchClients(query) {
   // Get matching customers
   let dbQuery = supabase.from("customers").select("*, customer_contacts(*)");
   if (customerIds.length > 0) {
-    dbQuery = dbQuery.or(`id.in.(${customerIds.map(id => `"${id}"`).join(",")}),display_name.ilike.%${trimQuery}%`);
+    dbQuery = dbQuery.or(`id.in.(${customerIds.map(id => `"${id}"`).join(",")}),display_name.ilike.%${trimQuery}%,customer_code.ilike.%${trimQuery}%`);
   } else {
-    dbQuery = dbQuery.ilike("display_name", `%${trimQuery}%`);
+    dbQuery = dbQuery.or(`display_name.ilike.%${trimQuery}%,customer_code.ilike.%${trimQuery}%`);
   }
 
   const { data, error } = await dbQuery.order("created_at", { ascending: false });
@@ -522,7 +523,7 @@ export async function getOrCreateClient(whatsapp, nickname, email) {
     return clientRecord;
   } else {
     return await createClient({
-      nickname: nickname || "Cliente Nuevo",
+      nickname: nickname || "",
       currentWhatsApp: whatsapp,
       pastWhatsApps: [],
       usedEmails: email ? [email] : [],
