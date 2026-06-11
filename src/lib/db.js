@@ -1,22 +1,56 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 // --- ENV CONFIG ---
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+let SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const isConfigured = SUPABASE_URL && SUPABASE_URL !== "https://placeholder.supabase.co" && SUPABASE_SERVICE_ROLE_KEY && SUPABASE_SERVICE_ROLE_KEY !== "placeholder_key";
+// Sanitize: strip surrounding quotes and whitespace
+if (SUPABASE_URL) {
+  SUPABASE_URL = SUPABASE_URL.replace(/^['"]|['"]$/g, "").trim();
+}
+if (SUPABASE_SERVICE_ROLE_KEY) {
+  SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY.replace(/^['"]|['"]$/g, "").trim();
+}
+
+// Validate URL format
+let isValidUrl = false;
+if (SUPABASE_URL) {
+  try {
+    new URL(SUPABASE_URL);
+    isValidUrl = true;
+  } catch (e) {
+    isValidUrl = false;
+  }
+}
+
+const isConfigured = isValidUrl && SUPABASE_URL !== "https://placeholder.supabase.co" && SUPABASE_SERVICE_ROLE_KEY && SUPABASE_SERVICE_ROLE_KEY !== "placeholder_key";
 
 // Initialize official Supabase client (using service role key on backend to bypass RLS)
-export const supabase = createSupabaseClient(
-  SUPABASE_URL || "https://placeholder.supabase.co",
-  SUPABASE_SERVICE_ROLE_KEY || "placeholder_key",
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
+export let supabase;
+try {
+  supabase = createSupabaseClient(
+    isConfigured ? SUPABASE_URL : "https://placeholder.supabase.co",
+    isConfigured ? SUPABASE_SERVICE_ROLE_KEY : "placeholder_key",
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
     }
-  }
-);
+  );
+} catch (e) {
+  console.error("⚠️ Failed to initialize Supabase client with configured variables:", e);
+  supabase = createSupabaseClient(
+    "https://placeholder.supabase.co",
+    "placeholder_key",
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    }
+  );
+}
 
 if (!isConfigured) {
   console.warn("⚠️ Supabase credentials not fully configured. Database requests will run with placeholders.");
@@ -25,7 +59,7 @@ if (!isConfigured) {
 // Assert configuration helper to prevent silent mock fallback in production/runtime
 function assertConfig() {
   if (!isConfigured) {
-    throw new Error("Base de datos Supabase no configurada. Verifica que hayas configurado las variables de entorno NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Vercel, y que hayas hecho un Redeploy (volver a desplegar) de la aplicación para cargarlas.");
+    throw new Error("Base de datos Supabase no configurada o mal configurada. Verifica que hayas configurado las variables de entorno NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Vercel sin comillas ni espacios adicionales, y que hayas hecho un Redeploy.");
   }
 }
 
