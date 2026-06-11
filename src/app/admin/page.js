@@ -350,7 +350,7 @@ export default function AdminDashboardPage() {
   }, [activeTab, activeSubTab]);
 
   useEffect(() => {
-    loadData();
+    setTimeout(loadData, 0);
   }, []);
 
   const handleLogout = async () => {
@@ -693,7 +693,7 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : familyAccounts.length === 0 ? (
                   <div className="empty-panel glass-panel text-center">
-                    <p>No se han registrado cuentas familiares todavía. Haz clic en "Añadir Cuenta Familiar" para crear una.</p>
+                    <p>No se han registrado cuentas familiares todavía. Haz clic en &ldquo;Añadir Cuenta Familiar&rdquo; para crear una.</p>
                   </div>
                 ) : (
                   <div className="families-grid-layout">

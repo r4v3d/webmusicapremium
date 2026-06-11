@@ -7,6 +7,22 @@ export default function ReferencesGallery({ images = [] }) {
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [brokenImages, setBrokenImages] = useState({});
 
+  const handleImageError = (index) => {
+    setBrokenImages((prev) => ({ ...prev, [index]: true }));
+  };
+
+  function closeLightbox() {
+    setLightboxIndex(null);
+  }
+
+  function navigateLeft() {
+    setLightboxIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+  }
+
+  function navigateRight() {
+    setLightboxIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+  }
+
   // Keyboard navigation for Lightbox
   useEffect(() => {
     if (lightboxIndex === null) return;
@@ -26,22 +42,6 @@ export default function ReferencesGallery({ images = [] }) {
       document.body.style.overflow = "unset";
     };
   }, [lightboxIndex]);
-
-  const handleImageError = (index) => {
-    setBrokenImages((prev) => ({ ...prev, [index]: true }));
-  };
-
-  const closeLightbox = () => {
-    setLightboxIndex(null);
-  };
-
-  const navigateLeft = () => {
-    setLightboxIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
-  };
-
-  const navigateRight = () => {
-    setLightboxIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
-  };
 
   // Swipe gestures for mobile devices
   const [touchStart, setTouchStart] = useState(null);

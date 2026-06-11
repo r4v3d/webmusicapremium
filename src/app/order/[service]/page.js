@@ -52,23 +52,18 @@ export default function OrderPage() {
   // Find current service configuration
   const serviceData = CONFIG.services[service];
 
+  const defaultPlan = serviceData && serviceData.plans.length > 0
+    ? (serviceData.plans.find(p => p.popular) || serviceData.plans[0])
+    : null;
+
   // Form states
-  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState(defaultPlan);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("yape_plin"); // yape_plin or binance_pay
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  // Select default plan on mount
-  useEffect(() => {
-    if (serviceData && serviceData.plans.length > 0) {
-      // Pick popular plan, or first plan
-      const popular = serviceData.plans.find(p => p.popular) || serviceData.plans[0];
-      setSelectedPlan(popular);
-    }
-  }, [serviceData]);
 
   if (!serviceData) {
     return (

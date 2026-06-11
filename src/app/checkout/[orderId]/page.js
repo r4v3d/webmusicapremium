@@ -56,37 +56,66 @@ export default function CheckoutPage() {
 
   const intervalRef = useRef(null);
 
-  // Fetch order details
-  const fetchOrder = async () => {
+  // Update payment status (Mock API request)
+  async function updateOrderStatus(newStatus) {
     try {
-      const response = await fetch(`/api/orders/${orderId}`);
-      if (!response.ok) {
-        throw new Error("Pedido no encontrado.");
-      }
+      const response = await fetch(`/api/orders/${orderId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
       const data = await response.json();
-      setOrder(data);
-      
-      // If payment is already completed, failed or expired, stop timer and clear localStorage
-      if (data.status !== "pending") {
-        setTimerActive(false);
-        const saved = localStorage.getItem("pendingCheckoutOrder");
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed.orderId === orderId) {
-              localStorage.removeItem("pendingCheckoutOrder");
-            }
-          } catch (e) {}
+      if (response.ok) {
+        setOrder(data.order);
+        if (newStatus !== "pending") {
+          setTimerActive(false);
+          const saved = localStorage.getItem("pendingCheckoutOrder");
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed.orderId === orderId) {
+                localStorage.removeItem("pendingCheckoutOrder");
+              }
+            } catch (e) {}
+          }
         }
       }
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error updating status:", err);
     }
-  };
+  }
 
+  // Fetch order details
   useEffect(() => {
+    async function fetchOrder() {
+      try {
+        const response = await fetch(`/api/orders/${orderId}`);
+        if (!response.ok) {
+          throw new Error("Pedido no encontrado.");
+        }
+        const data = await response.json();
+        setOrder(data);
+        
+        // If payment is already completed, failed or expired, stop timer and clear localStorage
+        if (data.status !== "pending") {
+          setTimerActive(false);
+          const saved = localStorage.getItem("pendingCheckoutOrder");
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed.orderId === orderId) {
+                localStorage.removeItem("pendingCheckoutOrder");
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
     fetchOrder();
   }, [orderId]);
 
@@ -115,35 +144,6 @@ export default function CheckoutPage() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  // Update payment status (Mock API request)
-  const updateOrderStatus = async (newStatus) => {
-    try {
-      const response = await fetch(`/api/orders/${orderId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setOrder(data.order);
-        if (newStatus !== "pending") {
-          setTimerActive(false);
-          const saved = localStorage.getItem("pendingCheckoutOrder");
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (parsed.orderId === orderId) {
-                localStorage.removeItem("pendingCheckoutOrder");
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Error updating status:", err);
-    }
   };
 
   // Simulate confirmed Binance payment

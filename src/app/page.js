@@ -397,7 +397,7 @@ export default function Home() {
                     ))}
                   </div>
                 </div>
-                <p className="testimonial-comment">"{t.comment}"</p>
+                <p className="testimonial-comment">&ldquo;{t.comment}&rdquo;</p>
                 <div className="testimonial-footer">
                   <span className="testimonial-date">{t.date}</span>
                   <span className="verified-badge">
@@ -464,7 +464,7 @@ export default function Home() {
               <div className="step-row">
                 <div className="step-num">1</div>
                 <div className="step-txt">
-                  <strong>Elige tu cuenta:</strong> Escoge Tidal, Deezer o Qobuz y haz clic en "Realizar Pedido".
+                  <strong>Elige tu cuenta:</strong> Escoge Tidal, Deezer o Qobuz y haz clic en &ldquo;Realizar Pedido&rdquo;.
                 </div>
               </div>
               <div className="step-row">
