@@ -322,14 +322,24 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
                     {/* QR Code Placeholder */}
                     <div className="qr-code-holder">
                       <div className="qr-visual">
-                        {/* We use styled SVG to represent QR code box premium */}
-                        <svg width="180" height="180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                          <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                          <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                          <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                          <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                        </svg>
-                        <span className="qr-logo-brand binance">Binance</span>
+                        {CONFIG.payments.binancePay.qrImage ? (
+                          <img
+                            src={CONFIG.payments.binancePay.qrImage}
+                            alt="Binance Pay QR"
+                            className="qr-image-display"
+                          />
+                        ) : (
+                          <>
+                            {/* We use styled SVG to represent QR code box premium */}
+                            <svg width="180" height="180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
+                              <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
+                              <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
+                              <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
+                              <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
+                            </svg>
+                            <span className="qr-logo-brand binance">Binance</span>
+                          </>
+                        )}
                       </div>
                       <span className="qr-hint-text">Escanea para pagar</span>
                     </div>
@@ -382,13 +392,23 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
                       <div className="qr-card">
                         <div className="qr-code-holder">
                           <div className="qr-visual purple">
-                            <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                              <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                              <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                            </svg>
-                            <span className="qr-logo-brand yape">Yape</span>
+                            {CONFIG.payments.yape.qrImage ? (
+                              <img
+                                src={CONFIG.payments.yape.qrImage}
+                                alt="Yape QR"
+                                className="qr-image-display"
+                              />
+                            ) : (
+                              <>
+                                <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
+                                  <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
+                                  <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
+                                  <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
+                                  <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
+                                </svg>
+                                <span className="qr-logo-brand yape">Yape</span>
+                              </>
+                            )}
                           </div>
                         </div>
                         <span className="qr-name">YAPE</span>
@@ -398,13 +418,23 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
                       <div className="qr-card">
                         <div className="qr-code-holder">
                           <div className="qr-visual blue">
-                            <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                              <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                              <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                            </svg>
-                            <span className="qr-logo-brand plin">Plin</span>
+                            {CONFIG.payments.plin.qrImage ? (
+                              <img
+                                src={CONFIG.payments.plin.qrImage}
+                                alt="Plin QR"
+                                className="qr-image-display"
+                              />
+                            ) : (
+                              <>
+                                <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
+                                  <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
+                                  <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
+                                  <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
+                                  <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
+                                </svg>
+                                <span className="qr-logo-brand plin">Plin</span>
+                              </>
+                            )}
                           </div>
                         </div>
                         <span className="qr-name">PLIN</span>
