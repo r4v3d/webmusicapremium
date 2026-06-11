@@ -64,20 +64,34 @@ function QobuzIcon() {
 
 export default function Home() {
   const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoSrc, setVideoSrc] = useState("");
   const heroRef = useRef(null);
   const videoRef = useRef(null);
 
   // Defer video loading to ensure initial page speed remains ultra-fast
   useEffect(() => {
+    const checkVideoSrc = () => {
+      const isPC = window.innerWidth > 1024;
+      const src = isPC ? "/video/video-1.mp4" : "/video_celular/video_celular1.mp4";
+      setVideoSrc(src);
+    };
+
+    checkVideoSrc();
+    window.addEventListener("resize", checkVideoSrc);
+
     const timer = setTimeout(() => {
       setVideoLoaded(true);
     }, 500);
-    return () => clearTimeout(timer);
+
+    return () => {
+      window.removeEventListener("resize", checkVideoSrc);
+      clearTimeout(timer);
+    };
   }, []);
 
   // IntersectionObserver to pause/play the video based on visibility
   useEffect(() => {
-    if (!videoLoaded) return;
+    if (!videoLoaded || !videoSrc) return;
     const videoElement = videoRef.current;
     const heroElement = heroRef.current;
     if (!videoElement || !heroElement) return;
@@ -103,7 +117,7 @@ export default function Home() {
     return () => {
       observer.disconnect();
     };
-  }, [videoLoaded]);
+  }, [videoLoaded, videoSrc]);
 
   // Handle smooth scroll to top when clicking logo
   const handleLogoClick = (e) => {
@@ -164,11 +178,12 @@ export default function Home() {
 
       {/* HERO SECTION */}
       <section ref={heroRef} className="hero-section section-padding">
-        {videoLoaded && (
+        {videoLoaded && videoSrc && (
           <div className="hero-video-bg-wrap">
             <video
+              key={videoSrc}
               ref={videoRef}
-              src="/video/video-1.mp4"
+              src={videoSrc}
               loop
               muted
               playsInline
