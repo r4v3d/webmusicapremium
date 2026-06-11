@@ -422,8 +422,22 @@ export async function updateFamilyAccount(id, updatedFields) {
 export async function deleteFamilyAccount(id) {
   await initDb();
   if (IS_MONGO) {
-    await MongoFamilyAccount.findByIdAndDelete(id);
-    await MongoMemberProfile.deleteMany({ familyAccountId: id });
+    const objectId = mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+    const deleteQuery = {
+      $or: [
+        { _id: id },
+        ...(objectId ? [{ _id: objectId }] : [])
+      ]
+    };
+    await MongoFamilyAccount.deleteOne(deleteQuery);
+
+    const profileDeleteQuery = {
+      $or: [
+        { familyAccountId: id },
+        ...(objectId ? [{ familyAccountId: objectId }] : [])
+      ]
+    };
+    await MongoMemberProfile.deleteMany(profileDeleteQuery);
   } else {
     const db = readLocalDb();
     if (db.familyAccounts && db.familyAccounts[id]) {
