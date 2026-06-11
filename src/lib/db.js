@@ -58,9 +58,9 @@ if (IS_MONGO) {
   const MemberProfileSchema = new mongoose.Schema({
     familyAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "FamilyAccount", required: true },
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: "Client", default: null },
-    memberEmail: { type: String, required: true },
+    memberEmail: { type: String, default: "" },
     emailType: { type: String, required: true, enum: ["client", "admin"], default: "client" },
-    memberPassword: { type: String, required: true },
+    memberPassword: { type: String, default: "" },
     pricePen: { type: Number, default: 0 },
     renewalDate: { type: Date, default: null },
     status: { 
