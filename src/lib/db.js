@@ -222,46 +222,140 @@ export async function deleteStockItem(id) {
   }
 }
 
-// Assigns an unused account from stock to a given order
-export async function assignStockAccount(orderId, service) {
-  await initDb();
-  if (IS_MONGO) {
-    // Find one unused account for this service
-    const account = await MongoStock.findOne({ service, isUsed: false });
-    if (!account) return null;
+// Helper to find or create a Client record and update their phone history
+export async function getOrCreateClient(whatsapp, nickname, email) {
+  const clients = await getClients();
+  const cleanPhone = whatsapp.replace(/\D/g, "");
 
-    // Mark it as used and assign
-    account.isUsed = true;
-    account.assignedToOrder = orderId;
-    await account.save();
+  // Find client by current WhatsApp or in their past WhatsApp list
+  let client = clients.find(c => {
+    const currentClean = c.currentWhatsApp ? c.currentWhatsApp.replace(/\D/g, "") : "";
+    if (currentClean === cleanPhone) return true;
+    const matchPast = c.pastWhatsApps && c.pastWhatsApps.some(p => p.replace(/\D/g, "") === cleanPhone);
+    return matchPast;
+  });
 
-    // Update the order with this account
-    await MongoOrder.findOneAndUpdate(
-      { orderId },
-      { $set: { assignedAccount: account.accountData } }
-    );
+  const countryData = getCountryFromPhone(whatsapp);
 
-    return account.accountData;
-  } else {
-    const db = readLocalDb();
-    // Find index of unused account
-    const accountIdx = db.stock.findIndex(item => item.service === service && !item.isUsed);
-    if (accountIdx === -1) return null;
-
-    // Update stock item
-    db.stock[accountIdx].isUsed = true;
-    db.stock[accountIdx].assignedToOrder = orderId;
-
-    const accountData = db.stock[accountIdx].accountData;
-
-    // Update order
-    if (db.orders[orderId]) {
-      db.orders[orderId].assignedAccount = accountData;
+  if (client) {
+    const updatedFields = {};
+    if (nickname && nickname !== client.nickname) {
+      updatedFields.nickname = nickname;
+    }
+    
+    // Check if they changed their primary WhatsApp number
+    if (client.currentWhatsApp !== whatsapp) {
+      const past = client.pastWhatsApps || [];
+      if (!past.includes(client.currentWhatsApp)) {
+        past.push(client.currentWhatsApp);
+      }
+      updatedFields.currentWhatsApp = whatsapp;
+      updatedFields.pastWhatsApps = past;
+      updatedFields.clientCountryCode = countryData.code;
     }
 
-    writeLocalDb(db);
-    return accountData;
+    // Ensure email is added to their history of used emails
+    const emails = client.usedEmails || [];
+    if (email && !emails.includes(email)) {
+      emails.push(email);
+      updatedFields.usedEmails = emails;
+    }
+
+    if (Object.keys(updatedFields).length > 0) {
+      const clientId = client._id || client.id;
+      client = await updateClient(clientId, updatedFields);
+    }
+  } else {
+    // Create new permanent client
+    client = await createClient({
+      nickname: nickname || "Cliente Nuevo",
+      currentWhatsApp: whatsapp,
+      pastWhatsApps: [],
+      usedEmails: email ? [email] : [],
+      clientCountryCode: countryData.code,
+      notes: ""
+    });
   }
+
+  return client;
+}
+
+function parsePrice(priceStr) {
+  if (!priceStr) return 0;
+  const match = priceStr.match(/\d+(\.\d+)?/);
+  return match ? parseFloat(match[0]) : 0;
+}
+
+function parseDurationMonths(durationStr) {
+  if (!durationStr) return 1;
+  const match = durationStr.match(/\d+/);
+  return match ? parseInt(match[0]) : 1;
+}
+
+// Assigns an unused account from stock (a free slot in a family plan) to a given order
+export async function assignStockAccount(orderId, service) {
+  await initDb();
+
+  // 1. Get order details
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+
+  // 2. Find a free member profile for this service
+  let assignedProfile = null;
+
+  if (IS_MONGO) {
+    const profiles = await MongoMemberProfile.find({ status: "free" }).populate("familyAccountId");
+    assignedProfile = profiles.find(p => p.familyAccountId && p.familyAccountId.service === service);
+  } else {
+    const db = readLocalDb();
+    if (db.memberProfiles) {
+      const freeProfiles = Object.values(db.memberProfiles).filter(p => p.status === "free");
+      assignedProfile = freeProfiles.find(p => {
+        const parent = db.familyAccounts && db.familyAccounts[p.familyAccountId];
+        return parent && parent.service === service;
+      });
+    }
+  }
+
+  if (!assignedProfile) return null;
+
+  // 3. Find or create the client for this order
+  const client = await getOrCreateClient(order.whatsapp, order.fullName, order.email);
+  const clientId = client._id || client.id;
+
+  // 4. Calculate prices and renewal date
+  const pricePenNum = parsePrice(order.pricePen);
+  const durationMonths = parseDurationMonths(order.duration);
+  const renewalDateVal = calculateRenewalDate(new Date(), durationMonths);
+
+  // 5. Update the member profile to active and bind client
+  const profileId = assignedProfile._id || assignedProfile.id;
+  const updatedFields = {
+    clientId,
+    pricePen: pricePenNum,
+    renewalDate: renewalDateVal,
+    status: "active"
+  };
+
+  await updateMemberProfile(profileId, updatedFields);
+
+  // 6. Update the order with the assigned account credentials
+  const accountInfo = `Correo: ${assignedProfile.memberEmail} | Clave: ${assignedProfile.memberPassword}`;
+  
+  if (IS_MONGO) {
+    await MongoOrder.findOneAndUpdate(
+      { orderId },
+      { $set: { assignedAccount: accountInfo } }
+    );
+  } else {
+    const db = readLocalDb();
+    if (db.orders[orderId]) {
+      db.orders[orderId].assignedAccount = accountInfo;
+      writeLocalDb(db);
+    }
+  }
+
+  return accountInfo;
 }
 
 // --- FAMILY ACCOUNTS CRUD ---

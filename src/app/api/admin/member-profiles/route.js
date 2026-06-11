@@ -1,64 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { updateMemberProfile, getClients, createClient, updateClient, getCountryFromPhone } from "../../../../lib/db";
-
-// Helper to find or create a Client record and update their phone history
-async function getOrCreateClient(whatsapp, nickname, email) {
-  const clients = await getClients();
-  const cleanPhone = whatsapp.replace(/\D/g, "");
-
-  // Find client by current WhatsApp or in their past WhatsApp list
-  let client = clients.find(c => {
-    const currentClean = c.currentWhatsApp ? c.currentWhatsApp.replace(/\D/g, "") : "";
-    if (currentClean === cleanPhone) return true;
-    const matchPast = c.pastWhatsApps && c.pastWhatsApps.some(p => p.replace(/\D/g, "") === cleanPhone);
-    return matchPast;
-  });
-
-  const countryData = getCountryFromPhone(whatsapp);
-
-  if (client) {
-    const updatedFields = {};
-    if (nickname && nickname !== client.nickname) {
-      updatedFields.nickname = nickname;
-    }
-    
-    // Check if they changed their primary WhatsApp number
-    if (client.currentWhatsApp !== whatsapp) {
-      const past = client.pastWhatsApps || [];
-      if (!past.includes(client.currentWhatsApp)) {
-        past.push(client.currentWhatsApp);
-      }
-      updatedFields.currentWhatsApp = whatsapp;
-      updatedFields.pastWhatsApps = past;
-      updatedFields.clientCountryCode = countryData.code;
-    }
-
-    // Ensure email is added to their history of used emails
-    const emails = client.usedEmails || [];
-    if (email && !emails.includes(email)) {
-      emails.push(email);
-      updatedFields.usedEmails = emails;
-    }
-
-    if (Object.keys(updatedFields).length > 0) {
-      const clientId = client._id || client.id;
-      client = await updateClient(clientId, updatedFields);
-    }
-  } else {
-    // Create new permanent client
-    client = await createClient({
-      nickname: nickname || "Cliente Nuevo",
-      currentWhatsApp: whatsapp,
-      pastWhatsApps: [],
-      usedEmails: email ? [email] : [],
-      clientCountryCode: countryData.code,
-      notes: ""
-    });
-  }
-
-  return client;
-}
+import { updateMemberProfile, getClients, createClient, updateClient, getCountryFromPhone, getOrCreateClient } from "../../../../lib/db";
 
 export async function PUT(req) {
   try {

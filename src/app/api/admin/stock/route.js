@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getStock, addStockItems, deleteStockItem } from "../../../../lib/db";
+import { getFamilyAccounts, getMemberProfiles, updateMemberProfile, createFamilyAccount, createMemberProfile } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -9,8 +9,31 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const stock = await getStock();
-    return NextResponse.json(stock, { status: 200 });
+    const accounts = await getFamilyAccounts();
+    const profiles = await getMemberProfiles();
+
+    // Filter profiles that are free to represent available stock
+    const freeProfiles = profiles
+      .filter(p => p.status === "free")
+      .map(p => {
+        const parent = accounts.find(acc => {
+          const accId = (acc._id || acc.id).toString();
+          const pAcc = p.familyAccountId;
+          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
+          return pAccId === accId;
+        });
+        
+        return {
+          id: p._id || p.id,
+          service: parent ? parent.service : "unknown",
+          accountData: `${p.memberEmail}:${p.memberPassword}`,
+          familyMasterEmail: parent ? parent.masterEmail : "No anotado",
+          isUsed: false,
+          createdAt: p.updatedAt || new Date().toISOString()
+        };
+      });
+
+    return NextResponse.json(freeProfiles, { status: 200 });
   } catch (error) {
     console.error("Fetch Stock Error:", error);
     return NextResponse.json({ message: `Error al cargar el stock: ${error.message}` }, { status: 500 });
@@ -40,28 +63,19 @@ export async function POST(req) {
       if (!trimmed) return; // Skip empty lines
 
       let accountData = "";
-      
-      // Attempt to split by tab (pasted from Google Sheets), comma, semicolon, or colon
       const parts = trimmed.split(/\t|,|;|:/);
       
       if (parts.length >= 2) {
-        // Extract first two columns (e.g. Email and Password)
         const col1 = parts[0].trim();
         const col2 = parts[1].trim();
         accountData = `${col1}:${col2}`;
       } else {
-        // Fallback for single value code/key
         accountData = trimmed;
       }
 
       if (accountData) {
         newItems.push({
-          id: `STK-${Math.floor(100000 + Math.random() * 900000)}`,
-          service,
-          accountData,
-          isUsed: false,
-          assignedToOrder: null,
-          createdAt: new Date().toISOString()
+          accountData
         });
       }
     });
@@ -70,13 +84,98 @@ export async function POST(req) {
       return NextResponse.json({ message: "No se encontraron cuentas válidas para importar." }, { status: 400 });
     }
 
-    // Save to DB
-    await addStockItems(newItems);
+    // 1. Get all family accounts and profiles
+    const accounts = await getFamilyAccounts();
+    const profiles = await getMemberProfiles();
+    const serviceAccounts = accounts.filter(acc => acc.service === service);
+    
+    // Find free slots of this service
+    const freeSlots = [];
+    profiles.forEach(p => {
+      if (p.status === "free") {
+        const parent = serviceAccounts.find(acc => {
+          const accId = (acc._id || acc.id).toString();
+          const pAcc = p.familyAccountId;
+          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
+          return pAccId === accId;
+        });
+        if (parent) {
+          freeSlots.push(p);
+        }
+      }
+    });
+
+    let slotsUpdated = 0;
+    let familiesCreated = 0;
+
+    for (let i = 0; i < newItems.length; i++) {
+      const item = newItems[i];
+      const parts = item.accountData.split(":");
+      const email = parts[0];
+      const password = parts[1] || "password123";
+
+      if (slotsUpdated < freeSlots.length) {
+        // Update credentials of an existing free slot
+        const targetSlot = freeSlots[slotsUpdated];
+        const pId = targetSlot._id || targetSlot.id;
+        await updateMemberProfile(pId, {
+          memberEmail: email,
+          memberPassword: password,
+          emailType: "admin",
+          status: "free"
+        });
+        slotsUpdated++;
+      } else {
+        // Create a new family account to hold this slot and 4 other default slots
+        const dummyMasterEmail = `familiar_autocreado_${Math.floor(1000 + Math.random() * 9000)}@webmusicapremium.com`;
+        const dummyPassword = Math.random().toString(36).substring(2, 10);
+
+        const newAcc = await createFamilyAccount({
+          service,
+          masterEmail: dummyMasterEmail,
+          password: dummyPassword,
+          notes: "Creado automáticamente al importar stock bulk."
+        });
+        familiesCreated++;
+
+        const accId = newAcc._id || newAcc.id;
+
+        // Generate 5 slots for this new family account
+        for (let j = 1; j <= 5; j++) {
+          let slotEmail = `${j}_perfil_${dummyMasterEmail}`;
+          let slotPassword = dummyPassword;
+
+          // If we still have pasted accounts in this iteration, use one!
+          if (i < newItems.length && j === 1) {
+            slotEmail = email;
+            slotPassword = password;
+          } else if (i + 1 < newItems.length) {
+            i++;
+            const nextItem = newItems[i];
+            const nextParts = nextItem.accountData.split(":");
+            slotEmail = nextParts[0];
+            slotPassword = nextParts[1] || "password123";
+          }
+
+          await createMemberProfile({
+            familyAccountId: accId,
+            clientId: null,
+            memberEmail: slotEmail,
+            emailType: "admin",
+            memberPassword: slotPassword,
+            pricePen: 0,
+            renewalDate: null,
+            status: "free"
+          });
+        }
+        slotsUpdated++;
+      }
+    }
 
     return NextResponse.json({
       success: true,
       count: newItems.length,
-      message: `Se importaron con éxito ${newItems.length} cuentas de ${service.toUpperCase()}.`
+      message: `Se importaron con éxito ${newItems.length} cuentas de ${service.toUpperCase()}. Se actualizaron ranuras libres y se crearon ${familiesCreated} nuevos grupos familiares.`
     }, { status: 201 });
 
   } catch (error) {
@@ -92,13 +191,12 @@ export async function DELETE(req) {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const { id } = await req.json();
-    if (!id) {
-      return NextResponse.json({ message: "ID de stock requerido." }, { status: 400 });
-    }
-
-    await deleteStockItem(id);
-    return NextResponse.json({ success: true, message: "Cuenta de stock eliminada." }, { status: 200 });
+    // Deleting a slot from stock isn't supported since they must belong to family accounts.
+    // The admin can manage/delete slots by managing their parent family account or modifying the slot to "free".
+    return NextResponse.json({ 
+      success: true, 
+      message: "Las ranuras de stock derivan de planes familiares. Para eliminarlas o modificarlas, por favor edítalas en la pestaña 'Clientes y Familias'." 
+    }, { status: 200 });
   } catch (error) {
     console.error("Delete Stock Error:", error);
     return NextResponse.json({ message: `Error al eliminar la cuenta de stock: ${error.message}` }, { status: 500 });

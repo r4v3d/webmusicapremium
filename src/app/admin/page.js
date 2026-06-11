@@ -394,25 +394,14 @@ export default function AdminDashboardPage() {
 
   // Delete account from stock
   const handleDeleteStock = async (id) => {
-    if (!confirm("¿Seguro que deseas eliminar esta cuenta del inventario?")) return;
-
     try {
       const res = await fetch("/api/admin/stock", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id })
       });
-      if (res.ok) {
-        setStock(prev => prev.filter(item => item.id !== id));
-        // Refresh stats
-        const statsRes = await fetch("/api/admin/stats");
-        if (statsRes.ok) {
-          const statsData = await statsRes.json();
-          setStats(statsData);
-        }
-      } else {
-        alert("Error al eliminar la cuenta.");
-      }
+      const data = await res.json();
+      alert(data.message || "Las ranuras de stock derivan de planes familiares y se gestionan desde allí.");
     } catch (e) {
       console.error(e);
     }
@@ -1044,6 +1033,11 @@ export default function AdminDashboardPage() {
 
                     <div className="stock-card-content">
                       <code>{item.accountData}</code>
+                      {item.familyMasterEmail && (
+                        <div style={{ fontSize: '0.75rem', marginTop: '6px', color: 'var(--text-muted)' }}>
+                          Plan Familiar: <strong>{item.familyMasterEmail}</strong>
+                        </div>
+                      )}
                       {item.assignedToOrder && (
                         <span className="assigned-order-tag">Orden: #{item.assignedToOrder}</span>
                       )}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getOrders, getStock } from "../../../../lib/db";
+import { getOrders, getFamilyAccounts, getMemberProfiles } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -10,7 +10,8 @@ export async function GET() {
     }
 
     const orders = await getOrders();
-    const stock = await getStock();
+    const accounts = await getFamilyAccounts();
+    const profiles = await getMemberProfiles();
 
     // Calculate order metrics
     const totalOrders = orders.length;
@@ -36,12 +37,22 @@ export async function GET() {
       }
     });
 
-    // Calculate stock metrics (count unused accounts by service)
-    const activeStock = {
-      tidal: stock.filter(item => item.service === "tidal" && !item.isUsed).length,
-      deezer: stock.filter(item => item.service === "deezer" && !item.isUsed).length,
-      qobuz: stock.filter(item => item.service === "qobuz" && !item.isUsed).length
-    };
+    // Calculate stock metrics (count free slots grouped by their parent family account service)
+    const activeStock = { tidal: 0, deezer: 0, qobuz: 0 };
+    
+    profiles.forEach(p => {
+      if (p.status === "free") {
+        const parent = accounts.find(acc => {
+          const accId = (acc._id || acc.id).toString();
+          const pAcc = p.familyAccountId;
+          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
+          return pAccId === accId;
+        });
+        if (parent && activeStock[parent.service] !== undefined) {
+          activeStock[parent.service]++;
+        }
+      }
+    });
 
     return NextResponse.json({
       totalOrders,
