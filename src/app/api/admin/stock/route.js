@@ -159,6 +159,7 @@ export async function POST(req) {
 
           await createMemberProfile({
             familyAccountId: accId,
+            slotNumber: j,
             clientId: null,
             memberEmail: slotEmail,
             emailType: "admin",

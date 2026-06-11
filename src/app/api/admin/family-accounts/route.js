@@ -61,6 +61,7 @@ export async function POST(req) {
     for (let i = 1; i <= 5; i++) {
       await createMemberProfile({
         familyAccountId: accId,
+        slotNumber: i,
         clientId: null,
         memberEmail: "", // Empty to indicate an unconfigured cupo
         emailType: "admin",

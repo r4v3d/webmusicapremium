@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import mongoose from "mongoose";
-import { initDb } from "../../../../lib/db";
+import { supabase } from "../../../../lib/db";
 
 export async function GET(req) {
   try {
@@ -10,39 +9,42 @@ export async function GET(req) {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    await initDb();
-    
-    let rawAccounts = [];
-    let connectionState = mongoose.connection.readyState;
-    
     const { searchParams } = new URL(req.url);
     const cleanEmail = searchParams.get("cleanEmail");
     let cleanedResult = null;
 
-    if (mongoose.connection.readyState >= 1) {
-      const colAccounts = mongoose.connection.db.collection("familyaccounts");
-      const colProfiles = mongoose.connection.db.collection("memberprofiles");
+    if (cleanEmail) {
+      // Find the account first
+      const { data: doc } = await supabase
+        .from("platform_accounts")
+        .select("id")
+        .eq("account_email", cleanEmail.trim())
+        .maybeSingle();
 
-      if (cleanEmail) {
-        // Find and delete the matching email to resolve index locks
-        const doc = await colAccounts.findOne({ masterEmail: cleanEmail.trim() });
-        if (doc) {
-          await colAccounts.deleteOne({ _id: doc._id });
-          await colProfiles.deleteMany({ familyAccountId: doc._id });
-          cleanedResult = { email: cleanEmail, id: doc._id, deleted: true };
-        } else {
-          cleanedResult = { email: cleanEmail, deleted: false, reason: "No se encontró ningún registro con este correo" };
-        }
+      if (doc) {
+        // Delete the family account (ON DELETE CASCADE will clear slots)
+        const { error } = await supabase
+          .from("platform_accounts")
+          .delete()
+          .eq("id", doc.id);
+
+        if (error) throw error;
+        cleanedResult = { email: cleanEmail, id: doc.id, deleted: true };
+      } else {
+        cleanedResult = { email: cleanEmail, deleted: false, reason: "No se encontró ningún registro con este correo en Supabase" };
       }
-
-      rawAccounts = await colAccounts.find().toArray();
     }
 
+    // Query all family accounts to list
+    const { data: rawAccounts } = await supabase
+      .from("platform_accounts")
+      .select("*");
+
     return NextResponse.json({
-      connectionState,
+      connectionState: "Supabase Connected",
       cleanedResult,
-      rawAccountsCount: rawAccounts.length,
-      rawAccounts
+      rawAccountsCount: (rawAccounts || []).length,
+      rawAccounts: rawAccounts || []
     }, { status: 200 });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
