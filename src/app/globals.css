@@ -3016,25 +3016,50 @@ a {
 
 /* --- ADMIN PANEL: FAMILY ACCOUNTS & CLIENTS UI --- */
 .families-grid-layout {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 24px;
   margin-top: 24px;
 }
 
 .family-card {
   display: flex;
+  flex-direction: row;
+  gap: 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  transition: all 0.3s ease;
+}
+
+@media (max-width: 1024px) {
+  .family-card {
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+}
+
+.family-info-col {
+  flex: 0 0 300px;
+  display: flex;
   flex-direction: column;
-  height: 100%;
+}
+
+@media (max-width: 1024px) {
+  .family-info-col {
+    flex: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 16px;
+  }
 }
 
 .family-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  padding-bottom: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .family-brand-info {
@@ -3052,10 +3077,9 @@ a {
 
 .family-master-credentials {
   font-size: 0.85rem;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 16px;
+  padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -3063,7 +3087,7 @@ a {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .cred-row:last-child {
@@ -3104,20 +3128,40 @@ a {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.family-slots-list {
+.family-slots-col {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  flex-grow: 1;
+  gap: 12px;
+}
+
+.family-slots-row-layout {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 1400px) {
+  .family-slots-row-layout {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .family-slots-row-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .slot-item-row {
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 12px;
+  min-height: 180px;
   transition: all 0.2s ease;
 }
 

@@ -701,85 +701,83 @@ export default function AdminDashboardPage() {
                       const accId = acc._id || acc.id;
                       return (
                         <div key={accId} className="family-card glass-panel border-purple">
-                          <div className="family-card-header">
-                            <div className="family-brand-info">
-                              <span className={`badge-service badge-${acc.service} family-service-tag`}>
-                                {acc.service}
-                              </span>
-                              <strong style={{ color: '#fff' }}>Familiar</strong>
+                          <div className="family-info-col">
+                            <div className="family-card-header">
+                              <div className="family-brand-info">
+                                <span className={`badge-service badge-${acc.service} family-service-tag`}>
+                                  {acc.service}
+                                </span>
+                                <strong style={{ color: '#fff' }}>Familiar</strong>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteFamily(accId, acc.masterEmail)}
+                                className="btn-delete-stock"
+                                style={{ padding: '4px', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
+                                title="Eliminar Cuenta Familiar"
+                              >
+                                <TrashIcon />
+                              </button>
                             </div>
-                            <button
-                              onClick={() => handleDeleteFamily(accId, acc.masterEmail)}
-                              className="btn-delete-stock"
-                              style={{ padding: '4px', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}
-                              title="Eliminar Cuenta Familiar"
-                            >
-                              <TrashIcon />
-                            </button>
+
+                            <div className="family-master-credentials">
+                              <div className="cred-row">
+                                <span className="cred-label">Correo Dueño:</span>
+                                <div className="cred-value-wrap">
+                                  <span className="cred-value">{acc.masterEmail}</span>
+                                  <button
+                                    onClick={() => handleCopyToClipboard(acc.masterEmail, `master-email-${accId}`)}
+                                    className="btn-mini-copy"
+                                    title="Copiar correo dueño"
+                                  >
+                                    <CopyIcon />
+                                    <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
+                                      {copiedId === `master-email-${accId}` ? "Copied" : ""}
+                                    </span>
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="cred-row">
+                                <span className="cred-label">Clave Maestro:</span>
+                                <div className="cred-value-wrap">
+                                  <span className="cred-value">{acc.password}</span>
+                                  <button
+                                    onClick={() => handleCopyToClipboard(acc.password, `master-pass-${accId}`)}
+                                    className="btn-mini-copy"
+                                    title="Copiar clave maestro"
+                                  >
+                                    <CopyIcon />
+                                    <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
+                                      {copiedId === `master-pass-${accId}` ? "Copied" : ""}
+                                    </span>
+                                  </button>
+                                </div>
+                              </div>
+                              {acc.notes && (
+                                <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
+                                  <strong>Notas:</strong> {acc.notes}
+                                </div>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="family-master-credentials">
-                            <div className="cred-row">
-                              <span className="cred-label">Correo Dueño:</span>
-                              <div className="cred-value-wrap">
-                                <span className="cred-value">{acc.masterEmail}</span>
-                                <button
-                                  onClick={() => handleCopyToClipboard(acc.masterEmail, `master-email-${accId}`)}
-                                  className="btn-mini-copy"
-                                  title="Copiar correo dueño"
-                                >
-                                  <CopyIcon />
-                                  <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
-                                    {copiedId === `master-email-${accId}` ? "Copied" : ""}
-                                  </span>
-                                </button>
-                              </div>
-                            </div>
-                            <div className="cred-row">
-                              <span className="cred-label">Clave Maestro:</span>
-                              <div className="cred-value-wrap">
-                                <span className="cred-value">{acc.password}</span>
-                                <button
-                                  onClick={() => handleCopyToClipboard(acc.password, `master-pass-${accId}`)}
-                                  className="btn-mini-copy"
-                                  title="Copiar clave maestro"
-                                >
-                                  <CopyIcon />
-                                  <span style={{ fontSize: '0.65rem', marginLeft: '2px' }}>
-                                    {copiedId === `master-pass-${accId}` ? "Copied" : ""}
-                                  </span>
-                                </button>
-                              </div>
-                            </div>
-                            {acc.notes && (
-                              <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '6px' }}>
-                                <strong>Notas:</strong> {acc.notes}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="family-slots-list">
+                          <div className="family-slots-col">
                             <h4 style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px' }}>Ranuras (Max 5 miembros)</h4>
-                            {acc.profiles && acc.profiles.map((p) => {
-                              const pId = p._id || p.id;
-                              const statusNames = {
-                                active: "Activo",
-                                expired: "Vencido",
-                                pending_payment: "Falta Pago",
-                                free: "Disponible"
-                              };
+                            <div className="family-slots-row-layout">
+                              {acc.profiles && acc.profiles.map((p) => {
+                                const pId = p._id || p.id;
+                                const statusNames = {
+                                  active: "Activo",
+                                  expired: "Vencido",
+                                  pending_payment: "Falta Pago",
+                                  free: "Disponible"
+                                };
                                 return (
                                   <div key={pId} className="slot-item-row">
                                     <div className="slot-row-header">
-                                      <div className="slot-email-wrap">
-                                        <span className="slot-email-text" title={p.memberEmail || "Cupo Disponible"}>
-                                          {p.memberEmail ? p.memberEmail : "Cupo Disponible / Libre"}
+                                      <div className="slot-email-wrap" style={{ width: '100%', justifyContent: 'space-between' }}>
+                                        <span className="slot-email-text" title={p.memberEmail || "Cupo Disponible"} style={{ maxWidth: '75%' }}>
+                                          {p.memberEmail ? p.memberEmail : "Cupo Disponible"}
                                         </span>
-                                        {p.memberEmail && (
-                                          <span className={`slot-badge-email-type ${p.emailType}`}>
-                                            {p.emailType === "admin" ? "Propio" : "Cliente"}
-                                          </span>
-                                        )}
                                         {p.memberEmail && (
                                           <button
                                             onClick={() => handleCopyToClipboard(p.memberEmail, `slot-email-${pId}`)}
@@ -790,57 +788,67 @@ export default function AdminDashboardPage() {
                                           </button>
                                         )}
                                       </div>
-                                      <span className={`status-badge-mini ${p.status}`}>{statusNames[p.status] || p.status}</span>
                                     </div>
-  
+
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0' }}>
+                                      {p.memberEmail && (
+                                        <span className={`slot-badge-email-type ${p.emailType}`} style={{ fontSize: '0.55rem' }}>
+                                          {p.emailType === "admin" ? "Propio" : "Cliente"}
+                                        </span>
+                                      )}
+                                      <span className={`status-badge-mini ${p.status}`} style={{ fontSize: '0.55rem' }}>{statusNames[p.status] || p.status}</span>
+                                    </div>
+    
                                     {p.status !== "free" && p.clientId && (
-                                      <div className="slot-client-info">
-                                        <span className="client-name-tag">👤 {p.clientId.nickname || "Sin apodo"}</span>
+                                      <div className="slot-client-info" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '2px' }}>
+                                        <span className="client-name-tag" style={{ fontSize: '0.75rem' }}>👤 {p.clientId.nickname || "Sin apodo"}</span>
                                         <a
                                           href={`https://wa.me/${p.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="client-phone-link"
+                                          style={{ fontSize: '0.75rem' }}
                                         >
                                           {getCountryFlag(p.clientId.currentWhatsApp)} {p.clientId.currentWhatsApp}
                                         </a>
                                       </div>
                                     )}
-  
-                                    <div className="slot-item-footer">
+    
+                                    <div className="slot-item-footer" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '2px', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '4px', marginTop: '4px' }}>
                                       {p.memberPassword ? (
-                                        <span>Clave: <code>{p.memberPassword}</code>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                          <span style={{ fontSize: '0.7rem' }}>Clave: <code>{p.memberPassword}</code></span>
                                           <button
                                             onClick={() => handleCopyToClipboard(p.memberPassword, `slot-pass-${pId}`)}
                                             className="btn-mini-copy"
-                                            style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle' }}
                                             title="Copiar clave"
                                           >
                                             <CopyIcon />
                                           </button>
-                                        </span>
+                                        </div>
                                       ) : (
-                                        <span style={{ color: 'var(--text-muted)' }}>Sin credenciales asignadas</span>
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Sin clave</span>
                                       )}
                                       {p.status !== "free" && (
-                                        <span>
-                                          S/. {p.pricePen}
-                                          {p.renewalDate && ` | Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
+                                        <span style={{ fontSize: '0.7rem', alignSelf: 'flex-end', color: 'var(--accent-cyan)' }}>
+                                          S/. {p.pricePen} {p.renewalDate && `| Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
                                         </span>
                                       )}
                                     </div>
 
-                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
-                                    <button
-                                      onClick={() => handleOpenEditSlotModal(p)}
-                                      className="btn-slot-edit"
-                                    >
-                                      Editar Ranura
-                                    </button>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                                      <button
+                                        onClick={() => handleOpenEditSlotModal(p)}
+                                        className="btn-slot-edit"
+                                        style={{ width: '100%', padding: '4px 8px', fontSize: '0.7rem', textAlign: 'center' }}
+                                      >
+                                        Editar Ranura
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       );
