@@ -120,6 +120,15 @@ export default function OrderPage() {
         throw new Error(data.message || "Error al procesar el pedido.");
       }
 
+      // Save order details to localStorage to allow recovery if they close/go back by accident
+      localStorage.setItem("pendingCheckoutOrder", JSON.stringify({
+        orderId: data.orderId,
+        serviceName: serviceData.name,
+        planName: selectedPlan.duration,
+        price: paymentMethod === "binance_pay" ? `$ ${selectedPlan.priceUsd} USDT` : selectedPlan.pricePen,
+        createdAt: Date.now()
+      }));
+
       // Redirect to checkout page
       router.push(`/checkout/${data.orderId}`);
     } catch (err) {

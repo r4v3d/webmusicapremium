@@ -1,5 +1,6 @@
 import { Epilogue, Mulish } from "next/font/google";
 import "./globals.css";
+import PendingOrderBanner from "../components/PendingOrderBanner";
 
 const epilogue = Epilogue({
   subsets: ["latin"],
@@ -34,6 +35,7 @@ export default function RootLayout({ children }) {
         <div className="main-layout-wrapper">
           {children}
         </div>
+        <PendingOrderBanner />
       </body>
     </html>
   );

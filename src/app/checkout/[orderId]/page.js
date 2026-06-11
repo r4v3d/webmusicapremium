@@ -66,9 +66,18 @@ export default function CheckoutPage() {
       const data = await response.json();
       setOrder(data);
       
-      // If payment is already completed or failed, stop timer
+      // If payment is already completed, failed or expired, stop timer and clear localStorage
       if (data.status !== "pending") {
         setTimerActive(false);
+        const saved = localStorage.getItem("pendingCheckoutOrder");
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed.orderId === orderId) {
+              localStorage.removeItem("pendingCheckoutOrder");
+            }
+          } catch (e) {}
+        }
       }
     } catch (err) {
       setError(err.message);
@@ -121,6 +130,15 @@ export default function CheckoutPage() {
         setOrder(data.order);
         if (newStatus !== "pending") {
           setTimerActive(false);
+          const saved = localStorage.getItem("pendingCheckoutOrder");
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed.orderId === orderId) {
+                localStorage.removeItem("pendingCheckoutOrder");
+              }
+            } catch (e) {}
+          }
         }
       }
     } catch (err) {
