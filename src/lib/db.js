@@ -488,19 +488,7 @@ export async function getOrCreateClient(whatsapp, nickname, email) {
     customerId = matchedContacts[0].customer_id;
   }
 
-  // Look by email
-  if (!customerId && email) {
-    const cleanEmail = email.trim().toLowerCase();
-    const { data: emailContacts } = await supabase
-      .from("customer_contacts")
-      .select("customer_id")
-      .eq("contact_type", "email")
-      .eq("normalized_value", cleanEmail);
 
-    if (emailContacts && emailContacts.length > 0) {
-      customerId = emailContacts[0].customer_id;
-    }
-  }
 
   if (customerId) {
     const updatedFields = {};
