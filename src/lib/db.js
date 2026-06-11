@@ -304,12 +304,12 @@ export async function assignStockAccount(orderId, service) {
   let assignedProfile = null;
 
   if (IS_MONGO) {
-    const profiles = await MongoMemberProfile.find({ status: "free" }).populate("familyAccountId");
+    const profiles = await MongoMemberProfile.find({ status: "free", memberEmail: { $ne: "" } }).populate("familyAccountId");
     assignedProfile = profiles.find(p => p.familyAccountId && p.familyAccountId.service === service);
   } else {
     const db = readLocalDb();
     if (db.memberProfiles) {
-      const freeProfiles = Object.values(db.memberProfiles).filter(p => p.status === "free");
+      const freeProfiles = Object.values(db.memberProfiles).filter(p => p.status === "free" && p.memberEmail);
       assignedProfile = freeProfiles.find(p => {
         const parent = db.familyAccounts && db.familyAccounts[p.familyAccountId];
         return parent && parent.service === service;

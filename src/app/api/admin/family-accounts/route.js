@@ -62,9 +62,9 @@ export async function POST(req) {
       await createMemberProfile({
         familyAccountId: accId,
         clientId: null,
-        memberEmail: `${i}_perfil_${masterEmail}`, // Default suggestion
+        memberEmail: "", // Empty to indicate an unconfigured cupo
         emailType: "admin",
-        memberPassword: password, // Default password
+        memberPassword: "", // Empty to indicate an unconfigured cupo
         pricePen: 0,
         renewalDate: null,
         status: "free"

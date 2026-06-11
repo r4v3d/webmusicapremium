@@ -768,57 +768,67 @@ export default function AdminDashboardPage() {
                                 pending_payment: "Falta Pago",
                                 free: "Disponible"
                               };
-                              return (
-                                <div key={pId} className="slot-item-row">
-                                  <div className="slot-row-header">
-                                    <div className="slot-email-wrap">
-                                      <span className="slot-email-text" title={p.memberEmail}>{p.memberEmail}</span>
-                                      <span className={`slot-badge-email-type ${p.emailType}`}>
-                                        {p.emailType === "admin" ? "Propio" : "Cliente"}
-                                      </span>
-                                      <button
-                                        onClick={() => handleCopyToClipboard(p.memberEmail, `slot-email-${pId}`)}
-                                        className="btn-mini-copy"
-                                        title="Copiar correo ranura"
-                                      >
-                                        <CopyIcon />
-                                      </button>
+                                return (
+                                  <div key={pId} className="slot-item-row">
+                                    <div className="slot-row-header">
+                                      <div className="slot-email-wrap">
+                                        <span className="slot-email-text" title={p.memberEmail || "Cupo Disponible"}>
+                                          {p.memberEmail ? p.memberEmail : "Cupo Disponible / Libre"}
+                                        </span>
+                                        {p.memberEmail && (
+                                          <span className={`slot-badge-email-type ${p.emailType}`}>
+                                            {p.emailType === "admin" ? "Propio" : "Cliente"}
+                                          </span>
+                                        )}
+                                        {p.memberEmail && (
+                                          <button
+                                            onClick={() => handleCopyToClipboard(p.memberEmail, `slot-email-${pId}`)}
+                                            className="btn-mini-copy"
+                                            title="Copiar correo ranura"
+                                          >
+                                            <CopyIcon />
+                                          </button>
+                                        )}
+                                      </div>
+                                      <span className={`status-badge-mini ${p.status}`}>{statusNames[p.status] || p.status}</span>
                                     </div>
-                                    <span className={`status-badge-mini ${p.status}`}>{statusNames[p.status] || p.status}</span>
-                                  </div>
-
-                                  {p.status !== "free" && p.clientId && (
-                                    <div className="slot-client-info">
-                                      <span className="client-name-tag">👤 {p.clientId.nickname || "Sin apodo"}</span>
-                                      <a
-                                        href={`https://wa.me/${p.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="client-phone-link"
-                                      >
-                                        {getCountryFlag(p.clientId.currentWhatsApp)} {p.clientId.currentWhatsApp}
-                                      </a>
-                                    </div>
-                                  )}
-
-                                  <div className="slot-item-footer">
-                                    <span>Clave: <code>{p.memberPassword}</code>
-                                      <button
-                                        onClick={() => handleCopyToClipboard(p.memberPassword, `slot-pass-${pId}`)}
-                                        className="btn-mini-copy"
-                                        style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle' }}
-                                        title="Copiar clave"
-                                      >
-                                        <CopyIcon />
-                                      </button>
-                                    </span>
-                                    {p.status !== "free" && (
-                                      <span>
-                                        S/. {p.pricePen}
-                                        {p.renewalDate && ` | Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
-                                      </span>
+  
+                                    {p.status !== "free" && p.clientId && (
+                                      <div className="slot-client-info">
+                                        <span className="client-name-tag">👤 {p.clientId.nickname || "Sin apodo"}</span>
+                                        <a
+                                          href={`https://wa.me/${p.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="client-phone-link"
+                                        >
+                                          {getCountryFlag(p.clientId.currentWhatsApp)} {p.clientId.currentWhatsApp}
+                                        </a>
+                                      </div>
                                     )}
-                                  </div>
+  
+                                    <div className="slot-item-footer">
+                                      {p.memberPassword ? (
+                                        <span>Clave: <code>{p.memberPassword}</code>
+                                          <button
+                                            onClick={() => handleCopyToClipboard(p.memberPassword, `slot-pass-${pId}`)}
+                                            className="btn-mini-copy"
+                                            style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle' }}
+                                            title="Copiar clave"
+                                          >
+                                            <CopyIcon />
+                                          </button>
+                                        </span>
+                                      ) : (
+                                        <span style={{ color: 'var(--text-muted)' }}>Sin credenciales asignadas</span>
+                                      )}
+                                      {p.status !== "free" && (
+                                        <span>
+                                          S/. {p.pricePen}
+                                          {p.renewalDate && ` | Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
+                                        </span>
+                                      )}
+                                    </div>
 
                                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
                                     <button
