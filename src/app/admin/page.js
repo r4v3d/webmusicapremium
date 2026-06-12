@@ -85,10 +85,16 @@ export default function AdminDashboardPage() {
   const [orders, setOrders] = useState([]);
   const [stock, setStock] = useState([]);
   
-  // Tab control: "orders", "stock", "import", "families"
+  // Tab control: "orders", "stock", "import", "families", "payments"
   const [activeTab, setActiveTab] = useState("orders");
   const [loading, setLoading] = useState(true);
   const [dbError, setDbError] = useState("");
+
+  // Customer payments state
+  const [payments, setPayments] = useState([]);
+  const [actionPaymentId, setActionPaymentId] = useState("");
+  const [rejectNotesModal, setRejectNotesModal] = useState({ show: false, paymentId: "" });
+  const [rejectNotesInput, setRejectNotesInput] = useState("");
 
   // Families & Clients state
   const [familyAccounts, setFamilyAccounts] = useState([]);
@@ -279,12 +285,50 @@ export default function AdminDashboardPage() {
         setFamilyAccounts(familiesData);
       }
 
+      // Fetch customer payments
+      const paymentsRes = await fetch("/api/admin/payments");
+      if (paymentsRes.ok) {
+        const paymentsData = await paymentsRes.json();
+        if (paymentsData.success) {
+          setPayments(paymentsData.payments);
+        }
+      }
+
     } catch (error) {
       console.error(error);
       setDbError(error.message || "Error al cargar la información.");
     } finally {
       setLoading(false);
       setIsFamiliesLoading(false);
+    }
+  };
+
+  const handleProcessPayment = async (paymentId, action, notes = "") => {
+    setActionPaymentId(paymentId);
+    try {
+      const res = await fetch("/api/admin/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentId,
+          action,
+          notes,
+          monthsToAdd: 1
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Error al procesar pago");
+      }
+      alert(data.message);
+      // Reload everything
+      await loadData();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setActionPaymentId("");
+      setRejectNotesModal({ show: false, paymentId: "" });
+      setRejectNotesInput("");
     }
   };
 
@@ -802,7 +846,7 @@ export default function AdminDashboardPage() {
         )}
 
         {/* TAB CONTROLS */}
-        <nav className="admin-tabs-nav glass-panel">
+        <nav className="admin-tabs-nav glass-panel" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           <button
             onClick={() => setActiveTab("orders")}
             className={`tab-btn ${activeTab === "orders" ? "active" : ""}`}
@@ -833,6 +877,27 @@ export default function AdminDashboardPage() {
             className={`tab-btn ${activeTab === "renewals" ? "active" : ""}`}
           >
             <span>PAGO RENOVACIONES</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("payments")}
+            className={`tab-btn ${activeTab === "payments" ? "active" : ""}`}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>Validar Pagos</span>
+            {payments.filter(p => p.status === "pending").length > 0 && (
+              <span style={{ 
+                background: '#ef4444', 
+                color: '#fff', 
+                padding: '2.5px 6px', 
+                borderRadius: '9999px', 
+                fontSize: '10px', 
+                fontWeight: 'bold',
+                lineHeight: '1',
+                display: 'inline-block'
+              }}>
+                {payments.filter(p => p.status === "pending").length}
+              </span>
+            )}
           </button>
         </nav>
 
@@ -2146,6 +2211,172 @@ export default function AdminDashboardPage() {
               </div>
             </section>
           )})()}
+
+        {/* TAB 6: CUSTOMER PAYMENTS VALIDATION */}
+        {activeTab === "payments" && (() => {
+          return (
+            <section className="payments-section animate-fade-in" style={{ paddingBottom: '30px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <div>
+                  <h2 style={{ marginBottom: '4px' }}>Validar Pagos de Clientes</h2>
+                  <p className="section-instruction">
+                    Revisa los comprobantes de pago subidos por tus clientes y confirma o rechaza las renovaciones de sus cupos.
+                  </p>
+                </div>
+              </div>
+
+              {payments.length === 0 ? (
+                <div className="empty-panel glass-panel text-center" style={{ padding: '40px' }}>
+                  <p style={{ color: 'var(--text-muted)' }}>No se han reportado pagos de clientes todavía.</p>
+                </div>
+              ) : (
+                <div className="payments-list-wrapper glass-panel" style={{ overflow: 'hidden', padding: '15px' }}>
+                  <div className="table-responsive" style={{ overflowX: 'auto' }}>
+                    <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                          <th style={{ padding: '12px 10px' }}>Cliente</th>
+                          <th style={{ padding: '12px 10px' }}>Servicio</th>
+                          <th style={{ padding: '12px 10px' }}>Monto</th>
+                          <th style={{ padding: '12px 10px' }}>Método</th>
+                          <th style={{ padding: '12px 10px' }}>Comprobante</th>
+                          <th style={{ padding: '12px 10px' }}>Detalles / Operación</th>
+                          <th style={{ padding: '12px 10px' }}>Fecha</th>
+                          <th style={{ padding: '12px 10px' }}>Estado</th>
+                          <th style={{ padding: '12px 10px', textAlign: 'center' }}>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payments.map((p) => {
+                          const isPending = p.status === "pending";
+                          const isConfirmed = p.status === "confirmed";
+                          const isRejected = p.status === "rejected";
+
+                          let statusStyle = { color: '#eab308', background: 'rgba(234, 179, 8, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
+                          let statusText = "Pendiente";
+
+                          if (isConfirmed) {
+                            statusStyle = { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
+                            statusText = "Confirmado";
+                          } else if (isRejected) {
+                            statusStyle = { color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
+                            statusText = "Rechazado";
+                          }
+
+                          return (
+                            <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
+                              <td style={{ padding: '12px 10px' }}>
+                                <strong style={{ color: '#fff', display: 'block' }}>{p.clientName}</strong>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{p.clientCode}</span>
+                              </td>
+                              <td style={{ padding: '12px 10px', textTransform: 'capitalize' }}>
+                                <span className={`platform-badge ${p.service}`} style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                  {p.service}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 10px', fontWeight: 'bold', color: '#fff' }}>
+                                S/. {p.amount.toFixed(2)}
+                              </td>
+                              <td style={{ padding: '12px 10px', textTransform: 'uppercase', fontSize: '0.75rem' }}>
+                                {p.paymentMethod}
+                              </td>
+                              <td style={{ padding: '12px 10px' }}>
+                                {p.proofUrl ? (
+                                  <a 
+                                    href={p.proofUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}
+                                  >
+                                    <img 
+                                      src={p.proofUrl} 
+                                      alt="Comprobante" 
+                                      style={{ width: '35px', height: '35px', objectFit: 'cover', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)' }} 
+                                    />
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', textDecoration: 'underline' }}>Ver captura</span>
+                                  </a>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Sin captura</span>
+                                )}
+                              </td>
+                              <td style={{ padding: '12px 10px', fontSize: '0.75rem', color: '#ccc', maxWidth: '180px', wordBreak: 'break-word' }}>
+                                {p.notes || "-"}
+                              </td>
+                              <td style={{ padding: '12px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {new Date(p.createdAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td style={{ padding: '12px 10px' }}>
+                                <span style={statusStyle}>{statusText}</span>
+                              </td>
+                              <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                                {isPending ? (
+                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                    <button
+                                      onClick={() => handleProcessPayment(p.id, "confirm")}
+                                      className="btn btn-primary"
+                                      style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '4px', background: 'var(--green-theme, #10b981)', border: 'none' }}
+                                      disabled={actionPaymentId === p.id}
+                                    >
+                                      {actionPaymentId === p.id ? "..." : "Aprobar"}
+                                    </button>
+                                    <button
+                                      onClick={() => setRejectNotesModal({ show: true, paymentId: p.id })}
+                                      className="btn btn-secondary"
+                                      style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '4px', borderColor: '#ef4444', color: '#ef4444' }}
+                                      disabled={actionPaymentId === p.id}
+                                    >
+                                      Rechazar
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Procesado</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Reject Notes Modal */}
+              {rejectNotesModal.show && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                  <div className="glass-panel p-6" style={{ maxWidth: '400px', width: '100%', margin: '0 15px', background: '#0f0f13', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px' }}>
+                    <h3 style={{ marginBottom: '8px', color: '#fff' }}>Rechazar Pago</h3>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '15px', lineHeight: '1.4' }}>
+                      Ingresa el motivo del rechazo. El cliente podrá verlo en su panel para volver a reportarlo con los datos correctos.
+                    </p>
+                    <textarea
+                      style={{ width: '100%', height: '100px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px', fontSize: '0.8rem', marginBottom: '15px', resize: 'none' }}
+                      placeholder="ej. El monto no coincide con la transferencia / Operación no encontrada en la cuenta."
+                      value={rejectNotesInput}
+                      onChange={(e) => setRejectNotesInput(e.target.value)}
+                    />
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '6px 14px', fontSize: '0.8rem' }}
+                        onClick={() => setRejectNotesModal({ show: false, paymentId: "" })}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '6px 14px', fontSize: '0.8rem', background: '#ef4444', border: 'none' }}
+                        onClick={() => handleProcessPayment(rejectNotesModal.paymentId, "reject", rejectNotesInput)}
+                      >
+                        Confirmar Rechazo
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          );
+        })()}
       </div>
 
       {/* MODAL: ADD FAMILY ACCOUNT */}

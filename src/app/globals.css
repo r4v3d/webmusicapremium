@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 /* --- RESET & VARIABLES --- */
 :root {
   --bg-primary: #08080a;

@@ -40,11 +40,16 @@ export async function sendOrderEmail(order) {
 
   // Setup Nodemailer transporter with Gmail SMTP
   const transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: {
       user: emailUser,
       pass: emailPass,
     },
+    tls: {
+      rejectUnauthorized: false
+    }
   });
 
   // Calculate dates
@@ -216,3 +221,98 @@ export async function sendOrderEmail(order) {
     return false;
   }
 }
+
+export async function sendOTPEmail(email, code) {
+  const emailUser = process.env.EMAIL_USER;
+  const emailPass = process.env.EMAIL_PASS;
+
+  // If email credentials are not configured, skip silently
+  if (!emailUser || !emailPass) {
+    return {
+      success: false,
+      error: "SMTP_NOT_CONFIGURED",
+      message: "Las variables de entorno EMAIL_USER o EMAIL_PASS no están configuradas."
+    };
+  }
+
+  // Setup Nodemailer transporter with Gmail SMTP
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user: emailUser,
+      pass: emailPass,
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  const emailHtml = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Código de Verificación - Música Premium Barato</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #08080a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f3f4f6;">
+      <table style="width: 100%; background-color: #08080a; padding: 40px 20px;" border="0" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <table style="max-width: 500px; margin: 0 auto; background-color: #0f0f13; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 30px; box-shadow: 0 8px 30px rgba(0,0,0,0.6);" border="0" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="text-align: center; padding-bottom: 20px;">
+                  <div style="font-size: 20px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;">
+                    Música Premium Barato
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom: 20px; text-align: center;">
+                  <h2 style="margin: 0; font-size: 20px; color: #ffffff;">Código de Inicio de Sesión</h2>
+                  <p style="margin: 10px 0 0 0; font-size: 14px; color: #9ca3af;">Usa el siguiente código de un solo uso para acceder a tu panel de cliente. Este código expira en 10 minutos.</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 20px 0; text-align: center;">
+                  <div style="background-color: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 15px; display: inline-block; letter-spacing: 5px; font-family: monospace; font-size: 32px; color: #00e5ff; font-weight: bold;">
+                    ${code}
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td style="text-align: center; font-size: 12px; color: #6b7280; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05);">
+                  Si no solicitaste este código, puedes ignorar este correo de forma segura.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const mailOptions = {
+    from: `"Música Premium Barato" <${emailUser}>`,
+    to: email,
+    subject: `Código de verificación: ${code}`,
+    html: emailHtml,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`OTP email sent successfully to ${email}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Error sending OTP email:", error);
+    return {
+      success: false,
+      error: error.code || "SMTP_ERROR",
+      message: error.message || "Error desconocido al enviar correo"
+    };
+  }
+}
+

@@ -163,6 +163,7 @@ export default function Home() {
             <a href="#servicios" className="nav-link" onClick={handleSectionLinkClick}>Servicios</a>
             <a href="#opiniones" className="nav-link" onClick={handleSectionLinkClick}>Referencias</a>
             <a href="#pagos" className="nav-link" onClick={handleSectionLinkClick}>Métodos de Pago</a>
+            <Link href="/login" className="nav-link">Mi Cuenta</Link>
           </nav>
           <a
             href={`https://wa.me/${CONFIG.whatsappNumber}?text=Hola!%20Me%20gustaría%20saber%20más%20sobre%20las%20cuentas%20premium.`}
@@ -204,10 +205,10 @@ export default function Home() {
             </p>
             <div className="hero-actions">
               <a href="#servicios" className="btn btn-primary" onClick={handleSectionLinkClick}>Ver Planes Disponibles</a>
-              <a href={CONFIG.whatsappChannelUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
-                <WhatsAppIcon />
-                <span>Canal de WhatsApp</span>
-              </a>
+              <Link href="/login" className="btn btn-secondary flex items-center justify-center">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 mr-2 inline-block animate-pulse"></span>
+                <span>Mi Cuenta (Ver Credenciales)</span>
+              </Link>
             </div>
           </div>
           <div className="hero-visual animate-float">
