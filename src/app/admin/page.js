@@ -1000,7 +1000,7 @@ export default function AdminDashboardPage() {
                   Administra las cuentas familiares dueñas y los perfiles de clientes vinculados.
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setActiveSubTab("familyAccounts")}
                   className={`btn ${activeSubTab === "familyAccounts" ? "btn-primary" : "btn-secondary"}`}
@@ -1864,7 +1864,7 @@ export default function AdminDashboardPage() {
 
           return (
             <section className="renewals-section animate-fade-in">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h2 style={{ marginBottom: '4px' }}>Pago de Renovaciones</h2>
                   <p className="section-instruction">
@@ -2034,7 +2034,7 @@ export default function AdminDashboardPage() {
               <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
                   {/* Platform Filters */}
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {["all", "tidal", "deezer", "qobuz"].map(plat => (
                       <button
                         key={plat}
@@ -2216,7 +2216,7 @@ export default function AdminDashboardPage() {
         {activeTab === "payments" && (() => {
           return (
             <section className="payments-section animate-fade-in" style={{ paddingBottom: '30px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h2 style={{ marginBottom: '4px' }}>Validar Pagos de Clientes</h2>
                   <p className="section-instruction">

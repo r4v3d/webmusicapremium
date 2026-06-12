@@ -268,8 +268,8 @@ export default function LoginPage() {
       </header>
 
       {/* LOGIN CARD MAIN AREA */}
-      <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-        <div className="glass-panel" style={{ maxWidth: "420px", width: "100%", padding: "40px 30px", borderRadius: "24px", boxShadow: "var(--shadow-lg)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }} className="login-main-container">
+        <div className="glass-panel login-card-custom" style={{ maxWidth: "420px", width: "100%", borderRadius: "24px", boxShadow: "var(--shadow-lg)", border: "1px solid rgba(255,255,255,0.06)" }}>
           
           {/* Form Header */}
           <div style={{ textAlign: "center", marginBottom: "30px" }}>
