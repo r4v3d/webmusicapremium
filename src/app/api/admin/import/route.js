@@ -42,12 +42,15 @@ export async function POST(req) {
         return str;
       }
       
-      // Try DD/MM/YYYY or DD-MM-YYYY
-      let match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      // Try DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY or DD-MM-YY
+      let match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
       if (match) {
         const day = parseInt(match[1], 10);
         const month = parseInt(match[2], 10);
-        const year = parseInt(match[3], 10);
+        let year = parseInt(match[3], 10);
+        if (year < 100) {
+          year = 2000 + year;
+        }
         return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       }
       
@@ -170,20 +173,30 @@ export async function POST(req) {
         importedCount++;
       }
     } else if (mode === "active_members") {
-      // Format: memberEmail | memberPassword | masterEmail | nickname | currentWhatsApp | pricePen | renewalDate
+      // Format: TITULAR PLAN FAMILIAR [tab] CLIENTE (WHATSAPP O NOMBRE) [tab] CORREO MIEMBRO [tab] CONTRASEÑA [tab] PRECIO [tab] FECHA
       for (const line of lines) {
         const parts = line.split(/\t|,|;|\|/).map(p => p.trim());
-        if (parts.length < 5) continue; // Requires at least memberEmail, memberPassword, masterEmail, nickname, whatsapp
+        if (parts.length < 4) continue; // Requires at least masterEmail, clientIdentifier, memberEmail, memberPassword
 
-        const memberEmail = parts[0];
-        const memberPassword = parts[1];
-        const masterEmail = parts[2];
-        const nickname = parts[3];
-        const currentWhatsApp = parts[4];
-        const pricePen = parseFloat(parts[5]) || 0;
-        const renewalDateStr = parseDateInput(parts[6]) || getDefaultRenewalDate();
+        const masterEmail = parts[0];
+        const clientIdentifier = parts[1];
+        const memberEmail = parts[2];
+        const memberPassword = parts[3];
+        const pricePen = parts[4] ? (parseFloat(parts[4]) || 0) : 0;
+        const renewalDateStr = (parts[5] ? parseDateInput(parts[5]) : null) || getDefaultRenewalDate();
 
-        if (!memberEmail || !masterEmail || !nickname || !currentWhatsApp) continue;
+        if (!masterEmail || !clientIdentifier || !memberEmail) continue;
+
+        let whatsapp = "";
+        let nickname = "";
+        const cleanPhone = clientIdentifier.replace(/\D/g, "");
+        if (cleanPhone.length >= 6) {
+          whatsapp = clientIdentifier;
+          nickname = "Cliente Nuevo";
+        } else {
+          nickname = clientIdentifier;
+          whatsapp = "";
+        }
 
         // 1. Find or create master family account
         let { data: family } = await supabase

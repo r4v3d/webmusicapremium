@@ -477,31 +477,59 @@ export async function searchClients(query) {
 
 export async function getOrCreateClient(whatsapp, nickname, email) {
   assertConfig();
-  const cleanPhone = whatsapp.replace(/\D/g, "");
-
-  // Look for client with primary or past whatsapp matching
-  const { data: matchedContacts } = await supabase
-    .from("customer_contacts")
-    .select("customer_id")
-    .eq("contact_type", "whatsapp")
-    .eq("normalized_value", cleanPhone);
-
-  let customerId = null;
-  if (matchedContacts && matchedContacts.length > 0) {
-    customerId = matchedContacts[0].customer_id;
+  
+  let cleanPhone = "";
+  let isPhone = false;
+  
+  if (whatsapp) {
+    cleanPhone = whatsapp.replace(/\D/g, "");
+    if (cleanPhone.length >= 6) {
+      isPhone = true;
+    }
   }
 
+  let customerId = null;
 
+  if (isPhone) {
+    // Look for client with primary or past whatsapp matching
+    const { data: matchedContacts } = await supabase
+      .from("customer_contacts")
+      .select("customer_id")
+      .eq("contact_type", "whatsapp")
+      .eq("normalized_value", cleanPhone);
+
+    if (matchedContacts && matchedContacts.length > 0) {
+      customerId = matchedContacts[0].customer_id;
+    }
+  } else {
+    // Treat the "whatsapp" parameter as the display name if nickname is empty
+    const nameToSearch = nickname || whatsapp;
+    if (nameToSearch) {
+      const { data: matchedCustomers } = await supabase
+        .from("customers")
+        .select("id")
+        .ilike("display_name", nameToSearch.trim())
+        .limit(1);
+      
+      if (matchedCustomers && matchedCustomers.length > 0) {
+        customerId = matchedCustomers[0].id;
+      }
+    }
+  }
 
   if (customerId) {
     const updatedFields = {};
     const clientRecord = await getClientById(customerId);
-    if (nickname && nickname !== clientRecord.nickname) {
-      updatedFields.nickname = nickname;
+    
+    const targetNickname = isPhone ? nickname : (nickname || whatsapp);
+    if (targetNickname && targetNickname !== clientRecord.nickname) {
+      updatedFields.nickname = targetNickname;
     }
-    if (clientRecord.currentWhatsApp !== whatsapp) {
+    
+    if (isPhone && clientRecord.currentWhatsApp !== whatsapp) {
       updatedFields.currentWhatsApp = whatsapp;
     }
+    
     const emails = clientRecord.usedEmails || [];
     if (email && !emails.includes(email)) {
       emails.push(email);
@@ -513,9 +541,12 @@ export async function getOrCreateClient(whatsapp, nickname, email) {
     }
     return clientRecord;
   } else {
+    const targetNickname = isPhone ? (nickname || "Cliente Nuevo") : (nickname || whatsapp || "Cliente Nuevo");
+    const targetPhone = isPhone ? whatsapp : "";
+    
     return await createClient({
-      nickname: nickname || "",
-      currentWhatsApp: whatsapp,
+      nickname: targetNickname,
+      currentWhatsApp: targetPhone,
       pastWhatsApps: [],
       usedEmails: email ? [email] : [],
       notes: ""

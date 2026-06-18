@@ -1741,16 +1741,16 @@ export default function AdminDashboardPage() {
                     </ul>
                   </>
                 )}
-                {importMode === "active_members" && (
+                 {importMode === "active_members" && (
                   <>
-                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel, o comas, puntos y comas, o barras |):</p>
+                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel o Google Sheets, o comas, puntos y comas, o barras |):</p>
                     <code style={{ display: 'block', padding: '6px', background: 'rgba(0,0,0,0.4)', borderRadius: '4px', margin: '8px 0', color: 'var(--accent-gold)' }}>
-                      correo_miembro [tab] contrasena_miembro [tab] correo_titular [tab] apodo_cliente [tab] whatsapp_cliente [tab] precio_pen (opcional) [tab] fecha_vencimiento (opcional, YYYY-MM-DD)
+                      titular_plan_familiar [tab] cliente (whatsapp o nombre) [tab] correo_miembro [tab] contrasena_miembro [tab] precio_pen (opcional) [tab] fecha_vencimiento (opcional, DD/MM, DD/MM/YY, YYYY-MM-DD)
                     </code>
                     <ul style={{ paddingLeft: '16px', color: 'var(--text-muted)' }}>
                       <li>Busca o crea la cuenta familiar dueña (maestra).</li>
-                      <li>Busca o crea al <strong>Cliente Permanente</strong> usando su WhatsApp. Si es un WhatsApp nuevo, se asocia automáticamente y los anteriores pasan al historial.</li>
-                      <li>Actualiza una ranura libre o crea una nueva, asocia al cliente, define la suscripción y registra el pago.</li>
+                      <li>Busca o crea al <strong>Cliente Permanente</strong> usando el nombre o WhatsApp provisto. Si ingresas un nombre, se emparejará por nombre. Si ingresas un número de WhatsApp, se normalizará y guardará como número de contacto directo.</li>
+                      <li>Asocia al cliente a una ranura, define la suscripción y registra el pago de manera automática.</li>
                     </ul>
                   </>
                 )}
