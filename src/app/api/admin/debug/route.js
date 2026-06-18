@@ -106,6 +106,26 @@ export async function GET(req) {
       }
     } catch (e) {}
 
+    // Query slots for g.etmushroom.22.55@gmail.com to inspect status
+    let targetSlots = [];
+    try {
+      // Find the account first
+      const { data: family } = await supabase
+        .from("platform_accounts")
+        .select("id")
+        .eq("account_email", "g.etmushroom.22.55@gmail.com")
+        .maybeSingle();
+      
+      if (family) {
+        const { data } = await supabase
+          .from("account_slots")
+          .select("*")
+          .eq("platform_account_id", family.id)
+          .order("slot_number", { ascending: true });
+        targetSlots = data || [];
+      }
+    } catch (e) {}
+
     return NextResponse.json({
       connectionState: "Supabase Connected",
       supabaseUrl: supabaseUrl || "not defined",
@@ -116,7 +136,8 @@ export async function GET(req) {
       cleanedResult,
       rawAccountsCount: rawAccounts.length,
       rawAccounts: rawAccounts,
-      recentEvents
+      recentEvents,
+      targetSlots
     }, { status: 200 });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
