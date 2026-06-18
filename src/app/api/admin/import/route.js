@@ -88,11 +88,18 @@ export async function POST(req) {
       return null;
     };
 
+    let skippedLogs = [];
+    let lineIndex = 0;
+
     if (mode === "master_accounts") {
       // Flexible format: masterEmail | password | renewalDate/notes | notes/renewalDate
       for (const line of lines) {
+        lineIndex++;
         const parts = line.split(/\t|,|;|\|/).map(p => p.trim());
-        if (parts.length < 2) continue;
+        if (parts.length < 2) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (columnas insuficientes: ${parts.length}, se necesitan al menos 2)`);
+          continue;
+        }
 
         const masterEmail = parts[0];
         const password = parts[1];
@@ -122,7 +129,10 @@ export async function POST(req) {
           renewalDateStr = getDefaultRenewalDate();
         }
 
-        if (!masterEmail || !password) continue;
+        if (!masterEmail || !password) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (correo titular o contraseña vacíos)`);
+          continue;
+        }
 
         // Check if exists
         const { data: existing } = await supabase
@@ -175,8 +185,12 @@ export async function POST(req) {
     } else if (mode === "active_members") {
       // Format: TITULAR PLAN FAMILIAR [tab] CLIENTE (WHATSAPP O NOMBRE) [tab] CORREO MIEMBRO [tab] CONTRASEÑA [tab] PRECIO [tab] FECHA
       for (const line of lines) {
+        lineIndex++;
         const parts = line.split(/\t|,|;|\|/).map(p => p.trim());
-        if (parts.length < 4) continue; // Requires at least masterEmail, clientIdentifier, memberEmail, memberPassword
+        if (parts.length < 4) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (columnas insuficientes: ${parts.length}, se necesitan al menos 4. Fila: "${line}")`);
+          continue;
+        }
 
         const masterEmail = parts[0];
         const clientIdentifier = parts[1];
@@ -185,7 +199,10 @@ export async function POST(req) {
         const pricePen = parts[4] ? (parseFloat(parts[4]) || 0) : 0;
         const renewalDateStr = (parts[5] ? parseDateInput(parts[5]) : null) || getDefaultRenewalDate();
 
-        if (!masterEmail || !clientIdentifier || !memberEmail) continue;
+        if (!masterEmail || !clientIdentifier || !memberEmail) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (datos obligatorios vacíos: titular=${masterEmail || 'vacío'}, cliente=${clientIdentifier || 'vacío'}, miembro=${memberEmail || 'vacío'})`);
+          continue;
+        }
 
         let whatsapp = "";
         let nickname = "";
@@ -294,14 +311,21 @@ export async function POST(req) {
     } else if (mode === "stock_members") {
       // Format: memberEmail | memberPassword | masterEmail
       for (const line of lines) {
+        lineIndex++;
         const parts = line.split(/\t|,|;|\|/).map(p => p.trim());
-        if (parts.length < 3) continue; // Requires memberEmail, memberPassword, masterEmail
+        if (parts.length < 3) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (columnas insuficientes: ${parts.length}, se necesitan al menos 3)`);
+          continue;
+        }
 
         const memberEmail = parts[0];
         const memberPassword = parts[1];
         const masterEmail = parts[2];
 
-        if (!memberEmail || !masterEmail) continue;
+        if (!memberEmail || !masterEmail) {
+          skippedLogs.push(`Línea ${lineIndex} omitida (correo miembro o correo titular vacíos)`);
+          continue;
+        }
 
         // 1. Find or create family account
         let { data: family } = await supabase
@@ -380,12 +404,18 @@ export async function POST(req) {
       }
     }
 
+    let finalMessage = `Importación completada: se procesaron ${importedCount} registros, se crearon ${familiesCreated} cuentas familiares y se actualizaron/crearon ${slotsUpdated} ranuras de perfiles.`;
+    
+    if (skippedLogs.length > 0) {
+      finalMessage += `\n\n[ATENCIÓN] Ocurrieron omisiones:\n${skippedLogs.join("\n")}`;
+    }
+
     return NextResponse.json({
       success: true,
       importedCount,
       familiesCreated,
       slotsUpdated,
-      message: `Importación completada: se procesaron ${importedCount} registros, se crearon ${familiesCreated} cuentas familiares y se actualizaron/crearon ${slotsUpdated} ranuras de perfiles.`
+      message: finalMessage
     }, { status: 200 });
 
   } catch (error) {

@@ -551,6 +551,15 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const formatDisplayDate = (dateStr) => {
+    if (!dateStr) return "";
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dateStr;
+  };
+
   const getExpiryTag = (renewalDate) => {
     if (!renewalDate) return { label: "Sin Fecha", className: "normal" };
     const [ry, rm, rd] = renewalDate.split("-").map(Number);
@@ -1180,7 +1189,7 @@ export default function AdminDashboardPage() {
                                       )}
                                       {p.status !== "free" && (
                                         <span style={{ fontSize: '0.7rem', alignSelf: 'flex-end', color: 'var(--accent-cyan)' }}>
-                                          S/. {p.pricePen} {p.renewalDate && `| Vence: ${new Date(p.renewalDate).toLocaleDateString()}`}
+                                          S/. {p.pricePen} {p.renewalDate && `| Vence: ${formatDisplayDate(p.renewalDate)}`}
                                         </span>
                                       )}
                                     </div>
@@ -1603,7 +1612,7 @@ export default function AdminDashboardPage() {
                                         {statusNames[m.status]}
                                       </span>
                                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        S/. {m.pricePen} {m.renewalDate && `| Vence: ${new Date(m.renewalDate).toLocaleDateString()}`}
+                                        S/. {m.pricePen} {m.renewalDate && `| Vence: ${formatDisplayDate(m.renewalDate)}`}
                                       </span>
                                     </div>
                                   </div>
