@@ -93,6 +93,19 @@ export async function GET(req) {
       queryError = e.message;
     }
 
+    // Query events log
+    let recentEvents = [];
+    try {
+      const { data, error } = await supabase
+        .from("events_log")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (!error) {
+        recentEvents = data || [];
+      }
+    } catch (e) {}
+
     return NextResponse.json({
       connectionState: "Supabase Connected",
       supabaseUrl: supabaseUrl || "not defined",
@@ -102,7 +115,8 @@ export async function GET(req) {
       queryError,
       cleanedResult,
       rawAccountsCount: rawAccounts.length,
-      rawAccounts: rawAccounts
+      rawAccounts: rawAccounts,
+      recentEvents
     }, { status: 200 });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
