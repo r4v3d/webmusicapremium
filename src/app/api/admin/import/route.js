@@ -32,16 +32,92 @@ export async function POST(req) {
       return d.toISOString().substring(0, 10);
     };
 
+    // Helper: parse flexible date formats (DD/MM, DD-MM, YYYY-MM-DD, or DD)
+    const parseDateInput = (str) => {
+      if (!str) return null;
+      str = str.trim();
+      
+      // Try YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        return str;
+      }
+      
+      // Try DD/MM/YYYY or DD-MM-YYYY
+      let match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if (match) {
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10);
+        const year = parseInt(match[3], 10);
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+      
+      // Try DD/MM or DD-MM
+      match = str.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+      if (match) {
+        const day = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10);
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        
+        let year = currentYear;
+        // If parsed month is early next year and we are at the end of the year, adjust year
+        if (month < currentMonth && (currentMonth - month) >= 9) {
+          year = currentYear + 1;
+        } else if (month > currentMonth && (month - currentMonth) >= 9) {
+          year = currentYear - 1;
+        }
+        
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+      
+      // Try just a day number (e.g. "25" or "5")
+      if (/^\d{1,2}$/.test(str)) {
+        const day = parseInt(str, 10);
+        if (day >= 1 && day <= 31) {
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const currentMonth = now.getMonth() + 1;
+          return `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+      }
+      
+      return null;
+    };
+
     if (mode === "master_accounts") {
-      // Format: masterEmail | password | notes | renewalDate (optional)
+      // Flexible format: masterEmail | password | renewalDate/notes | notes/renewalDate
       for (const line of lines) {
         const parts = line.split(/\t|,|;|\|/).map(p => p.trim());
         if (parts.length < 2) continue;
 
         const masterEmail = parts[0];
         const password = parts[1];
-        const notes = parts[2] || "";
-        const renewalDateStr = parts[3] || getDefaultRenewalDate();
+        
+        let renewalDateStr = null;
+        let notes = "";
+
+        if (parts.length >= 3) {
+          const part2Date = parseDateInput(parts[2]);
+          if (part2Date) {
+            renewalDateStr = part2Date;
+            notes = parts.slice(3).join(" - ");
+          } else {
+            notes = parts[2];
+            if (parts.length >= 4) {
+              const part3Date = parseDateInput(parts[3]);
+              if (part3Date) {
+                renewalDateStr = part3Date;
+              } else {
+                notes += " - " + parts.slice(3).join(" - ");
+              }
+            }
+          }
+        }
+
+        if (!renewalDateStr) {
+          renewalDateStr = getDefaultRenewalDate();
+        }
 
         if (!masterEmail || !password) continue;
 
@@ -61,6 +137,7 @@ export async function POST(req) {
             .update({
               account_password: password,
               notes: notes,
+              owner_renewal_date: renewalDateStr,
               updated_at: new Date().toISOString()
             })
             .eq("id", accId);
@@ -69,7 +146,8 @@ export async function POST(req) {
             service,
             masterEmail,
             password,
-            notes
+            notes,
+            ownerRenewalDate: renewalDateStr
           });
           accId = newAcc.id;
           familiesCreated++;
@@ -103,7 +181,7 @@ export async function POST(req) {
         const nickname = parts[3];
         const currentWhatsApp = parts[4];
         const pricePen = parseFloat(parts[5]) || 0;
-        const renewalDateStr = parts[6] || getDefaultRenewalDate();
+        const renewalDateStr = parseDateInput(parts[6]) || getDefaultRenewalDate();
 
         if (!memberEmail || !masterEmail || !nickname || !currentWhatsApp) continue;
 

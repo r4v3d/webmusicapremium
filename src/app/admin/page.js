@@ -1730,12 +1730,13 @@ export default function AdminDashboardPage() {
                 <h4 style={{ color: 'var(--accent-cyan)', marginBottom: '8px', fontSize: '0.85rem' }}>Instrucciones de Formato:</h4>
                 {importMode === "master_accounts" && (
                   <>
-                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel, o comas, puntos y comas, o barras |):</p>
+                    <p style={{ margin: 0, color: '#fff' }}>Pega las columnas en el orden siguiente (separadas por tabulaciones al copiar de Excel o Google Sheets, o comas, puntos y comas, o barras |):</p>
                     <code style={{ display: 'block', padding: '6px', background: 'rgba(0,0,0,0.4)', borderRadius: '4px', margin: '8px 0', color: 'var(--accent-gold)' }}>
-                      correo_titular [tab] contrasena [tab] notas (opcional) [tab] fecha_vencimiento (opcional, YYYY-MM-DD)
+                      correo_titular [tab] contrasena [tab] fecha_renovacion (DD/MM, DD-MM o YYYY-MM-DD) [tab] notas (opcional)
                     </code>
                     <ul style={{ paddingLeft: '16px', color: 'var(--text-muted)' }}>
                       <li>Crea la cuenta familiar maestra con sus 5 ranuras libres por defecto.</li>
+                      <li>Soporta formatos flexibles de fecha para la renovación, como <strong>25/06</strong> (día/mes), <strong>25/06/2026</strong> o simplemente <strong>25</strong> (el día del mes actual).</li>
                       <li>Si no se ingresa fecha de renovación, se calculará <strong>+30 días</strong> automáticamente.</li>
                     </ul>
                   </>
