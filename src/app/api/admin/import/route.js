@@ -236,7 +236,7 @@ export async function POST(req) {
         }
 
         // 2. Find or create client permanent record
-        const clientRecord = await getOrCreateClient(currentWhatsApp, nickname, memberEmail);
+        const clientRecord = await getOrCreateClient(whatsapp, nickname, memberEmail);
         const clientId = clientRecord.id;
 
         // 3. Find a slot in this family account to assign
