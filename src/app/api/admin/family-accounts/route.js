@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
 import { getFamilyAccounts, createFamilyAccount, updateFamilyAccount, deleteFamilyAccount, getMemberProfiles, createMemberProfile } from "../../../../lib/db";

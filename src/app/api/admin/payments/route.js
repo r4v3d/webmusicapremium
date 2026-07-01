@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { supabase, logEvent } from "../../../../lib/db";
 import { checkAdminAuth } from "../../../../lib/auth";
