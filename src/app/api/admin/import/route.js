@@ -134,53 +134,71 @@ export async function POST(req) {
           continue;
         }
 
-        // Check if exists
-        const { data: existing } = await supabase
-          .from("platform_accounts")
-          .select("id")
-          .eq("platform_code", service)
-          .eq("account_email", masterEmail)
-          .maybeSingle();
-
-        let accId;
-        if (existing) {
-          accId = existing.id;
-          await supabase
+        try {
+          // Check if exists in the current service
+          const { data: existing } = await supabase
             .from("platform_accounts")
-            .update({
-              account_password: password,
-              notes: notes,
-              owner_renewal_date: renewalDateStr,
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", accId);
-        } else {
-          const newAcc = await createFamilyAccount({
-            service,
-            masterEmail,
-            password,
-            notes,
-            ownerRenewalDate: renewalDateStr
-          });
-          accId = newAcc.id;
-          familiesCreated++;
+            .select("id")
+            .eq("platform_code", service)
+            .eq("account_email", masterEmail)
+            .maybeSingle();
 
-          // Auto-generate 5 slots for new family
-          for (let i = 1; i <= 5; i++) {
-            await createMemberProfile({
-              familyAccountId: accId,
-              slotNumber: i,
-              clientId: null,
-              memberEmail: "",
-              emailType: "admin",
-              memberPassword: "",
-              pricePen: 0,
-              renewalDate: null,
-              status: "free"
+          let accId;
+          if (existing) {
+            accId = existing.id;
+            const { error: updateErr } = await supabase
+              .from("platform_accounts")
+              .update({
+                account_password: password,
+                notes: notes,
+                owner_renewal_date: renewalDateStr,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", accId);
+            if (updateErr) throw updateErr;
+          } else {
+            // Check if the email already exists globally under another platform
+            const { data: globalExisting } = await supabase
+              .from("platform_accounts")
+              .select("id, platform_code")
+              .eq("account_email", masterEmail)
+              .maybeSingle();
+
+            if (globalExisting) {
+              skippedLogs.push(`Línea ${lineIndex} omitida (El correo titular '${masterEmail}' ya está registrado en la plataforma '${globalExisting.platform_code.toUpperCase()}')`);
+              continue;
+            }
+
+            const newAcc = await createFamilyAccount({
+              service,
+              masterEmail,
+              password,
+              notes,
+              ownerRenewalDate: renewalDateStr
             });
+            accId = newAcc.id;
+            familiesCreated++;
+
+            // Auto-generate 5 slots for new family
+            for (let i = 1; i <= 5; i++) {
+              await createMemberProfile({
+                familyAccountId: accId,
+                slotNumber: i,
+                clientId: null,
+                memberEmail: "",
+                emailType: "admin",
+                memberPassword: "",
+                pricePen: 0,
+                renewalDate: null,
+                status: "free"
+              });
+            }
           }
+          importedCount++;
+        } catch (err) {
+          console.error(`Error importando línea ${lineIndex} (${masterEmail}):`, err);
+          skippedLogs.push(`Línea ${lineIndex} omitida por error: ${err.message || err}`);
         }
-        importedCount++;
       }
     } else if (mode === "active_members") {
       // Format: TITULAR PLAN FAMILIAR [tab] CLIENTE (WHATSAPP O NOMBRE) [tab] CORREO MIEMBRO [tab] CONTRASEÑA [tab] PRECIO [tab] FECHA
