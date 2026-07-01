@@ -192,12 +192,31 @@ function formatOrder(o) {
 
 export async function getOrders() {
   assertConfig();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data || []).map(formatOrder);
+  
+  let allData = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) throw error;
+    
+    allData = allData.concat(data || []);
+
+    if (!data || data.length < pageSize) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  return allData.map(formatOrder);
 }
 
 export async function getOrderById(orderId) {
@@ -256,9 +275,30 @@ export async function updateOrder(orderId, updatedFields) {
 
 export async function getStock() {
   assertConfig();
-  const { data, error } = await supabase.from("stock").select("*");
-  if (error) throw error;
-  return (data || []).map(s => ({
+  
+  let allData = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("stock")
+      .select("*")
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) throw error;
+    
+    allData = allData.concat(data || []);
+
+    if (!data || data.length < pageSize) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  return allData.map(s => ({
     id: s.id,
     service: s.service,
     accountData: s.account_data,
@@ -291,12 +331,31 @@ export async function deleteStockItem(id) {
 
 export async function getClients() {
   assertConfig();
-  const { data, error } = await supabase
-    .from("customers")
-    .select("*, customer_contacts(*)")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data || []).map(formatClient);
+  
+  let allData = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("*, customer_contacts(*)")
+      .order("created_at", { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) throw error;
+    
+    allData = allData.concat(data || []);
+
+    if (!data || data.length < pageSize) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  return allData.map(formatClient);
 }
 
 export async function getClientById(id) {
@@ -558,13 +617,31 @@ export async function getOrCreateClient(whatsapp, nickname, email) {
 
 export async function getFamilyAccounts() {
   assertConfig();
-  const { data, error } = await supabase
-    .from("platform_accounts")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
+  
+  let allData = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
 
-  return (data || []).map(acc => ({
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("platform_accounts")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) throw error;
+    
+    allData = allData.concat(data || []);
+
+    if (!data || data.length < pageSize) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  return allData.map(acc => ({
     id: acc.id,
     _id: acc.id,
     service: acc.platform_code,
@@ -688,21 +765,38 @@ export async function deleteFamilyAccount(id) {
 
 export async function getMemberProfiles(filters = {}) {
   assertConfig();
-  let query = supabase
-    .from("account_slots")
-    .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)");
+  
+  let allData = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
 
-  if (filters.familyAccountId) {
-    query = query.eq("platform_account_id", filters.familyAccountId);
+  while (hasMore) {
+    let query = supabase
+      .from("account_slots")
+      .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)")
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (filters.familyAccountId) {
+      query = query.eq("platform_account_id", filters.familyAccountId);
+    }
+    if (filters.status) {
+      query = query.eq("status", filters.status);
+    }
+
+    const { data, error } = await query.order("updated_at", { ascending: false });
+    if (error) throw error;
+
+    allData = allData.concat(data || []);
+
+    if (!data || data.length < pageSize) {
+      hasMore = false;
+    } else {
+      page++;
+    }
   }
-  if (filters.status) {
-    query = query.eq("status", filters.status);
-  }
 
-  const { data, error } = await query.order("updated_at", { ascending: false });
-  if (error) throw error;
-
-  return (data || []).map(slot => formatMemberProfile(slot));
+  return allData.map(slot => formatMemberProfile(slot));
 }
 
 export async function getMemberProfileById(id) {

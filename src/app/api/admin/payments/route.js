@@ -10,18 +10,34 @@ export async function GET() {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const { data: payments, error } = await supabase
-      .from("payments")
-      .select(`
-        *,
-        customers:customer_id(display_name, customer_code),
-        subscriptions:subscription_id(*)
-      `)
-      .order("created_at", { ascending: false });
+    let allData = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-    if (error) throw error;
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from("payments")
+        .select(`
+          *,
+          customers:customer_id(display_name, customer_code),
+          subscriptions:subscription_id(*)
+        `)
+        .order("created_at", { ascending: false })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
 
-    const formattedPayments = (payments || []).map(p => {
+      if (error) throw error;
+      
+      allData = allData.concat(data || []);
+
+      if (!data || data.length < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+
+    const formattedPayments = allData.map(p => {
       return {
         id: p.id,
         customerId: p.customer_id,
