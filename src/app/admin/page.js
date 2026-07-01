@@ -192,6 +192,9 @@ export default function AdminDashboardPage() {
     deezer: { cost: 1500, currency: "ARS" },
     qobuz: { cost: 5.99, currency: "USD" }
   });
+  const [simClientIncrease, setSimClientIncrease] = useState(0);
+  const [simTidalCost, setSimTidalCost] = useState(2000);
+  const [simUsdArs, setSimUsdArs] = useState(1400);
   const [renewalsSearch, setRenewalsSearch] = useState("");
   const [renewalsPlatform, setRenewalsPlatform] = useState("all");
   const [selectedRenewalDay, setSelectedRenewalDay] = useState(null);
@@ -219,20 +222,15 @@ export default function AdminDashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceSlotId, targetSlotId })
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Error al transferir el perfil.");
+      if (res.ok) {
+        setTransferSuccess("¡Miembro transferido con éxito!");
+        await loadData();
+      } else {
+        const errData = await res.json();
+        setTransferError(errData.message || "Error al transferir miembro.");
       }
-      setTransferSuccess(data.message);
-      setTimeout(() => {
-        setShowTransferModal(false);
-        setTransferSourceSlot(null);
-        setTransferSourceAccount(null);
-        setTransferSuccess("");
-        loadData();
-      }, 1500);
     } catch (err) {
-      setTransferError(err.message);
+      setTransferError("Fallo de red al transferir miembro.");
     } finally {
       setIsTransferring(false);
     }
@@ -242,13 +240,18 @@ export default function AdminDashboardPage() {
     if (typeof window !== "undefined") {
       const savedUsdArs = localStorage.getItem("tc_usd_ars");
       const savedUsdPen = localStorage.getItem("tc_usd_pen");
-      if (savedUsdArs) setExchangeRateUsdToArs(Number(savedUsdArs));
+      if (savedUsdArs) {
+        setExchangeRateUsdToArs(Number(savedUsdArs));
+        setSimUsdArs(Number(savedUsdArs));
+      }
       if (savedUsdPen) setExchangeRateUsdToPen(Number(savedUsdPen));
 
       const savedCosts = localStorage.getItem("platform_costs");
       if (savedCosts) {
         try {
-          setPlatformCosts(JSON.parse(savedCosts));
+          const parsed = JSON.parse(savedCosts);
+          setPlatformCosts(parsed);
+          if (parsed.tidal?.cost) setSimTidalCost(Number(parsed.tidal.cost));
         } catch (e) {
           console.error("Error parsing platform costs", e);
         }
@@ -1080,6 +1083,13 @@ export default function AdminDashboardPage() {
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <span>Organizador (Consolidar)</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("profitability")}
+            className={`tab-btn ${activeTab === "profitability" ? "active" : ""}`}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>Rentabilidad</span>
           </button>
         </nav>
 
@@ -3384,6 +3394,506 @@ export default function AdminDashboardPage() {
             </section>
           );
         })()}
+
+        {activeTab === "profitability" && (() => {
+          // 1. Helper function to get monthly equivalent value
+          const getMonthlyEquivalent = (price, service) => {
+            const p = Number(price) || 0;
+            if (service === 'qobuz') {
+              return p; // Qobuz only has 1 month plan (S/. 9)
+            }
+            if (p <= 7) return p; // 1 Mes (S/. 6)
+            if (p <= 15) return p / 2; // 2 Meses (S/. 9)
+            if (p <= 35) return p / 6; // 6 Meses (S/. 25)
+            return p / 12; // 12 Meses (S/. 45)
+          };
+
+          // 2. Helper to get plan name
+          const getPlanDuration = (price, service) => {
+            const p = Number(price) || 0;
+            if (service === 'qobuz') return "1 Mes";
+            if (p <= 7) return "1 Mes";
+            if (p <= 15) return "2 Meses";
+            if (p <= 35) return "6 Meses";
+            return "12 Meses";
+          };
+
+          // 3. Calculate metrics for each service
+          const getPlatformStats = (serviceName, simulatedCost = null, simulatedTC = null, simClientMult = 1) => {
+            const serviceAccounts = familyAccounts.filter(acc => acc.service === serviceName);
+            const serviceSlots = allSlots.filter(s => s.service === serviceName);
+            const activeServiceSlots = serviceSlots.filter(s => s.status === 'active');
+
+            // Costs calculation
+            const totalCost = serviceAccounts.reduce((sum, acc) => {
+              if (serviceName === 'tidal' && simulatedCost !== null) {
+                const cur = platformCosts[serviceName]?.currency || "ARS";
+                const tc = simulatedTC !== null ? simulatedTC : exchangeRateUsdToArs;
+                
+                if (cur === 'ARS') {
+                  const costInUsd = tc > 0 ? (simulatedCost / tc) : 0;
+                  return sum + (costInUsd * exchangeRateUsdToPen);
+                } else if (cur === 'USD') {
+                  return sum + (simulatedCost * exchangeRateUsdToPen);
+                } else {
+                  return sum + simulatedCost;
+                }
+              }
+
+              const pCost = platformCosts[serviceName] || { cost: 0, currency: "PEN" };
+              return sum + getCostInPen(pCost.cost, pCost.currency, serviceName);
+            }, 0);
+
+            // Revenue calculation
+            const baseRevenue = activeServiceSlots.reduce((sum, s) => {
+              return sum + getMonthlyEquivalent(s.pricePen, serviceName);
+            }, 0);
+            
+            const totalRevenue = baseRevenue * simClientMult;
+            const profit = totalRevenue - totalCost;
+            const margin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
+
+            return {
+              accountsCount: serviceAccounts.length,
+              slotsCount: serviceSlots.length,
+              activeSlotsCount: activeServiceSlots.length,
+              simulatedActiveSlotsCount: Math.round(activeServiceSlots.length * simClientMult),
+              totalCost,
+              totalRevenue,
+              profit,
+              margin
+            };
+          };
+
+          // Compute actual statistics
+          const statsTidal = getPlatformStats('tidal');
+          const statsDeezer = getPlatformStats('deezer');
+          const statsQobuz = getPlatformStats('qobuz');
+
+          const overallRevenue = statsTidal.totalRevenue + statsDeezer.totalRevenue + statsQobuz.totalRevenue;
+          const overallCost = statsTidal.totalCost + statsDeezer.totalCost + statsQobuz.totalCost;
+          const overallProfit = overallRevenue - overallCost;
+          const overallMargin = overallRevenue > 0 ? (overallProfit / overallRevenue) * 100 : 0;
+
+          // Compute simulated statistics
+          const simMult = 1 + (simClientIncrease / 100);
+          const simTidal = getPlatformStats('tidal', simTidalCost, simUsdArs, simMult);
+          const simDeezer = getPlatformStats('deezer', null, null, simMult);
+          const simQobuz = getPlatformStats('qobuz', null, null, simMult);
+
+          const simOverallRevenue = simTidal.totalRevenue + simDeezer.totalRevenue + simQobuz.totalRevenue;
+          const simOverallCost = simTidal.totalCost + simDeezer.totalCost + simQobuz.totalCost;
+          const simOverallProfit = simOverallRevenue - simOverallCost;
+          const simOverallMargin = simOverallRevenue > 0 ? (simOverallProfit / simOverallRevenue) * 100 : 0;
+
+          // Count plan distributions for Tidal and Deezer active slots
+          const planCounts = { "1 Mes": 0, "2 Meses": 0, "6 Meses": 0, "12 Meses": 0 };
+          allSlots.forEach(s => {
+            if (s.status === 'active' && (s.service === 'tidal' || s.service === 'deezer')) {
+              const plan = getPlanDuration(s.pricePen, s.service);
+              if (planCounts[plan] !== undefined) {
+                planCounts[plan]++;
+              }
+            }
+          });
+
+          // Donut Chart Math (angles and offsets)
+          const profits = [
+            { name: "Tidal", value: Math.max(0, statsTidal.profit), color: "#a855f7" },
+            { name: "Deezer", value: Math.max(0, statsDeezer.profit), color: "#eab308" },
+            { name: "Qobuz", value: Math.max(0, statsQobuz.profit), color: "#06b6d4" }
+          ];
+          const totalProfitForDonut = profits.reduce((sum, p) => sum + p.value, 0);
+
+          let accumPercentage = 0;
+          const donutSegments = profits.map((p) => {
+            const percentage = totalProfitForDonut > 0 ? (p.value / totalProfitForDonut) * 100 : 0;
+            const strokeDasharray = `${percentage} ${100 - percentage}`;
+            const strokeDashoffset = 100 - accumPercentage + 25; // 25 is rotation adjustment
+            accumPercentage += percentage;
+            return {
+              ...p,
+              percentage,
+              strokeDasharray,
+              strokeDashoffset
+            };
+          });
+
+          // Maximum value for vertical bar chart scaling
+          const maxVal = Math.max(
+            statsTidal.totalRevenue, statsTidal.totalCost,
+            statsDeezer.totalRevenue, statsDeezer.totalCost,
+            statsQobuz.totalRevenue, statsQobuz.totalCost,
+            100 // fallback floor
+          );
+
+          const getBarHeight = (val) => {
+            return `${(val / maxVal) * 100}%`;
+          };
+
+          return (
+            <section className="profitability-section animate-fade-in">
+              <div style={{ marginBottom: '20px' }}>
+                <h2 style={{ marginBottom: '4px' }}>Dashboard de Rentabilidad</h2>
+                <p className="section-instruction">
+                  Análisis contable de ingresos mensuales proyectados, costos reales de cuentas y márgenes netos de ganancias.
+                </p>
+              </div>
+
+              {/* KPI Cards */}
+              <div className="stats-grid" style={{ marginBottom: '24px' }}>
+                <div className="stat-card glass-panel border-cyan">
+                  <span className="stat-label">Ingreso Bruto Mensual (PEN)</span>
+                  <strong className="stat-value text-cyan">S/. {overallRevenue.toFixed(2)}</strong>
+                  <span className="stat-desc">Equivalente de todos los slots activos</span>
+                </div>
+
+                <div className="stat-card glass-panel border-purple">
+                  <span className="stat-label">Costo Mensual Proveedores (PEN)</span>
+                  <strong className="stat-value text-purple">S/. {overallCost.toFixed(2)}</strong>
+                  <span className="stat-desc">Costo mensual de las {familyAccounts.length} cuentas titulares</span>
+                </div>
+
+                <div className="stat-card glass-panel border-green">
+                  <span className="stat-label">Utilidad Neta Mensual</span>
+                  <strong className="stat-value text-green">S/. {overallProfit.toFixed(2)}</strong>
+                  <span className="stat-desc">Margen neto de retorno financiero</span>
+                </div>
+
+                <div className="stat-card glass-panel border-yellow">
+                  <span className="stat-label">Margen de Rentabilidad</span>
+                  <strong className="stat-value text-yellow">{overallMargin.toFixed(1)}%</strong>
+                  <span className="stat-desc">Ganancia neta sobre el volumen de ingresos</span>
+                </div>
+              </div>
+
+              {/* Charts Grid */}
+              <div className="profitability-grid-charts">
+                {/* 1. Bar Chart: Revenues vs Costs */}
+                <div className="chart-card-wrapper glass-panel">
+                  <h3 className="chart-title">
+                    <span style={{ color: 'var(--accent-cyan)' }}>📊</span> Ingresos vs. Costos por Servicio
+                  </h3>
+                  <div className="bar-chart-vertical">
+                    {/* Tidal */}
+                    <div className="bar-group-platform">
+                      <div className="bars-dual-wrapper">
+                        <div className="bar-single-rect income" style={{ height: getBarHeight(statsTidal.totalRevenue) }}>
+                          <span className="bar-tooltip-val">Ingreso: S/. {statsTidal.totalRevenue.toFixed(0)}</span>
+                        </div>
+                        <div className="bar-single-rect cost" style={{ height: getBarHeight(statsTidal.totalCost) }}>
+                          <span className="bar-tooltip-val">Costo: S/. {statsTidal.totalCost.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fff' }}>Tidal</span>
+                    </div>
+
+                    {/* Deezer */}
+                    <div className="bar-group-platform">
+                      <div className="bars-dual-wrapper">
+                        <div className="bar-single-rect income" style={{ height: getBarHeight(statsDeezer.totalRevenue) }}>
+                          <span className="bar-tooltip-val">Ingreso: S/. {statsDeezer.totalRevenue.toFixed(0)}</span>
+                        </div>
+                        <div className="bar-single-rect cost" style={{ height: getBarHeight(statsDeezer.totalCost) }}>
+                          <span className="bar-tooltip-val">Costo: S/. {statsDeezer.totalCost.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fff' }}>Deezer</span>
+                    </div>
+
+                    {/* Qobuz */}
+                    <div className="bar-group-platform">
+                      <div className="bars-dual-wrapper">
+                        <div className="bar-single-rect income" style={{ height: getBarHeight(statsQobuz.totalRevenue) }}>
+                          <span className="bar-tooltip-val">Ingreso: S/. {statsQobuz.totalRevenue.toFixed(0)}</span>
+                        </div>
+                        <div className="bar-single-rect cost" style={{ height: getBarHeight(statsQobuz.totalCost) }}>
+                          <span className="bar-tooltip-val">Costo: S/. {statsQobuz.totalCost.toFixed(0)}</span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fff' }}>Qobuz</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '0.7rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#22c55e', borderRadius: '2px' }}></span>
+                      <span style={{ color: 'var(--text-muted)' }}>Ingresos</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#ef4444', borderRadius: '2px' }}></span>
+                      <span style={{ color: 'var(--text-muted)' }}>Costos</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Donut Chart: Utility Breakdown */}
+                <div className="chart-card-wrapper glass-panel">
+                  <h3 className="chart-title">
+                    <span style={{ color: 'var(--accent-purple)' }}>🍩</span> Participación de Utilidad Neta
+                  </h3>
+                  <div className="chart-container-flex">
+                    <div style={{ position: 'relative', width: '120px', height: '120px' }}>
+                      <svg width="100%" height="100%" viewBox="0 0 42 42" className="donut-svg">
+                        <circle className="donut-hole" cx="21" cy="21" r="15.915"></circle>
+                        <circle className="donut-ring" cx="21" cy="21" r="15.915" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="4"></circle>
+                        
+                        {totalProfitForDonut > 0 ? (
+                          donutSegments.map((seg, idx) => (
+                            <circle
+                              key={idx}
+                              className="donut-segment"
+                              cx="21"
+                              cy="21"
+                              r="15.915"
+                              fill="transparent"
+                              stroke={seg.color}
+                              strokeDasharray={seg.strokeDasharray}
+                              strokeDashoffset={seg.strokeDashoffset}
+                            ></circle>
+                          ))
+                        ) : (
+                          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="rgba(255,255,255,0.2)" strokeWidth="3" strokeDasharray="100 0"></circle>
+                        )}
+                      </svg>
+                      <div className="donut-center-text">
+                        <span className="donut-center-val">S/. {overallProfit.toFixed(0)}</span>
+                        <span className="donut-center-lbl">Utilidad</span>
+                      </div>
+                    </div>
+
+                    <div className="donut-legend">
+                      {donutSegments.map((seg, idx) => (
+                        <div key={idx} className="legend-item">
+                          <span className="legend-color-dot" style={{ background: seg.color }}></span>
+                          <span style={{ fontWeight: '500' }}>{seg.name}:</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{seg.percentage.toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Horizontal Chart: Plan distribution */}
+                <div className="chart-card-wrapper glass-panel">
+                  <h3 className="chart-title">
+                    <span style={{ color: 'var(--accent-yellow)' }}>📈</span> Distribución de Planes (Tidal/Deezer)
+                  </h3>
+                  <div className="bar-chart-horizontal" style={{ marginTop: '10px' }}>
+                    {Object.keys(planCounts).map((plan) => {
+                      const count = planCounts[plan];
+                      const totalActiveTidalDeezer = Object.values(planCounts).reduce((a, b) => a + b, 0) || 1;
+                      const pct = (count / totalActiveTidalDeezer) * 100;
+                      return (
+                        <div key={plan} className="h-bar-row">
+                          <div className="h-bar-info">
+                            <span style={{ fontWeight: '600', color: '#fff' }}>{plan}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{count} miembros ({pct.toFixed(0)}%)</span>
+                          </div>
+                          <div className="h-bar-track">
+                            <div className="h-bar-fill" style={{ width: `${pct}%`, background: 'linear-gradient(to right, rgba(168, 85, 247, 0.4), rgba(0, 229, 255, 0.8))' }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Table Platform Breakdown */}
+              <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#fff' }}>Detalle Económico por Plataforma</h3>
+                <div className="table-responsive">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Plataforma</th>
+                        <th className="text-center">Cuentas Titulares</th>
+                        <th className="text-center">Slots Ocupados / Totales</th>
+                        <th className="text-right">Ingreso Mensual</th>
+                        <th className="text-right">Costo Mensual</th>
+                        <th className="text-right">Utilidad Neta</th>
+                        <th className="text-right">Margen ROI</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Tidal */}
+                      <tr>
+                        <td>
+                          <span className="badge-service badge-tidal">Tidal</span>
+                        </td>
+                        <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsTidal.accountsCount}</td>
+                        <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsTidal.activeSlotsCount}</span> / {statsTidal.slotsCount}
+                        </td>
+                        <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsTidal.totalRevenue.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: '#f87171' }}>S/. {statsTidal.totalCost.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: statsTidal.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          S/. {statsTidal.profit.toFixed(2)}
+                        </td>
+                        <td className="text-right" style={{ color: statsTidal.margin >= 40 ? '#4ade80' : statsTidal.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          {statsTidal.margin.toFixed(1)}%
+                        </td>
+                      </tr>
+
+                      {/* Deezer */}
+                      <tr>
+                        <td>
+                          <span className="badge-service badge-deezer">Deezer</span>
+                        </td>
+                        <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsDeezer.accountsCount}</td>
+                        <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsDeezer.activeSlotsCount}</span> / {statsDeezer.slotsCount}
+                        </td>
+                        <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsDeezer.totalRevenue.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: '#f87171' }}>S/. {statsDeezer.totalCost.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: statsDeezer.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          S/. {statsDeezer.profit.toFixed(2)}
+                        </td>
+                        <td className="text-right" style={{ color: statsDeezer.margin >= 40 ? '#4ade80' : statsDeezer.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          {statsDeezer.margin.toFixed(1)}%
+                        </td>
+                      </tr>
+
+                      {/* Qobuz */}
+                      <tr>
+                        <td>
+                          <span className="badge-service badge-qobuz">Qobuz</span>
+                        </td>
+                        <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsQobuz.accountsCount}</td>
+                        <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsQobuz.activeSlotsCount}</span> / {statsQobuz.slotsCount}
+                        </td>
+                        <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsQobuz.totalRevenue.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: '#f87171' }}>S/. {statsQobuz.totalCost.toFixed(2)}</td>
+                        <td className="text-right" style={{ color: statsQobuz.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          S/. {statsQobuz.profit.toFixed(2)}
+                        </td>
+                        <td className="text-right" style={{ color: statsQobuz.margin >= 40 ? '#4ade80' : statsQobuz.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          {statsQobuz.margin.toFixed(1)}%
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Simulation projection panel */}
+              <div className="simulator-panel glass-panel border-cyan">
+                <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: 'var(--accent-cyan)' }}>🚀</span> Simulador de Proyección y Precios
+                </h3>
+                <p style={{ margin: '0 0 20px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Modifica las variables en tiempo real para proyectar tus ganancias estimadas ante cambios en el tipo de cambio, costos de cuenta y volumen de clientes.
+                </p>
+
+                <div className="simulator-controls-grid">
+                  {/* Control 1: T.C. USD -> ARS */}
+                  <div className="sim-slider-group">
+                    <div className="sim-slider-label-row">
+                      <span>T.C. Dólar en Argentina (ARS)</span>
+                      <strong>{simUsdArs} ARS</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="800"
+                      max="2200"
+                      step="10"
+                      value={simUsdArs}
+                      onChange={(e) => setSimUsdArs(Number(e.target.value))}
+                      className="sim-slider-input"
+                    />
+                  </div>
+
+                  {/* Control 2: Costo Cuenta Tidal */}
+                  <div className="sim-slider-group">
+                    <div className="sim-slider-label-row">
+                      <span>Costo de Cuenta Tidal (ARS)</span>
+                      <strong>{simTidalCost} ARS</strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="500"
+                      max="4000"
+                      step="50"
+                      value={simTidalCost}
+                      onChange={(e) => setSimTidalCost(Number(e.target.value))}
+                      className="sim-slider-input"
+                    />
+                  </div>
+
+                  {/* Control 3: Incremento de Clientes */}
+                  <div className="sim-slider-group">
+                    <div className="sim-slider-label-row">
+                      <span>Crecimiento de Clientes (%)</span>
+                      <strong style={{ color: simClientIncrease >= 0 ? '#4ade80' : '#f87171' }}>
+                        {simClientIncrease >= 0 ? `+${simClientIncrease}` : simClientIncrease}%
+                      </strong>
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="100"
+                      step="5"
+                      value={simClientIncrease}
+                      onChange={(e) => setSimClientIncrease(Number(e.target.value))}
+                      className="sim-slider-input"
+                    />
+                  </div>
+                </div>
+
+                {/* Simulation results comparison */}
+                <div style={{ background: 'rgba(0, 229, 255, 0.03)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(0, 229, 255, 0.15)' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Resultados Proyectados Simulados</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                    
+                    <div>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ingreso Proyectado:</span>
+                      <strong style={{ fontSize: '1.1rem', color: '#fff' }}>
+                        S/. {simOverallRevenue.toFixed(2)}
+                      </strong>
+                      <span style={{ display: 'block', fontSize: '0.65rem', color: simOverallRevenue >= overallRevenue ? '#4ade80' : '#f87171' }}>
+                        {simOverallRevenue >= overallRevenue ? `+S/. ${(simOverallRevenue - overallRevenue).toFixed(0)}` : `-S/. ${(overallRevenue - simOverallRevenue).toFixed(0)}`} respecto al real
+                      </span>
+                    </div>
+
+                    <div>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Costo Proyectado:</span>
+                      <strong style={{ fontSize: '1.1rem', color: '#fff' }}>
+                        S/. {simOverallCost.toFixed(2)}
+                      </strong>
+                      <span style={{ display: 'block', fontSize: '0.65rem', color: simOverallCost <= overallCost ? '#4ade80' : '#f87171' }}>
+                        {simOverallCost <= overallCost ? `Ahorro: S/. ${(overallCost - simOverallCost).toFixed(0)}` : `Aumento: S/. ${(simOverallCost - overallCost).toFixed(0)}`}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Utilidad Proyectada:</span>
+                      <strong style={{ fontSize: '1.1rem', color: '#4ade80' }}>
+                        S/. {simOverallProfit.toFixed(2)}
+                      </strong>
+                      <span style={{ display: 'block', fontSize: '0.65rem', color: simOverallProfit >= overallProfit ? '#4ade80' : '#f87171' }}>
+                        {simOverallProfit >= overallProfit ? `+S/. ${(simOverallProfit - overallProfit).toFixed(0)}` : `-S/. ${(overallProfit - simOverallProfit).toFixed(0)}`} de ganancia
+                      </span>
+                    </div>
+
+                    <div>
+                      <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Margen Proyectado:</span>
+                      <strong style={{ fontSize: '1.1rem', color: simOverallMargin >= overallMargin ? '#4ade80' : '#eab308' }}>
+                        {simOverallMargin.toFixed(1)}%
+                      </strong>
+                      <span style={{ display: 'block', fontSize: '0.65rem', color: simOverallMargin >= overallMargin ? '#4ade80' : '#f87171' }}>
+                        {simOverallMargin >= overallMargin ? `+${(simOverallMargin - overallMargin).toFixed(1)}%` : `${(simOverallMargin - overallMargin).toFixed(1)}%`} de margen
+                      </span>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+
+            </section>
+          );
+        })()}
+
       </div>
 
       {/* MODAL: ADD FAMILY ACCOUNT */}
