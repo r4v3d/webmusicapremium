@@ -99,7 +99,7 @@ export async function GET(req) {
       const { data, error } = await supabase
         .from("events_log")
         .select("*")
-        .order("created_at", { ascending: false })
+        .order("performed_at", { ascending: false })
         .limit(30);
       if (!error) {
         recentEvents = data || [];
