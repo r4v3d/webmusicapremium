@@ -180,19 +180,21 @@ export async function POST(req) {
             familiesCreated++;
 
             // Auto-generate 5 slots for new family
+            const slotsToCreate = [];
             for (let i = 1; i <= 5; i++) {
-              await createMemberProfile({
-                familyAccountId: accId,
-                slotNumber: i,
-                clientId: null,
-                memberEmail: "",
-                emailType: "admin",
-                memberPassword: "",
-                pricePen: 0,
-                renewalDate: null,
-                status: "free"
+              slotsToCreate.push({
+                platform_account_id: accId,
+                slot_number: i,
+                status: "free",
+                email_type: "admin",
+                member_email: "",
+                member_password: ""
               });
             }
+            const { error: slotsErr } = await supabase
+              .from("account_slots")
+              .insert(slotsToCreate);
+            if (slotsErr) throw slotsErr;
           }
           importedCount++;
         } catch (err) {
@@ -253,19 +255,21 @@ export async function POST(req) {
           familiesCreated++;
 
           // Auto-generate 5 slots for new family
+          const slotsToCreate = [];
           for (let i = 1; i <= 5; i++) {
-            await createMemberProfile({
-              familyAccountId: accId,
-              slotNumber: i,
-              clientId: null,
-              memberEmail: "",
-              emailType: "admin",
-              memberPassword: "",
-              pricePen: 0,
-              renewalDate: null,
-              status: "free"
+            slotsToCreate.push({
+              platform_account_id: accId,
+              slot_number: i,
+              status: "free",
+              email_type: "admin",
+              member_email: "",
+              member_password: ""
             });
           }
+          const { error: slotsErr } = await supabase
+            .from("account_slots")
+            .insert(slotsToCreate);
+          if (slotsErr) throw slotsErr;
         } else {
           accId = family.id;
         }
@@ -365,19 +369,21 @@ export async function POST(req) {
           familiesCreated++;
 
           // Auto-generate 5 slots for new family
+          const slotsToCreate = [];
           for (let i = 1; i <= 5; i++) {
-            await createMemberProfile({
-              familyAccountId: accId,
-              slotNumber: i,
-              clientId: null,
-              memberEmail: "",
-              emailType: "admin",
-              memberPassword: "",
-              pricePen: 0,
-              renewalDate: null,
-              status: "free"
+            slotsToCreate.push({
+              platform_account_id: accId,
+              slot_number: i,
+              status: "free",
+              email_type: "admin",
+              member_email: "",
+              member_password: ""
             });
           }
+          const { error: slotsErr } = await supabase
+            .from("account_slots")
+            .insert(slotsToCreate);
+          if (slotsErr) throw slotsErr;
         } else {
           accId = family.id;
         }
