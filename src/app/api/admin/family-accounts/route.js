@@ -11,26 +11,105 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    // 1. Fetch flat tables in parallel (no SQL joins)
-    const [
-      { data: accounts, error: errAcc },
-      { data: slots, error: errSlot },
-      { data: activeSubs, error: errSub },
-      { data: customers, error: errCust },
-      { data: contacts, error: errCont }
-    ] = await Promise.all([
-      supabase.from("platform_accounts").select("*").order("created_at", { ascending: false }),
-      supabase.from("account_slots").select("id, platform_account_id, slot_number, member_email, member_password, email_type, status, customer_id, updated_at"),
-      supabase.from("subscriptions").select("id, account_slot_id, plan_price, renewal_date, subscription_status").in("subscription_status", ["active", "pending_payment"]),
-      supabase.from("customers").select("*"),
-      supabase.from("customer_contacts").select("customer_id, contact_value, contact_type, is_primary")
-    ]);
+    // 1. Fetch flat tables in parallel (no SQL joins, bypassing the 1000 row limit)
+    const [accounts, slots, activeSubs, customers, contacts] = await Promise.all([
+      // Accounts loop
+      (async () => {
+        let list = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("platform_accounts")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          list = list.concat(data || []);
+          if (!data || data.length < pageSize) hasMore = false;
+          else page++;
+        }
+        return list;
+      })(),
+      
+      // Slots loop
+      (async () => {
+        let list = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("account_slots")
+            .select("id, platform_account_id, slot_number, member_email, member_password, email_type, status, customer_id, updated_at")
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          list = list.concat(data || []);
+          if (!data || data.length < pageSize) hasMore = false;
+          else page++;
+        }
+        return list;
+      })(),
 
-    if (errAcc) throw errAcc;
-    if (errSlot) throw errSlot;
-    if (errSub) throw errSub;
-    if (errCust) throw errCust;
-    if (errCont) throw errCont;
+      // Active Subscriptions loop
+      (async () => {
+        let list = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("subscriptions")
+            .select("id, account_slot_id, plan_price, renewal_date, subscription_status")
+            .in("subscription_status", ["active", "pending_payment"])
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          list = list.concat(data || []);
+          if (!data || data.length < pageSize) hasMore = false;
+          else page++;
+        }
+        return list;
+      })(),
+
+      // Customers loop
+      (async () => {
+        let list = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("customers")
+            .select("*")
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          list = list.concat(data || []);
+          if (!data || data.length < pageSize) hasMore = false;
+          else page++;
+        }
+        return list;
+      })(),
+
+      // Contacts loop
+      (async () => {
+        let list = [];
+        let page = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("customer_contacts")
+            .select("customer_id, contact_value, contact_type, is_primary")
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+          if (error) throw error;
+          list = list.concat(data || []);
+          if (!data || data.length < pageSize) hasMore = false;
+          else page++;
+        }
+        return list;
+      })()
+    ]);
 
     // 2. Create index maps for O(1) in-memory lookups
     const slotsByAccount = {};
