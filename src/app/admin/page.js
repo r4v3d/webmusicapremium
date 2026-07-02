@@ -2012,12 +2012,12 @@ export default function AdminDashboardPage() {
             return true;
           });
 
-          // Generate 30-day timeline
+          // Generate 31-day timeline
           const today = new Date();
           today.setHours(0,0,0,0);
           
           const timelineDays = [];
-          for (let i = 0; i < 30; i++) {
+          for (let i = 0; i < 31; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() + i);
             
@@ -2300,7 +2300,7 @@ export default function AdminDashboardPage() {
               {/* TIMELINE */}
               <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>Línea de Tiempo de Renovaciones (Proyección 30 días)</h3>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>Línea de Tiempo de Renovaciones (Proyección 31 días)</h3>
                   {selectedRenewalDay && (
                     <button 
                       onClick={() => setSelectedRenewalDay(null)} 
