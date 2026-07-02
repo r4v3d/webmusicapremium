@@ -20,10 +20,10 @@ export async function GET() {
       { data: contacts, error: errCont }
     ] = await Promise.all([
       supabase.from("platform_accounts").select("*").order("created_at", { ascending: false }),
-      supabase.from("account_slots").select("id, platform_account_id, slot_number, member_email, member_password, email_type, status, customer_id"),
+      supabase.from("account_slots").select("id, platform_account_id, slot_number, member_email, member_password, email_type, status, customer_id, updated_at"),
       supabase.from("subscriptions").select("id, account_slot_id, plan_price, renewal_date, subscription_status").in("subscription_status", ["active", "pending_payment"]),
-      supabase.from("customers").select("id, display_name"),
-      supabase.from("customer_contacts").select("customer_id, contact_value").eq("contact_type", "whatsapp").eq("is_primary", true)
+      supabase.from("customers").select("*"),
+      supabase.from("customer_contacts").select("customer_id, contact_value, contact_type, is_primary")
     ]);
 
     if (errAcc) throw errAcc;
@@ -49,16 +49,36 @@ export async function GET() {
       }
     });
 
-    const customerMap = {};
-    (customers || []).forEach(cust => {
-      customerMap[cust.id] = cust;
+    const contactsByCustomer = {};
+    (contacts || []).forEach(c => {
+      if (c.customer_id) {
+        if (!contactsByCustomer[c.customer_id]) {
+          contactsByCustomer[c.customer_id] = [];
+        }
+        contactsByCustomer[c.customer_id].push(c);
+      }
     });
 
-    const contactMap = {};
-    (contacts || []).forEach(cont => {
-      if (cont.customer_id) {
-        contactMap[cont.customer_id] = cont.contact_value;
-      }
+    const customerMap = {};
+    (customers || []).forEach(cust => {
+      const custContacts = contactsByCustomer[cust.id] || [];
+      const primaryWhatsApp = custContacts.find(c => c.contact_type === "whatsapp" && c.is_primary)?.contact_value || custContacts.find(c => c.contact_type === "whatsapp")?.contact_value || "";
+      const pastWhatsApps = custContacts.filter(c => c.contact_type === "whatsapp" && c.contact_value !== primaryWhatsApp).map(c => c.contact_value);
+      const usedEmails = custContacts.filter(c => c.contact_type === "email").map(c => c.contact_value);
+
+      customerMap[cust.id] = {
+        id: cust.id,
+        _id: cust.id,
+        customerCode: cust.customer_code,
+        nickname: cust.display_name || "",
+        currentWhatsApp: primaryWhatsApp,
+        pastWhatsApps,
+        usedEmails,
+        notes: cust.notes || "",
+        status: cust.status,
+        createdAt: cust.created_at,
+        updatedAt: cust.updated_at
+      };
     });
 
     // 3. Assemble hierarchy structure in memory
@@ -80,20 +100,7 @@ export async function GET() {
           renewalCurrency: acc.renewal_currency || "PEN"
         };
         
-        let client = null;
-        if (slot.customer_id && customerMap[slot.customer_id]) {
-          const cust = customerMap[slot.customer_id];
-          const whatsApp = contactMap[slot.customer_id] || "";
-          client = {
-            id: cust.id,
-            _id: cust.id,
-            nickname: cust.display_name,
-            currentWhatsApp: whatsApp,
-            usedEmails: [],
-            pastWhatsApps: []
-          };
-        }
-        
+        const client = slot.customer_id ? customerMap[slot.customer_id] || null : null;
         const sub = subsBySlot[slot.id];
         const pricePen = sub ? (Number(sub.plan_price) || 0) : 0;
         const renewalDate = sub ? sub.renewal_date : null;
@@ -109,7 +116,8 @@ export async function GET() {
           pricePen,
           renewalDate,
           status: slot.status,
-          slotNumber: slot.slot_number
+          slotNumber: slot.slot_number,
+          updatedAt: slot.updated_at
         };
       });
       
