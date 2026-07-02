@@ -190,33 +190,17 @@ function formatOrder(o) {
 
 // --- ORDERS API ---
 
-export async function getOrders() {
+export async function getOrders(limit = 250) {
   assertConfig();
   
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (error) throw error;
-    
-    allData = allData.concat(data || []);
-
-    if (!data || data.length < pageSize) {
-      hasMore = false;
-    } else {
-      page++;
-    }
-  }
-
-  return allData.map(formatOrder);
+  if (error) throw error;
+  return (data || []).map(formatOrder);
 }
 
 export async function getOrderById(orderId) {

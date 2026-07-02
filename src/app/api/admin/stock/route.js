@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getFamilyAccounts, getMemberProfiles, updateMemberProfile, createFamilyAccount, createMemberProfile } from "../../../../lib/db";
+import { supabase, updateMemberProfile, createFamilyAccount, createMemberProfile } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -11,29 +11,24 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const accounts = await getFamilyAccounts();
-    const profiles = await getMemberProfiles();
+    const { data: slots, error } = await supabase
+      .from("account_slots")
+      .select("id, member_email, member_password, updated_at, platform_accounts(platform_code, account_email)")
+      .eq("status", "free");
 
-    // Filter profiles that are free to represent available stock
-    const freeProfiles = profiles
-      .filter(p => p.status === "free")
-      .map(p => {
-        const parent = accounts.find(acc => {
-          const accId = (acc._id || acc.id).toString();
-          const pAcc = p.familyAccountId;
-          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
-          return pAccId === accId;
-        });
-        
-        return {
-          id: p._id || p.id,
-          service: parent ? parent.service : "unknown",
-          accountData: `${p.memberEmail}:${p.memberPassword}`,
-          familyMasterEmail: parent ? parent.masterEmail : "No anotado",
-          isUsed: false,
-          createdAt: p.updatedAt || new Date().toISOString()
-        };
-      });
+    if (error) throw error;
+
+    const freeProfiles = (slots || []).map(p => {
+      const parent = p.platform_accounts;
+      return {
+        id: p.id,
+        service: parent ? parent.platform_code : "unknown",
+        accountData: `${p.member_email || ""}:${p.member_password || ""}`,
+        familyMasterEmail: parent ? parent.account_email : "No anotado",
+        isUsed: false,
+        createdAt: p.updated_at || new Date().toISOString()
+      };
+    });
 
     return NextResponse.json(freeProfiles, { status: 200 });
   } catch (error) {
@@ -86,26 +81,14 @@ export async function POST(req) {
       return NextResponse.json({ message: "No se encontraron cuentas válidas para importar." }, { status: 400 });
     }
 
-    // 1. Get all family accounts and profiles
-    const accounts = await getFamilyAccounts();
-    const profiles = await getMemberProfiles();
-    const serviceAccounts = accounts.filter(acc => acc.service === service);
-    
-    // Find free slots of this service
-    const freeSlots = [];
-    profiles.forEach(p => {
-      if (p.status === "free") {
-        const parent = serviceAccounts.find(acc => {
-          const accId = (acc._id || acc.id).toString();
-          const pAcc = p.familyAccountId;
-          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
-          return pAccId === accId;
-        });
-        if (parent) {
-          freeSlots.push(p);
-        }
-      }
-    });
+    // 1. Get free slots of this service directly from DB
+    const { data: freeSlots, error: freeError } = await supabase
+      .from("account_slots")
+      .select("id, slot_number, platform_accounts!inner(id, platform_code)")
+      .eq("status", "free")
+      .eq("platform_accounts.platform_code", service);
+
+    if (freeError) throw freeError;
 
     let slotsUpdated = 0;
     let familiesCreated = 0;

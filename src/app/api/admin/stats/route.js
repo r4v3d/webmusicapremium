@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getOrders, getFamilyAccounts, getFreeSlotsStock } from "../../../../lib/db";
+import { supabase, getFamilyAccounts, getFreeSlotsStock } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -11,15 +11,28 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const orders = await getOrders();
     const accounts = await getFamilyAccounts();
     const activeStock = await getFreeSlotsStock();
 
-    // Calculate order metrics
-    const totalOrders = orders.length;
-    const pendingOrders = orders.filter(o => o.status === "pending").length;
-    const paidOrdersList = orders.filter(o => o.status === "paid");
-    const paidOrders = paidOrdersList.length;
+    // Calculate order metrics using fast count queries
+    const { count: totalOrders, error: errTotal } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true });
+    if (errTotal) throw errTotal;
+
+    const { count: pendingOrders, error: errPending } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending");
+    if (errPending) throw errPending;
+
+    const { data: paidOrdersList, error: errPaid } = await supabase
+      .from("orders")
+      .select("price_pen, price_usd, payment_method")
+      .eq("status", "paid");
+    if (errPaid) throw errPaid;
+
+    const paidOrders = paidOrdersList ? paidOrdersList.length : 0;
 
     // Helper to extract numeric value from price strings (e.g. "S/. 22.00" -> 22)
     const parsePrice = (priceStr) => {
@@ -31,13 +44,15 @@ export async function GET() {
     let totalRevenuePen = 0;
     let totalRevenueUsd = 0;
 
-    paidOrdersList.forEach(o => {
-      if (o.paymentMethod === "binance_pay") {
-        totalRevenueUsd += parsePrice(o.priceUsd);
-      } else {
-        totalRevenuePen += parsePrice(o.pricePen);
-      }
-    });
+    if (paidOrdersList) {
+      paidOrdersList.forEach(o => {
+        if (o.payment_method === "binance_pay") {
+          totalRevenueUsd += parsePrice(o.price_usd);
+        } else {
+          totalRevenuePen += parsePrice(o.price_pen);
+        }
+      });
+    }
 
     return NextResponse.json({
       totalOrders,

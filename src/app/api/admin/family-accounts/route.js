@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getFamilyAccounts, createFamilyAccount, updateFamilyAccount, deleteFamilyAccount, getMemberProfiles, createMemberProfile } from "../../../../lib/db";
+import { supabase, createFamilyAccount, updateFamilyAccount, deleteFamilyAccount, createMemberProfile } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -11,19 +11,112 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const accounts = await getFamilyAccounts();
-    const profiles = await getMemberProfiles();
+    const { data, error } = await supabase
+      .from("platform_accounts")
+      .select(`
+        id,
+        platform_code,
+        account_email,
+        account_password,
+        notes,
+        created_at,
+        owner_renewal_date,
+        renewal_cost,
+        renewal_currency,
+        account_slots (
+          id,
+          slot_number,
+          member_email,
+          member_password,
+          email_type,
+          status,
+          customer_id,
+          customers (
+            id,
+            display_name,
+            customer_contacts (
+              contact_value,
+              normalized_value,
+              contact_type,
+              is_primary
+            )
+          ),
+          subscriptions (
+            id,
+            plan_price,
+            renewal_date,
+            subscription_status
+          )
+        )
+      `)
+      .order("created_at", { ascending: false });
 
-    // Group profiles by familyAccountId
-    const grouped = accounts.map(acc => {
-      const accId = (acc._id || acc.id).toString();
-      const accProfiles = profiles.filter(p => {
-        const pAcc = p.familyAccountId;
-        const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
-        return pAccId === accId;
+    if (error) throw error;
+
+    const grouped = (data || []).map(acc => {
+      const accProfiles = (acc.account_slots || []).map(slot => {
+        const familyAccount = {
+          id: acc.id,
+          _id: acc.id,
+          service: acc.platform_code,
+          masterEmail: acc.account_email,
+          password: acc.account_password,
+          notes: acc.notes || "",
+          createdAt: acc.created_at,
+          ownerRenewalDate: acc.owner_renewal_date,
+          renewalCost: Number(acc.renewal_cost) || 0,
+          renewalCurrency: acc.renewal_currency || "PEN"
+        };
+        
+        let client = null;
+        if (slot.customers) {
+          const primaryContact = (slot.customers.customer_contacts || []).find(c => c.contact_type === 'whatsapp' && c.is_primary) || slot.customers.customer_contacts?.[0];
+          client = {
+            id: slot.customers.id,
+            _id: slot.customers.id,
+            nickname: slot.customers.display_name,
+            currentWhatsApp: primaryContact ? primaryContact.contact_value : "",
+            usedEmails: [],
+            pastWhatsApps: []
+          };
+        }
+        
+        let pricePen = 0;
+        let renewalDate = null;
+        if (slot.status !== "free" && slot.subscriptions && slot.subscriptions.length > 0) {
+          const activeSub = slot.subscriptions.find(s => s.subscription_status === "active" || s.subscription_status === "pending_payment") || slot.subscriptions[0];
+          pricePen = Number(activeSub.plan_price) || 0;
+          renewalDate = activeSub.renewal_date;
+        }
+        
+        return {
+          id: slot.id,
+          _id: slot.id,
+          familyAccountId: familyAccount,
+          clientId: client,
+          memberEmail: slot.member_email || "",
+          emailType: slot.email_type || "admin",
+          memberPassword: slot.member_password || "",
+          pricePen,
+          renewalDate,
+          status: slot.status,
+          slotNumber: slot.slot_number
+        };
       });
+      
+      accProfiles.sort((a, b) => (a.slotNumber || 0) - (b.slotNumber || 0));
+
       return {
-        ...acc,
+        id: acc.id,
+        _id: acc.id,
+        service: acc.platform_code,
+        masterEmail: acc.account_email,
+        password: acc.account_password,
+        notes: acc.notes || "",
+        createdAt: acc.created_at,
+        ownerRenewalDate: acc.owner_renewal_date,
+        renewalCost: Number(acc.renewal_cost) || 0,
+        renewalCurrency: acc.renewal_currency || "PEN",
         profiles: accProfiles
       };
     });
