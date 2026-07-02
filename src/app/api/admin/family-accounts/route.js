@@ -11,50 +11,62 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const { data, error } = await supabase
-      .from("platform_accounts")
-      .select(`
-        id,
-        platform_code,
-        account_email,
-        account_password,
-        notes,
-        created_at,
-        owner_renewal_date,
-        renewal_cost,
-        renewal_currency,
-        account_slots (
-          id,
-          slot_number,
-          member_email,
-          member_password,
-          email_type,
-          status,
-          customer_id,
-          customers (
-            id,
-            display_name,
-            customer_contacts (
-              contact_value,
-              normalized_value,
-              contact_type,
-              is_primary
-            )
-          ),
-          subscriptions (
-            id,
-            plan_price,
-            renewal_date,
-            subscription_status
-          )
-        )
-      `)
-      .order("created_at", { ascending: false });
+    // 1. Fetch flat tables in parallel (no SQL joins)
+    const [
+      { data: accounts, error: errAcc },
+      { data: slots, error: errSlot },
+      { data: activeSubs, error: errSub },
+      { data: customers, error: errCust },
+      { data: contacts, error: errCont }
+    ] = await Promise.all([
+      supabase.from("platform_accounts").select("*").order("created_at", { ascending: false }),
+      supabase.from("account_slots").select("id, platform_account_id, slot_number, member_email, member_password, email_type, status, customer_id"),
+      supabase.from("subscriptions").select("id, account_slot_id, plan_price, renewal_date, subscription_status").in("subscription_status", ["active", "pending_payment"]),
+      supabase.from("customers").select("id, display_name"),
+      supabase.from("customer_contacts").select("customer_id, contact_value").eq("contact_type", "whatsapp").eq("is_primary", true)
+    ]);
 
-    if (error) throw error;
+    if (errAcc) throw errAcc;
+    if (errSlot) throw errSlot;
+    if (errSub) throw errSub;
+    if (errCust) throw errCust;
+    if (errCont) throw errCont;
 
-    const grouped = (data || []).map(acc => {
-      const accProfiles = (acc.account_slots || []).map(slot => {
+    // 2. Create index maps for O(1) in-memory lookups
+    const slotsByAccount = {};
+    (slots || []).forEach(slot => {
+      const accId = slot.platform_account_id;
+      if (!slotsByAccount[accId]) {
+        slotsByAccount[accId] = [];
+      }
+      slotsByAccount[accId].push(slot);
+    });
+
+    const subsBySlot = {};
+    (activeSubs || []).forEach(sub => {
+      if (sub.account_slot_id) {
+        subsBySlot[sub.account_slot_id] = sub;
+      }
+    });
+
+    const customerMap = {};
+    (customers || []).forEach(cust => {
+      customerMap[cust.id] = cust;
+    });
+
+    const contactMap = {};
+    (contacts || []).forEach(cont => {
+      if (cont.customer_id) {
+        contactMap[cont.customer_id] = cont.contact_value;
+      }
+    });
+
+    // 3. Assemble hierarchy structure in memory
+    const grouped = (accounts || []).map(acc => {
+      const accId = acc.id;
+      const rawSlots = slotsByAccount[accId] || [];
+      
+      const accProfiles = rawSlots.map(slot => {
         const familyAccount = {
           id: acc.id,
           _id: acc.id,
@@ -69,25 +81,22 @@ export async function GET() {
         };
         
         let client = null;
-        if (slot.customers) {
-          const primaryContact = (slot.customers.customer_contacts || []).find(c => c.contact_type === 'whatsapp' && c.is_primary) || slot.customers.customer_contacts?.[0];
+        if (slot.customer_id && customerMap[slot.customer_id]) {
+          const cust = customerMap[slot.customer_id];
+          const whatsApp = contactMap[slot.customer_id] || "";
           client = {
-            id: slot.customers.id,
-            _id: slot.customers.id,
-            nickname: slot.customers.display_name,
-            currentWhatsApp: primaryContact ? primaryContact.contact_value : "",
+            id: cust.id,
+            _id: cust.id,
+            nickname: cust.display_name,
+            currentWhatsApp: whatsApp,
             usedEmails: [],
             pastWhatsApps: []
           };
         }
         
-        let pricePen = 0;
-        let renewalDate = null;
-        if (slot.status !== "free" && slot.subscriptions && slot.subscriptions.length > 0) {
-          const activeSub = slot.subscriptions.find(s => s.subscription_status === "active" || s.subscription_status === "pending_payment") || slot.subscriptions[0];
-          pricePen = Number(activeSub.plan_price) || 0;
-          renewalDate = activeSub.renewal_date;
-        }
+        const sub = subsBySlot[slot.id];
+        const pricePen = sub ? (Number(sub.plan_price) || 0) : 0;
+        const renewalDate = sub ? sub.renewal_date : null;
         
         return {
           id: slot.id,
