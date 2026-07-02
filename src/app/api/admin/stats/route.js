@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { getOrders, getFamilyAccounts, getMemberProfiles } from "../../../../lib/db";
+import { getOrders, getFamilyAccounts, getFreeSlotsStock } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -13,7 +13,7 @@ export async function GET() {
 
     const orders = await getOrders();
     const accounts = await getFamilyAccounts();
-    const profiles = await getMemberProfiles();
+    const activeStock = await getFreeSlotsStock();
 
     // Calculate order metrics
     const totalOrders = orders.length;
@@ -36,23 +36,6 @@ export async function GET() {
         totalRevenueUsd += parsePrice(o.priceUsd);
       } else {
         totalRevenuePen += parsePrice(o.pricePen);
-      }
-    });
-
-    // Calculate stock metrics (count free slots grouped by their parent family account service)
-    const activeStock = { tidal: 0, deezer: 0, qobuz: 0 };
-    
-    profiles.forEach(p => {
-      if (p.status === "free") {
-        const parent = accounts.find(acc => {
-          const accId = (acc._id || acc.id).toString();
-          const pAcc = p.familyAccountId;
-          const pAccId = (pAcc?._id || pAcc?.id || pAcc || "").toString();
-          return pAccId === accId;
-        });
-        if (parent && activeStock[parent.service] !== undefined) {
-          activeStock[parent.service]++;
-        }
       }
     });
 

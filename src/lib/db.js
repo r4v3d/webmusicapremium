@@ -774,7 +774,7 @@ export async function getMemberProfiles(filters = {}) {
   while (hasMore) {
     let query = supabase
       .from("account_slots")
-      .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)")
+      .select("*, platform_accounts(id, platform_code, account_email, account_password, notes, owner_renewal_date, renewal_cost, renewal_currency), customers(id, display_name, customer_contacts(contact_value, normalized_value, contact_type, is_primary)), subscriptions(plan_price, renewal_date, subscription_status)")
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (filters.familyAccountId) {
@@ -799,11 +799,31 @@ export async function getMemberProfiles(filters = {}) {
   return allData.map(slot => formatMemberProfile(slot));
 }
 
+export async function getFreeSlotsStock() {
+  assertConfig();
+  const { data, error } = await supabase
+    .from("account_slots")
+    .select("status, platform_accounts(platform_code)")
+    .eq("status", "free");
+  if (error) throw error;
+  
+  const activeStock = { tidal: 0, deezer: 0, qobuz: 0 };
+  if (data) {
+    data.forEach(item => {
+      const code = item.platform_accounts?.platform_code;
+      if (code && activeStock[code] !== undefined) {
+        activeStock[code]++;
+      }
+    });
+  }
+  return activeStock;
+}
+
 export async function getMemberProfileById(id) {
   assertConfig();
   const { data, error } = await supabase
     .from("account_slots")
-    .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)")
+    .select("*, platform_accounts(id, platform_code, account_email, account_password, notes, owner_renewal_date, renewal_cost, renewal_currency), customers(id, display_name, customer_contacts(contact_value, normalized_value, contact_type, is_primary)), subscriptions(plan_price, renewal_date, subscription_status)")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
@@ -911,7 +931,7 @@ export async function updateMemberProfile(id, updatedFields) {
     } else {
       // Create a brand new active subscription record
       const serviceCode = oldSlot.platform_accounts?.platform_code || "tidal";
-      const { data: newSub } = await supabase
+      const { data: newSub, error: newSubError } = await supabase
         .from("subscriptions")
         .insert({
           customer_id: currentClientId,
@@ -927,7 +947,16 @@ export async function updateMemberProfile(id, updatedFields) {
           subscription_status: currentStatus
         })
         .select()
-        .single();
+        .maybeSingle();
+
+      if (newSubError) {
+        console.error("Detalle del error de Supabase al crear suscripción:", newSubError);
+        throw new Error("Error al crear suscripción en la base de datos: " + newSubError.message);
+      }
+
+      if (!newSub) {
+        throw new Error("No se pudo recuperar el registro de suscripción creado.");
+      }
 
       subscriptionId = newSub.id;
     }
