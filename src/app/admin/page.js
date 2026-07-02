@@ -195,6 +195,10 @@ export default function AdminDashboardPage() {
   const [simClientIncrease, setSimClientIncrease] = useState(0);
   const [simTidalCost, setSimTidalCost] = useState(2000);
   const [simUsdArs, setSimUsdArs] = useState(1400);
+  const [selectedReportMonth, setSelectedReportMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [renewalsSearch, setRenewalsSearch] = useState("");
   const [renewalsPlatform, setRenewalsPlatform] = useState("all");
   const [selectedRenewalDay, setSelectedRenewalDay] = useState(null);
@@ -3396,36 +3400,32 @@ export default function AdminDashboardPage() {
         })()}
 
         {activeTab === "profitability" && (() => {
-          // 1. Helper function to get monthly equivalent value
-          const getMonthlyEquivalent = (price, service) => {
-            const p = Number(price) || 0;
-            if (service === 'qobuz') {
-              return p; // Qobuz only has 1 month plan (S/. 9)
+          // 1. Helper to generate month options list (2 months back, current month, 5 months forward)
+          const getMonthsList = () => {
+            const list = [];
+            const d = new Date();
+            d.setMonth(d.getMonth() - 2);
+            for (let i = 0; i < 8; i++) {
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              const label = d.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+              list.push({ val: `${y}-${m}`, label: label.charAt(0).toUpperCase() + label.slice(1) });
+              d.setMonth(d.getMonth() + 1);
             }
-            if (p <= 7) return p; // 1 Mes (S/. 6)
-            if (p <= 15) return p / 2; // 2 Meses (S/. 9)
-            if (p <= 35) return p / 6; // 6 Meses (S/. 25)
-            return p / 12; // 12 Meses (S/. 45)
+            return list;
           };
 
-          // 2. Helper to get plan name
-          const getPlanDuration = (price, service) => {
-            const p = Number(price) || 0;
-            if (service === 'qobuz') return "1 Mes";
-            if (p <= 7) return "1 Mes";
-            if (p <= 15) return "2 Meses";
-            if (p <= 35) return "6 Meses";
-            return "12 Meses";
-          };
-
-          // 3. Calculate metrics for each service
-          const getPlatformStats = (serviceName, simulatedCost = null, simulatedTC = null, simClientMult = 1) => {
+          // 2. Calculate metrics for each service in the selected targetMonth
+          const getPlatformStats = (serviceName, simulatedCost = null, simulatedTC = null, simClientMult = 1, targetMonth = selectedReportMonth) => {
             const serviceAccounts = familyAccounts.filter(acc => acc.service === serviceName);
             const serviceSlots = allSlots.filter(s => s.service === serviceName);
-            const activeServiceSlots = serviceSlots.filter(s => s.status === 'active');
+            
+            // Filter accounts and slots that expire/renew in the targetMonth
+            const monthAccounts = serviceAccounts.filter(acc => acc.ownerRenewalDate && acc.ownerRenewalDate.substring(0, 7) === targetMonth);
+            const monthSlots = serviceSlots.filter(s => s.status === 'active' && s.renewalDate && s.renewalDate.substring(0, 7) === targetMonth);
 
             // Costs calculation
-            const totalCost = serviceAccounts.reduce((sum, acc) => {
+            const totalCost = monthAccounts.reduce((sum, acc) => {
               if (serviceName === 'tidal' && simulatedCost !== null) {
                 const cur = platformCosts[serviceName]?.currency || "ARS";
                 const tc = simulatedTC !== null ? simulatedTC : exchangeRateUsdToArs;
@@ -3444,9 +3444,9 @@ export default function AdminDashboardPage() {
               return sum + getCostInPen(pCost.cost, pCost.currency, serviceName);
             }, 0);
 
-            // Revenue calculation
-            const baseRevenue = activeServiceSlots.reduce((sum, s) => {
-              return sum + getMonthlyEquivalent(s.pricePen, serviceName);
+            // Revenue calculation (total cash due to be billed in the targetMonth)
+            const baseRevenue = monthSlots.reduce((sum, s) => {
+              return sum + (Number(s.pricePen) || 0);
             }, 0);
             
             const totalRevenue = baseRevenue * simClientMult;
@@ -3454,10 +3454,10 @@ export default function AdminDashboardPage() {
             const margin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
 
             return {
-              accountsCount: serviceAccounts.length,
-              slotsCount: serviceSlots.length,
-              activeSlotsCount: activeServiceSlots.length,
-              simulatedActiveSlotsCount: Math.round(activeServiceSlots.length * simClientMult),
+              accountsCount: monthAccounts.length,
+              slotsCount: monthSlots.length,
+              activeSlotsCount: monthSlots.length,
+              simulatedActiveSlotsCount: Math.round(monthSlots.length * simClientMult),
               totalCost,
               totalRevenue,
               profit,
@@ -3465,7 +3465,7 @@ export default function AdminDashboardPage() {
             };
           };
 
-          // Compute actual statistics
+          // Compute actual statistics for the selected month
           const statsTidal = getPlatformStats('tidal');
           const statsDeezer = getPlatformStats('deezer');
           const statsQobuz = getPlatformStats('qobuz');
@@ -3485,17 +3485,6 @@ export default function AdminDashboardPage() {
           const simOverallCost = simTidal.totalCost + simDeezer.totalCost + simQobuz.totalCost;
           const simOverallProfit = simOverallRevenue - simOverallCost;
           const simOverallMargin = simOverallRevenue > 0 ? (simOverallProfit / simOverallRevenue) * 100 : 0;
-
-          // Count plan distributions for Tidal and Deezer active slots
-          const planCounts = { "1 Mes": 0, "2 Meses": 0, "6 Meses": 0, "12 Meses": 0 };
-          allSlots.forEach(s => {
-            if (s.status === 'active' && (s.service === 'tidal' || s.service === 'deezer')) {
-              const plan = getPlanDuration(s.pricePen, s.service);
-              if (planCounts[plan] !== undefined) {
-                planCounts[plan]++;
-              }
-            }
-          });
 
           // Donut Chart Math (angles and offsets)
           const profits = [
@@ -3531,39 +3520,93 @@ export default function AdminDashboardPage() {
             return `${(val / maxVal) * 100}%`;
           };
 
+          // Calculate 6-month trends for projected cash flows
+          const trendsData = [];
+          const trendsD = new Date();
+          trendsD.setMonth(trendsD.getMonth() - 1); // 1 month back for context
+          for (let k = 0; k < 6; k++) {
+            const y = trendsD.getFullYear();
+            const m = String(trendsD.getMonth() + 1).padStart(2, '0');
+            const monthKey = `${y}-${m}`;
+            const label = trendsD.toLocaleString('es-ES', { month: 'short' });
+            
+            const tSlots = allSlots.filter(s => s.status === 'active' && s.renewalDate && s.renewalDate.substring(0, 7) === monthKey);
+            const tAccounts = familyAccounts.filter(acc => acc.ownerRenewalDate && acc.ownerRenewalDate.substring(0, 7) === monthKey);
+            
+            const tRevenue = tSlots.reduce((sum, s) => sum + (Number(s.pricePen) || 0), 0);
+            const tCost = tAccounts.reduce((sum, acc) => {
+              const pCost = platformCosts[acc.service] || { cost: 0, currency: "PEN" };
+              return sum + getCostInPen(pCost.cost, pCost.currency, acc.service);
+            }, 0);
+            
+            trendsData.push({
+              label: label.charAt(0).toUpperCase() + label.slice(1) + " " + String(y).substring(2),
+              revenue: tRevenue,
+              cost: tCost
+            });
+            trendsD.setMonth(trendsD.getMonth() + 1);
+          }
+
+          const maxTrendVal = Math.max(...trendsData.map(d => Math.max(d.revenue, d.cost)), 100);
+
           return (
             <section className="profitability-section animate-fade-in">
-              <div style={{ marginBottom: '20px' }}>
-                <h2 style={{ marginBottom: '4px' }}>Dashboard de Rentabilidad</h2>
-                <p className="section-instruction">
-                  Análisis contable de ingresos mensuales proyectados, costos reales de cuentas y márgenes netos de ganancias.
-                </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h2 style={{ marginBottom: '4px' }}>Dashboard de Rentabilidad (Flujo de Caja)</h2>
+                  <p className="section-instruction">
+                    Análisis contable basado en los vencimientos y cobros del mes seleccionado.
+                  </p>
+                </div>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '0.85rem', color: '#fff', fontWeight: '500' }}>Mes de Análisis:</span>
+                  <select
+                    value={selectedReportMonth}
+                    onChange={(e) => setSelectedReportMonth(e.target.value)}
+                    className="admin-select"
+                    style={{ 
+                      minWidth: '165px', 
+                      padding: '8px 12px', 
+                      background: 'rgba(255,255,255,0.05)', 
+                      color: '#fff', 
+                      border: '1px solid rgba(255,255,255,0.1)', 
+                      borderRadius: '6px',
+                      outline: 'none',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {getMonthsList().map(m => (
+                      <option key={m.val} value={m.val}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* KPI Cards */}
               <div className="stats-grid" style={{ marginBottom: '24px' }}>
                 <div className="stat-card glass-panel border-cyan">
-                  <span className="stat-label">Ingreso Bruto Mensual (PEN)</span>
+                  <span className="stat-label">Cobros Proyectados en el Mes</span>
                   <strong className="stat-value text-cyan">S/. {overallRevenue.toFixed(2)}</strong>
-                  <span className="stat-desc">Equivalente de todos los slots activos</span>
+                  <span className="stat-desc">Suma de mensualidades de miembros que vencen este mes</span>
                 </div>
 
                 <div className="stat-card glass-panel border-purple">
-                  <span className="stat-label">Costo Mensual Proveedores (PEN)</span>
+                  <span className="stat-label">Costos de Renovación en el Mes</span>
                   <strong className="stat-value text-purple">S/. {overallCost.toFixed(2)}</strong>
-                  <span className="stat-desc">Costo mensual de las {familyAccounts.length} cuentas titulares</span>
+                  <span className="stat-desc">Costo de las cuentas titulares que vencen este mes</span>
                 </div>
 
                 <div className="stat-card glass-panel border-green">
-                  <span className="stat-label">Utilidad Neta Mensual</span>
+                  <span className="stat-label">Utilidad del Mes (Caja)</span>
                   <strong className="stat-value text-green">S/. {overallProfit.toFixed(2)}</strong>
-                  <span className="stat-desc">Margen neto de retorno financiero</span>
+                  <span className="stat-desc">Retorno neto de cobros menos pagos de proveedores</span>
                 </div>
 
                 <div className="stat-card glass-panel border-yellow">
-                  <span className="stat-label">Margen de Rentabilidad</span>
+                  <span className="stat-label">Margen de Cobros</span>
                   <strong className="stat-value text-yellow">{overallMargin.toFixed(1)}%</strong>
-                  <span className="stat-desc">Ganancia neta sobre el volumen de ingresos</span>
+                  <span className="stat-desc">Ganancia neta sobre el volumen de cobros del mes</span>
                 </div>
               </div>
 
@@ -3572,14 +3615,14 @@ export default function AdminDashboardPage() {
                 {/* 1. Bar Chart: Revenues vs Costs */}
                 <div className="chart-card-wrapper glass-panel">
                   <h3 className="chart-title">
-                    <span style={{ color: 'var(--accent-cyan)' }}>📊</span> Ingresos vs. Costos por Servicio
+                    <span style={{ color: 'var(--accent-cyan)' }}>📊</span> Cobros vs. Costos del Mes
                   </h3>
                   <div className="bar-chart-vertical">
                     {/* Tidal */}
                     <div className="bar-group-platform">
                       <div className="bars-dual-wrapper">
                         <div className="bar-single-rect income" style={{ height: getBarHeight(statsTidal.totalRevenue) }}>
-                          <span className="bar-tooltip-val">Ingreso: S/. {statsTidal.totalRevenue.toFixed(0)}</span>
+                          <span className="bar-tooltip-val">Cobros: S/. {statsTidal.totalRevenue.toFixed(0)}</span>
                         </div>
                         <div className="bar-single-rect cost" style={{ height: getBarHeight(statsTidal.totalCost) }}>
                           <span className="bar-tooltip-val">Costo: S/. {statsTidal.totalCost.toFixed(0)}</span>
@@ -3592,7 +3635,7 @@ export default function AdminDashboardPage() {
                     <div className="bar-group-platform">
                       <div className="bars-dual-wrapper">
                         <div className="bar-single-rect income" style={{ height: getBarHeight(statsDeezer.totalRevenue) }}>
-                          <span className="bar-tooltip-val">Ingreso: S/. {statsDeezer.totalRevenue.toFixed(0)}</span>
+                          <span className="bar-tooltip-val">Cobros: S/. {statsDeezer.totalRevenue.toFixed(0)}</span>
                         </div>
                         <div className="bar-single-rect cost" style={{ height: getBarHeight(statsDeezer.totalCost) }}>
                           <span className="bar-tooltip-val">Costo: S/. {statsDeezer.totalCost.toFixed(0)}</span>
@@ -3605,7 +3648,7 @@ export default function AdminDashboardPage() {
                     <div className="bar-group-platform">
                       <div className="bars-dual-wrapper">
                         <div className="bar-single-rect income" style={{ height: getBarHeight(statsQobuz.totalRevenue) }}>
-                          <span className="bar-tooltip-val">Ingreso: S/. {statsQobuz.totalRevenue.toFixed(0)}</span>
+                          <span className="bar-tooltip-val">Cobros: S/. {statsQobuz.totalRevenue.toFixed(0)}</span>
                         </div>
                         <div className="bar-single-rect cost" style={{ height: getBarHeight(statsQobuz.totalCost) }}>
                           <span className="bar-tooltip-val">Costo: S/. {statsQobuz.totalCost.toFixed(0)}</span>
@@ -3617,7 +3660,7 @@ export default function AdminDashboardPage() {
                   <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '0.7rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#22c55e', borderRadius: '2px' }}></span>
-                      <span style={{ color: 'var(--text-muted)' }}>Ingresos</span>
+                      <span style={{ color: 'var(--text-muted)' }}>Cobros</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#ef4444', borderRadius: '2px' }}></span>
@@ -3629,7 +3672,7 @@ export default function AdminDashboardPage() {
                 {/* 2. Donut Chart: Utility Breakdown */}
                 <div className="chart-card-wrapper glass-panel">
                   <h3 className="chart-title">
-                    <span style={{ color: 'var(--accent-purple)' }}>🍩</span> Participación de Utilidad Neta
+                    <span style={{ color: 'var(--accent-purple)' }}>🍩</span> Utilidad por Plataforma (Mes)
                   </h3>
                   <div className="chart-container-flex">
                     <div style={{ position: 'relative', width: '120px', height: '120px' }}>
@@ -3673,44 +3716,54 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
-                {/* 3. Horizontal Chart: Plan distribution */}
+                {/* 3. Trends Chart: Projected cash flow */}
                 <div className="chart-card-wrapper glass-panel">
                   <h3 className="chart-title">
-                    <span style={{ color: 'var(--accent-yellow)' }}>📈</span> Distribución de Planes (Tidal/Deezer)
+                    <span style={{ color: 'var(--accent-yellow)' }}>📈</span> Tendencia de Cobros vs. Costos
                   </h3>
-                  <div className="bar-chart-horizontal" style={{ marginTop: '10px' }}>
-                    {Object.keys(planCounts).map((plan) => {
-                      const count = planCounts[plan];
-                      const totalActiveTidalDeezer = Object.values(planCounts).reduce((a, b) => a + b, 0) || 1;
-                      const pct = (count / totalActiveTidalDeezer) * 100;
+                  <div className="bar-chart-vertical" style={{ height: '180px', marginTop: '10px' }}>
+                    {trendsData.map((t, idx) => {
+                      const getTrendHeight = (val) => `${(val / maxTrendVal) * 100}%`;
                       return (
-                        <div key={plan} className="h-bar-row">
-                          <div className="h-bar-info">
-                            <span style={{ fontWeight: '600', color: '#fff' }}>{plan}</span>
-                            <span style={{ color: 'var(--text-muted)' }}>{count} miembros ({pct.toFixed(0)}%)</span>
+                        <div key={idx} className="bar-group-platform" style={{ flex: 1 }}>
+                          <div className="bars-dual-wrapper" style={{ height: '140px' }}>
+                            <div className="bar-single-rect income" style={{ height: getTrendHeight(t.revenue) }}>
+                              <span className="bar-tooltip-val">Cobros: S/. {t.revenue.toFixed(0)}</span>
+                            </div>
+                            <div className="bar-single-rect cost" style={{ height: getTrendHeight(t.cost) }}>
+                              <span className="bar-tooltip-val">Costo: S/. {t.cost.toFixed(0)}</span>
+                            </div>
                           </div>
-                          <div className="h-bar-track">
-                            <div className="h-bar-fill" style={{ width: `${pct}%`, background: 'linear-gradient(to right, rgba(168, 85, 247, 0.4), rgba(0, 229, 255, 0.8))' }}></div>
-                          </div>
+                          <span style={{ fontSize: '0.65rem', color: '#fff', textAlign: 'center', whiteSpace: 'nowrap' }}>{t.label}</span>
                         </div>
                       );
                     })}
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '0.7rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#22c55e', borderRadius: '2px' }}></span>
+                      <span style={{ color: 'var(--text-muted)' }}>Cobros</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ display: 'inline-block', width: '8px', height: '8px', background: '#ef4444', borderRadius: '2px' }}></span>
+                      <span style={{ color: 'var(--text-muted)' }}>Costos</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Table Platform Breakdown */}
               <div className="glass-panel" style={{ padding: '20px', marginBottom: '24px' }}>
-                <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#fff' }}>Detalle Económico por Plataforma</h3>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#fff' }}>Detalle Económico del Mes Seleccionado</h3>
                 <div className="table-responsive">
                   <table className="admin-table">
                     <thead>
                       <tr>
                         <th>Plataforma</th>
-                        <th className="text-center">Cuentas Titulares</th>
-                        <th className="text-center">Slots Ocupados / Totales</th>
-                        <th className="text-right">Ingreso Mensual</th>
-                        <th className="text-right">Costo Mensual</th>
+                        <th className="text-center">Cuentas Titulares a Vencer</th>
+                        <th className="text-center">Miembros a Cobrar</th>
+                        <th className="text-right">Cobros Proyectados</th>
+                        <th className="text-right">Costos de Renovación</th>
                         <th className="text-right">Utilidad Neta</th>
                         <th className="text-right">Margen ROI</th>
                       </tr>
@@ -3723,7 +3776,7 @@ export default function AdminDashboardPage() {
                         </td>
                         <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsTidal.accountsCount}</td>
                         <td className="text-center" style={{ color: 'var(--text-muted)' }}>
-                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsTidal.activeSlotsCount}</span> / {statsTidal.slotsCount}
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsTidal.activeSlotsCount}</span>
                         </td>
                         <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsTidal.totalRevenue.toFixed(2)}</td>
                         <td className="text-right" style={{ color: '#f87171' }}>S/. {statsTidal.totalCost.toFixed(2)}</td>
@@ -3742,7 +3795,7 @@ export default function AdminDashboardPage() {
                         </td>
                         <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsDeezer.accountsCount}</td>
                         <td className="text-center" style={{ color: 'var(--text-muted)' }}>
-                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsDeezer.activeSlotsCount}</span> / {statsDeezer.slotsCount}
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsDeezer.activeSlotsCount}</span>
                         </td>
                         <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsDeezer.totalRevenue.toFixed(2)}</td>
                         <td className="text-right" style={{ color: '#f87171' }}>S/. {statsDeezer.totalCost.toFixed(2)}</td>
@@ -3761,7 +3814,7 @@ export default function AdminDashboardPage() {
                         </td>
                         <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsQobuz.accountsCount}</td>
                         <td className="text-center" style={{ color: 'var(--text-muted)' }}>
-                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsQobuz.activeSlotsCount}</span> / {statsQobuz.slotsCount}
+                          <span style={{ color: '#fff', fontWeight: '600' }}>{statsQobuz.activeSlotsCount}</span>
                         </td>
                         <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsQobuz.totalRevenue.toFixed(2)}</td>
                         <td className="text-right" style={{ color: '#f87171' }}>S/. {statsQobuz.totalCost.toFixed(2)}</td>
@@ -3780,10 +3833,10 @@ export default function AdminDashboardPage() {
               {/* Simulation projection panel */}
               <div className="simulator-panel glass-panel border-cyan">
                 <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ color: 'var(--accent-cyan)' }}>🚀</span> Simulador de Proyección y Precios
+                  <span style={{ color: 'var(--accent-cyan)' }}>🚀</span> Simulador de Proyección de Cobros
                 </h3>
                 <p style={{ margin: '0 0 20px 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Modifica las variables en tiempo real para proyectar tus ganancias estimadas ante cambios en el tipo de cambio, costos de cuenta y volumen de clientes.
+                  Modifica las variables en tiempo real para proyectar los cobros de este mes ante cambios en el tipo de cambio, costos de cuenta y volumen de clientes.
                 </p>
 
                 <div className="simulator-controls-grid">
