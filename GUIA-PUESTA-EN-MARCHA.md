@@ -11,7 +11,7 @@
 | PostgreSQL 18.6, Node 22, Caddy con HTTPS, respaldos cifrados | ✅ Hecho (pasos 20 a 50; verificación: 58 en verde) |
 | SSH todavía acepta contraseña | ⚠️ Corregido en el kit: repetir el paso 10 |
 | DNS de `cheapmusic.best` | ✅ Apunta al VPS (nube gris) |
-| Código nuevo en GitHub | ❌ Solo está en tu PC. El repositorio es **público** |
+| Código nuevo en GitHub | ✅ Subido (`main`). El repositorio es **público** |
 
 Tu tienda actual sigue funcionando en Vercel mientras haces todo esto. No se apaga nada hasta la etapa 9.
 
@@ -171,6 +171,8 @@ La copia de respaldos fuera del VPS (rclone) no bloquea nada. Déjala para cuand
 
 ## Etapa 5 · Pasar los datos desde Supabase
 
+> **Omitida:** decidiste empezar con la base vacía porque en Supabase no había nada importante. Las migraciones de la etapa 6 crean todas las tablas desde cero, y tus cuentas se cargan desde el panel (etapa 6.3). Esta etapa queda como referencia por si algún día necesitas traer datos.
+
 **Hazlo en un momento tranquilo.** Los pedidos que entren a la tienda de Vercel *después* de este volcado no pasarán al servidor nuevo.
 
 ### 5.1 Conseguir la cadena de conexión de Supabase
@@ -248,20 +250,19 @@ Esto descarga el código, aplica las migraciones de la base, construye la web y 
 
 **Salió bien si** termina con "Despliegue de … terminado" y "Worker activo".
 
-### 6.3 Verificar que los datos pasaron completos
+### 6.3 Cargar tu inventario
 
-Usa la misma URI de Supabase de la etapa 5:
+Como la base empieza vacía, carga tus cuentas familiares desde el panel. Entra a `https://cheapmusic.best/admin`, ve a **Inventario → Cargar**, elige la plataforma y pega tus cuentas:
 
-```bash
-cd /srv/musicapremium/repo && SOURCE_DATABASE_URL='postgresql://...LA-MISMA-DE-SUPABASE...' TARGET_DATABASE_URL="$(sudo sed -n 's/^DATABASE_URL=//p' /etc/musicapremium/env)" node scripts/verify-cutover.mjs
-```
+- **Titulares:** correo, contraseña y, opcionalmente, la fecha de renovación.
+- **Clientes activos:** titular, WhatsApp, correo del miembro, contraseña, precio y vencimiento.
 
-**Salió bien si** todas las líneas tienen ✓ y al final dice "Todo cuadra". Pueden aparecer ✗ en `payments` o `events_log` si entraron pedidos en Vercel después del volcado; en ese caso avísame.
+Pulsa **Vista previa** antes de importar, para ver qué líneas se van a cargar.
 
 ### 6.4 Probar el sitio
 
 1. Abre `https://cheapmusic.best`. Debe cargar tu tienda con candado HTTPS.
-2. Entra a `https://cheapmusic.best/admin` con tu `ADMIN_PASSWORD` y revisa que estén tus clientes y cuentas.
+2. Entra a `https://cheapmusic.best/admin` con tu `ADMIN_PASSWORD`. Tras la carga de la etapa 6.3, revisa en **Inventario → Stock** que aparezcan tus cupos libres.
 
 ---
 
