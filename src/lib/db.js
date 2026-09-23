@@ -1,99 +1,69 @@
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+// Capa de datos sobre PostgreSQL propio (§5.3). Mantiene la forma de los
+// objetos que ya consume el panel (camelCase, `_id`, relaciones anidadas).
+import { query, queryOne, withTransaction } from "./pg";
+import { calculateRenewalDate } from "./renewal";
+import { insertPayment } from "./ledger";
+import { CONFIG } from "../data/config";
 
-// --- ENV CONFIG ---
-let SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-let SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-// Sanitize: strip surrounding quotes and whitespace
-if (SUPABASE_URL) {
-  SUPABASE_URL = SUPABASE_URL.replace(/^['"]|['"]$/g, "").trim();
-}
-if (SUPABASE_SERVICE_ROLE_KEY) {
-  SUPABASE_SERVICE_ROLE_KEY = SUPABASE_SERVICE_ROLE_KEY.replace(/^['"]|['"]$/g, "").trim();
-}
-
-// Validate URL format
-let isValidUrl = false;
-if (SUPABASE_URL) {
-  try {
-    new URL(SUPABASE_URL);
-    isValidUrl = true;
-  } catch (e) {
-    isValidUrl = false;
+export function formatDatabaseError(error) {
+  const message = error?.message || String(error || "Error desconocido");
+  const code = error?.code || error?.cause?.code || "";
+  if (["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT", "57P03"].includes(code) || message.includes("DATABASE_URL")) {
+    return "No se pudo conectar a PostgreSQL. Revisa que el servicio esté activo (systemctl status postgresql) y que DATABASE_URL sea correcta.";
   }
-}
-
-const isConfigured = isValidUrl && SUPABASE_URL !== "https://placeholder.supabase.co" && SUPABASE_SERVICE_ROLE_KEY && SUPABASE_SERVICE_ROLE_KEY !== "placeholder_key";
-
-// Initialize official Supabase client (using service role key on backend to bypass RLS)
-export let supabase;
-try {
-  supabase = createSupabaseClient(
-    isConfigured ? SUPABASE_URL : "https://placeholder.supabase.co",
-    isConfigured ? SUPABASE_SERVICE_ROLE_KEY : "placeholder_key",
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false
-      }
-    }
-  );
-} catch (e) {
-  console.error("⚠️ Failed to initialize Supabase client with configured variables:", e);
-  supabase = createSupabaseClient(
-    "https://placeholder.supabase.co",
-    "placeholder_key",
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false
-      }
-    }
-  );
-}
-
-if (!isConfigured) {
-  console.warn("⚠️ Supabase credentials not fully configured. Database requests will run with placeholders.");
-}
-
-// Assert configuration helper to prevent silent mock fallback in production/runtime
-function assertConfig() {
-  if (!isConfigured) {
-    throw new Error("Base de datos Supabase no configurada o mal configurada. Verifica que hayas configurado las variables de entorno NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Vercel sin comillas ni espacios adicionales, y que hayas hecho un Redeploy.");
+  if (message.includes("timeout exceeded when trying to connect")) {
+    return "PostgreSQL no respondió a tiempo. El pool de conexiones puede estar agotado.";
   }
+  return message;
 }
 
-// --- DATABASE INITIALIZER ---
-export async function initDb() {
-  // Supabase client is initialized synchronously. No-op for compatibility.
-  return;
+/** 'YYYY-MM-DD'. Un Date se formatea en hora local (el servicio corre con TZ=America/Lima). */
+export function toDateStr(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return `${value.getFullYear()}-${m}-${d}`;
+  }
+  return String(value).substring(0, 10);
 }
 
-// --- LOG EVENT HELPER (Audit Trail) ---
-export async function logEvent(entityType, entityId, eventType, oldValue = null, newValue = null, reason = "") {
+// --- AUDITORÍA ---
+
+export async function logEvent(entityType, entityId, eventType, oldValue = null, newValue = null, reason = "", { tx = null, performedBy = "admin" } = {}) {
+  const runner = tx || { query };
   try {
-    assertConfig();
-    await supabase.from("events_log").insert({
-      entity_type: entityType,
-      entity_id: String(entityId),
-      event_type: eventType,
-      old_value: oldValue,
-      new_value: newValue,
-      performed_by: "admin",
-      reason: reason || "Updated from Admin Panel"
-    });
+    await runner.query(
+      `insert into events_log(entity_type, entity_id, event_type, old_value, new_value, performed_by, reason)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [entityType, String(entityId), eventType,
+       oldValue == null ? null : JSON.stringify(oldValue),
+       newValue == null ? null : JSON.stringify(newValue),
+       performedBy, reason || "Updated from Admin Panel"]
+    );
   } catch (error) {
+    // Dentro de una transacción el error debe propagarse: un asiento sin auditoría no vale.
+    if (tx) throw error;
     console.error("Error writing audit event log:", error);
   }
 }
 
-// --- CLIENT DATA FORMATTER HELPER ---
-function formatClient(customer) {
+// --- FORMATEADORES ---
+
+export const CONTACTS_JSON = `(select coalesce(json_agg(cc order by cc.id), '[]'::json)
+                          from customer_contacts cc where cc.customer_id = c.id) as customer_contacts`;
+
+export function formatClient(customer) {
   if (!customer) return null;
   const contacts = customer.customer_contacts || [];
-  const primaryWhatsApp = contacts.find(c => c.contact_type === "whatsapp" && c.is_primary)?.contact_value || "";
-  const pastWhatsApps = contacts.filter(c => c.contact_type === "whatsapp" && !c.is_primary).map(c => c.contact_value);
-  const usedEmails = contacts.filter(c => c.contact_type === "email").map(c => c.contact_value);
+  const primaryWhatsApp =
+    contacts.find((c) => c.contact_type === "whatsapp" && c.is_primary)?.contact_value ||
+    contacts.find((c) => c.contact_type === "whatsapp")?.contact_value || "";
+  const pastWhatsApps = contacts
+    .filter((c) => c.contact_type === "whatsapp" && c.contact_value !== primaryWhatsApp)
+    .map((c) => c.contact_value);
+  const usedEmails = contacts.filter((c) => c.contact_type === "email").map((c) => c.contact_value);
 
   return {
     id: customer.id,
@@ -106,68 +76,53 @@ function formatClient(customer) {
     notes: customer.notes || "",
     status: customer.status,
     createdAt: customer.created_at,
-    updatedAt: customer.updated_at
+    updatedAt: customer.updated_at,
   };
 }
 
-// --- PROFILE/SLOT FORMATTER HELPER ---
-function formatMemberProfile(slot, clientData = null, familyAccountData = null) {
+export function formatFamilyAccount(acc) {
+  if (!acc) return null;
+  return {
+    id: acc.id,
+    _id: acc.id,
+    service: acc.platform_code,
+    masterEmail: acc.account_email,
+    password: acc.account_password,
+    notes: acc.notes || "",
+    createdAt: acc.created_at,
+    ownerRenewalDate: acc.owner_renewal_date,
+    renewalCost: Number(acc.renewal_cost) || 0,
+    renewalCurrency: acc.renewal_currency || "PEN",
+  };
+}
+
+function pickCurrentSubscription(subscriptions) {
+  if (!subscriptions || subscriptions.length === 0) return null;
+  return subscriptions.find((s) => s.subscription_status === "active" || s.subscription_status === "pending_payment") || subscriptions[0];
+}
+
+function formatMemberProfile(slot) {
   if (!slot) return null;
-
-  // Format client object if populated
-  let client = null;
-  if (slot.customers) {
-    client = formatClient(slot.customers);
-  } else if (clientData) {
-    client = clientData;
-  }
-
-  // Format parent family account if populated
-  let familyAccount = slot.platform_account_id;
-  if (slot.platform_accounts) {
-    familyAccount = {
-      id: slot.platform_accounts.id,
-      _id: slot.platform_accounts.id,
-      service: slot.platform_accounts.platform_code,
-      masterEmail: slot.platform_accounts.account_email,
-      password: slot.platform_accounts.account_password,
-      notes: slot.platform_accounts.notes || "",
-      createdAt: slot.platform_accounts.created_at,
-      ownerRenewalDate: slot.platform_accounts.owner_renewal_date,
-      renewalCost: Number(slot.platform_accounts.renewal_cost) || 0,
-      renewalCurrency: slot.platform_accounts.renewal_currency || "PEN"
-    };
-  } else if (familyAccountData) {
-    familyAccount = familyAccountData;
-  }
-
-  // Get pricing/renewal details
-  let pricePen = 0;
-  let renewalDate = null;
-  if (slot.status !== "free" && slot.subscriptions && slot.subscriptions.length > 0) {
-    // Pick the most recent active or pending subscription
-    const activeSub = slot.subscriptions.find(s => s.subscription_status === "active" || s.subscription_status === "pending_payment") || slot.subscriptions[0];
-    pricePen = Number(activeSub.plan_price) || 0;
-    renewalDate = activeSub.renewal_date;
-  }
+  const sub = slot.status !== "free" ? pickCurrentSubscription(slot.subscriptions) : null;
 
   return {
     id: slot.id,
     _id: slot.id,
-    familyAccountId: familyAccount,
-    clientId: client,
+    familyAccountId: slot.platform_accounts ? formatFamilyAccount(slot.platform_accounts) : slot.platform_account_id,
+    clientId: slot.customers ? formatClient(slot.customers) : null,
     memberEmail: slot.member_email || "",
     emailType: slot.email_type || "admin",
     memberPassword: slot.member_password || "",
-    pricePen,
-    renewalDate,
+    pricePen: sub ? Number(sub.plan_price) || 0 : 0,
+    renewalDate: sub ? sub.renewal_date : null,
     status: slot.status,
-    updatedAt: slot.updated_at
+    slotNumber: slot.slot_number,
+    reservedUntil: slot.reserved_until || null,
+    updatedAt: slot.updated_at,
   };
 }
 
-// --- ORDER FORMATTER HELPER ---
-function formatOrder(o) {
+export function formatOrder(o) {
   if (!o) return null;
   return {
     id: o.id,
@@ -178,887 +133,534 @@ function formatOrder(o) {
     whatsapp: o.whatsapp,
     service: o.service,
     duration: o.duration,
+    planId: o.plan_id,
     pricePen: o.price_pen,
     priceUsd: o.price_usd,
+    amountPen: o.amount_pen,
+    amountUsdt: o.amount_usdt,
+    payCurrency: o.pay_currency,
     paymentMethod: o.payment_method,
     status: o.status,
     assignedAccount: o.assigned_account,
+    customerId: o.customer_id,
+    salesChannel: o.sales_channel,
+    accountSlotId: o.account_slot_id,
+    subscriptionId: o.subscription_id,
+    paidAt: o.paid_at,
+    deliveredAt: o.delivered_at,
+    expiresAt: o.expires_at,
+    renewSubscriptionId: o.renew_subscription_id,
+    deliveryAttempts: o.delivery_attempts,
+    lastDeliveryError: o.last_delivery_error,
     createdAt: o.created_at,
-    updatedAt: o.updated_at
+    updatedAt: o.updated_at,
   };
 }
 
-// --- ORDERS API ---
+// --- PEDIDOS ---
 
 export async function getOrders(limit = 250) {
-  assertConfig();
-  
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-
-  if (error) throw error;
-  return (data || []).map(formatOrder);
+  const { rows } = await query("select * from orders order by created_at desc limit $1", [limit]);
+  return rows.map(formatOrder);
 }
 
 export async function getOrderById(orderId) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("order_id", orderId)
-    .maybeSingle();
-  if (error) throw error;
-  return formatOrder(data);
+  return formatOrder(await queryOne("select * from orders where order_id = $1", [orderId]));
 }
 
-export async function createOrder(orderData) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("orders")
-    .insert({
-      order_id: orderData.orderId,
-      full_name: orderData.fullName,
-      email: orderData.email,
-      whatsapp: orderData.whatsapp,
-      service: orderData.service,
-      duration: orderData.duration,
-      price_pen: orderData.pricePen,
-      price_usd: orderData.priceUsd,
-      payment_method: orderData.paymentMethod,
-      status: orderData.status,
-      assigned_account: orderData.assignedAccount,
-      created_at: orderData.createdAt
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return formatOrder(data);
+export async function createOrder(orderData, { tx = null } = {}) {
+  const runner = tx || { query };
+  const res = await runner.query(
+    `insert into orders(
+       order_id, full_name, email, whatsapp, service, duration, plan_id,
+       price_pen, price_usd, amount_pen, amount_usdt, pay_currency,
+       payment_method, status, customer_id, sales_channel, access_token, renew_subscription_id, created_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, coalesce($19::timestamptz, now()))
+     returning *`,
+    [orderData.orderId, orderData.fullName, orderData.email, orderData.whatsapp,
+     orderData.service, orderData.duration, orderData.planId ?? null,
+     orderData.pricePen ?? null, orderData.priceUsd ?? null,
+     orderData.amountPen ?? null, orderData.amountUsdt ?? null, orderData.payCurrency ?? null,
+     orderData.paymentMethod, orderData.status || "pending",
+     orderData.customerId ?? null, orderData.salesChannel || "web",
+     orderData.accessToken ?? null, orderData.renewSubscriptionId ?? null, orderData.createdAt ?? null]
+  );
+  return formatOrder(res.rows[0]);
 }
 
+/**
+ * Cambios administrativos del pedido. `paid` y `delivered` NO pasan por aquí:
+ * solo los escribe settlePayment()/deliverOrder() (§9.1).
+ */
 export async function updateOrder(orderId, updatedFields) {
-  assertConfig();
-  const fields = {};
-  if (updatedFields.status !== undefined) fields.status = updatedFields.status;
-  if (updatedFields.assignedAccount !== undefined) fields.assigned_account = updatedFields.assignedAccount;
-  fields.updated_at = new Date().toISOString();
-
-  const { data, error } = await supabase
-    .from("orders")
-    .update(fields)
-    .eq("order_id", orderId)
-    .select()
-    .maybeSingle();
-  if (error) throw error;
-  return formatOrder(data);
-}
-
-// --- STOCK API (Unlinked stock credentials) ---
-
-export async function getStock() {
-  assertConfig();
-  
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
-
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from("stock")
-      .select("*")
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (error) throw error;
-    
-    allData = allData.concat(data || []);
-
-    if (!data || data.length < pageSize) {
-      hasMore = false;
-    } else {
-      page++;
-    }
+  if (updatedFields.status === "paid" || updatedFields.status === "delivered") {
+    throw new Error("El estado paid/delivered solo lo escribe la liquidación.");
   }
-
-  return allData.map(s => ({
-    id: s.id,
-    service: s.service,
-    accountData: s.account_data,
-    isUsed: s.is_used,
-    assignedToOrder: s.assigned_to_order,
-    createdAt: s.created_at
-  }));
+  const sets = ["updated_at = now()"];
+  const params = [orderId];
+  if (updatedFields.status !== undefined) {
+    params.push(updatedFields.status);
+    sets.push(`status = $${params.length}`);
+  }
+  if (updatedFields.assignedAccount !== undefined) {
+    params.push(updatedFields.assignedAccount);
+    sets.push(`assigned_account = $${params.length}`);
+  }
+  const row = await queryOne(`update orders set ${sets.join(", ")} where order_id = $1 returning *`, params);
+  return formatOrder(row);
 }
 
-export async function addStockItems(items) {
-  assertConfig();
-  const mapped = items.map(s => ({
-    id: s.id,
-    service: s.service,
-    account_data: s.accountData,
-    is_used: s.isUsed || false,
-    assigned_to_order: s.assignedToOrder || null
-  }));
-  const { error } = await supabase.from("stock").insert(mapped);
-  if (error) throw error;
-}
-
-export async function deleteStockItem(id) {
-  assertConfig();
-  const { error } = await supabase.from("stock").delete().eq("id", id);
-  if (error) throw error;
-}
-
-// --- CLIENTS & SEARCH ---
+// --- CLIENTES ---
 
 export async function getClients() {
-  assertConfig();
-  
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
+  const { rows } = await query(`select c.*, ${CONTACTS_JSON} from customers c order by c.created_at desc`);
+  return rows.map(formatClient);
+}
 
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*, customer_contacts(*)")
-      .order("created_at", { ascending: false })
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+export async function getClientById(id, { tx = null } = {}) {
+  const runner = tx || { query };
+  const res = await runner.query(`select c.*, ${CONTACTS_JSON} from customers c where c.id = $1`, [id]);
+  return formatClient(res.rows[0]);
+}
 
-    if (error) throw error;
-    
-    allData = allData.concat(data || []);
+async function upsertPrimaryWhatsApp(tx, customerId, whatsapp) {
+  const cleanPhone = String(whatsapp).replace(/\D/g, "");
+  await tx.query(
+    `update customer_contacts set is_primary = false, status = 'inactive'
+      where customer_id = $1 and contact_type = 'whatsapp' and is_primary`,
+    [customerId]
+  );
+  const existing = await tx.query(
+    `select id from customer_contacts
+      where customer_id = $1 and contact_type = 'whatsapp' and normalized_value = $2
+      order by id limit 1`,
+    [customerId, cleanPhone]
+  );
+  if (existing.rows[0]) {
+    await tx.query("update customer_contacts set is_primary = true, status = 'active' where id = $1", [existing.rows[0].id]);
+  } else {
+    await tx.query(
+      `insert into customer_contacts(customer_id, contact_type, contact_value, normalized_value, is_primary, status)
+       values ($1,'whatsapp',$2,$3,true,'active')`,
+      [customerId, whatsapp, cleanPhone]
+    );
+  }
+}
 
-    if (!data || data.length < pageSize) {
-      hasMore = false;
+async function addEmails(tx, customerId, emails) {
+  for (const email of emails || []) {
+    const clean = String(email || "").trim();
+    if (!clean) continue;
+    await tx.query(
+      `insert into customer_contacts(customer_id, contact_type, contact_value, normalized_value, is_primary, status)
+       select $1,'email',$2,$3,false,'active'
+        where not exists (select 1 from customer_contacts
+                           where customer_id = $1 and contact_type = 'email' and normalized_value = $3)`,
+      [customerId, clean, clean.toLowerCase()]
+    );
+  }
+}
+
+export async function createClient(clientData, { tx = null } = {}) {
+  const run = async (t) => {
+    const res = await t.query(
+      "insert into customers(display_name, notes) values ($1,$2) returning id",
+      [clientData.nickname || "", clientData.notes || ""]
+    );
+    const id = res.rows[0].id;
+    if (clientData.currentWhatsApp) await upsertPrimaryWhatsApp(t, id, clientData.currentWhatsApp);
+    await addEmails(t, id, clientData.usedEmails);
+    const client = await getClientById(id, { tx: t });
+    await logEvent("customer", id, "create", null, client, "Client created", { tx: t });
+    return client;
+  };
+  return tx ? run(tx) : withTransaction(run);
+}
+
+export async function updateClient(id, updatedFields, { tx = null } = {}) {
+  const run = async (t) => {
+    const oldData = await getClientById(id, { tx: t });
+    const sets = ["updated_at = now()"];
+    const params = [id];
+    if (updatedFields.nickname !== undefined) {
+      params.push(updatedFields.nickname);
+      sets.push(`display_name = $${params.length}`);
+    }
+    if (updatedFields.notes !== undefined) {
+      params.push(updatedFields.notes);
+      sets.push(`notes = $${params.length}`);
+    }
+    await t.query(`update customers set ${sets.join(", ")} where id = $1`, params);
+    if (updatedFields.currentWhatsApp !== undefined && updatedFields.currentWhatsApp) {
+      await upsertPrimaryWhatsApp(t, id, updatedFields.currentWhatsApp);
+    }
+    if (updatedFields.usedEmails !== undefined) await addEmails(t, id, updatedFields.usedEmails);
+    const newData = await getClientById(id, { tx: t });
+    await logEvent("customer", id, "update", oldData, newData, "Client fields updated", { tx: t });
+    return newData;
+  };
+  return tx ? run(tx) : withTransaction(run);
+}
+
+function sanitizeSearchTerm(value) {
+  return String(value || "").replace(/[%_\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+export async function searchClients(rawQuery) {
+  const term = sanitizeSearchTerm(rawQuery);
+  if (!term) return [];
+  const cleanPhone = term.replace(/\D/g, "");
+  const { rows } = await query(
+    `select c.*, ${CONTACTS_JSON}
+       from customers c
+      where c.display_name ilike $1
+         or c.customer_code ilike $1
+         or exists (
+              select 1 from customer_contacts cc
+               where cc.customer_id = c.id
+                 and (cc.normalized_value ilike $2
+                      or ($3 <> '' and cc.normalized_value like '%' || $3 || '%'))
+            )
+      order by c.created_at desc
+      limit 200`,
+    [`%${term}%`, `%${term.toLowerCase()}%`, cleanPhone.length >= 4 ? cleanPhone : ""]
+  );
+  return rows.map(formatClient);
+}
+
+export async function getOrCreateClient(whatsapp, nickname, email, { tx = null } = {}) {
+  const run = async (t) => {
+    const cleanPhone = whatsapp ? String(whatsapp).replace(/\D/g, "") : "";
+    const isPhone = cleanPhone.length >= 6;
+    let customerId = null;
+
+    if (isPhone) {
+      const res = await t.query(
+        `select customer_id from customer_contacts
+          where contact_type = 'whatsapp' and normalized_value = $1
+          order by is_primary desc, id limit 1`,
+        [cleanPhone]
+      );
+      customerId = res.rows[0]?.customer_id ?? null;
     } else {
-      page++;
-    }
-  }
-
-  return allData.map(formatClient);
-}
-
-export async function getClientById(id) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("customers")
-    .select("*, customer_contacts(*)")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  return formatClient(data);
-}
-
-export async function createClient(clientData) {
-  assertConfig();
-  const { data: customer, error } = await supabase
-    .from("customers")
-    .insert({
-      display_name: clientData.nickname || "",
-      notes: clientData.notes || ""
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  // Insert primary phone number contact row
-  if (clientData.currentWhatsApp) {
-    const cleanPhone = clientData.currentWhatsApp.replace(/\D/g, "");
-    await supabase.from("customer_contacts").insert({
-      customer_id: customer.id,
-      contact_type: "whatsapp",
-      contact_value: clientData.currentWhatsApp,
-      normalized_value: cleanPhone,
-      is_primary: true,
-      status: "active"
-    });
-  }
-
-  // Insert emails if any
-  if (clientData.usedEmails && clientData.usedEmails.length > 0) {
-    for (const email of clientData.usedEmails) {
-      await supabase.from("customer_contacts").insert({
-        customer_id: customer.id,
-        contact_type: "email",
-        contact_value: email,
-        normalized_value: email.trim().toLowerCase(),
-        is_primary: false,
-        status: "active"
-      });
-    }
-  }
-
-  // Fetch fully populated client
-  const { data: finalCustomer } = await supabase
-    .from("customers")
-    .select("*, customer_contacts(*)")
-    .eq("id", customer.id)
-    .single();
-
-  await logEvent("customer", customer.id, "create", null, finalCustomer, "Client created");
-  return formatClient(finalCustomer);
-}
-
-export async function updateClient(id, updatedFields) {
-  assertConfig();
-  const fields = {};
-  if (updatedFields.nickname !== undefined) fields.display_name = updatedFields.nickname;
-  if (updatedFields.notes !== undefined) fields.notes = updatedFields.notes;
-  fields.updated_at = new Date().toISOString();
-
-  // Get old value for log
-  const { data: oldData } = await supabase.from("customers").select("*, customer_contacts(*)").eq("id", id).maybeSingle();
-
-  if (Object.keys(fields).length > 0) {
-    const { error } = await supabase.from("customers").update(fields).eq("id", id);
-    if (error) throw error;
-  }
-
-  // Update contacts if specified
-  if (updatedFields.currentWhatsApp !== undefined) {
-    const cleanPhone = updatedFields.currentWhatsApp.replace(/\D/g, "");
-    // Mark previous primary whatsapp as not primary
-    await supabase
-      .from("customer_contacts")
-      .update({ is_primary: false, status: "inactive" })
-      .eq("customer_id", id)
-      .eq("contact_type", "whatsapp")
-      .eq("is_primary", true);
-
-    // Check if new number already in contacts
-    const { data: existing } = await supabase
-      .from("customer_contacts")
-      .select("id")
-      .eq("customer_id", id)
-      .eq("contact_type", "whatsapp")
-      .eq("normalized_value", cleanPhone)
-      .maybeSingle();
-
-    if (existing) {
-      await supabase
-        .from("customer_contacts")
-        .update({ is_primary: true, status: "active" })
-        .eq("id", existing.id);
-    } else {
-      await supabase.from("customer_contacts").insert({
-        customer_id: id,
-        contact_type: "whatsapp",
-        contact_value: updatedFields.currentWhatsApp,
-        normalized_value: cleanPhone,
-        is_primary: true,
-        status: "active"
-      });
-    }
-  }
-
-  if (updatedFields.usedEmails !== undefined) {
-    // Insert new emails that aren't there
-    const { data: existingEmails } = await supabase
-      .from("customer_contacts")
-      .select("normalized_value")
-      .eq("customer_id", id)
-      .eq("contact_type", "email");
-    const existingSet = new Set((existingEmails || []).map(e => e.normalized_value));
-
-    for (const email of updatedFields.usedEmails) {
-      const cleanEmail = email.trim().toLowerCase();
-      if (!existingSet.has(cleanEmail)) {
-        await supabase.from("customer_contacts").insert({
-          customer_id: id,
-          contact_type: "email",
-          contact_value: email.trim(),
-          normalized_value: cleanEmail,
-          is_primary: false,
-          status: "active"
-        });
+      const nameToSearch = (nickname || whatsapp || "").trim();
+      if (nameToSearch) {
+        const res = await t.query("select id from customers where display_name ilike $1 limit 1", [sanitizeSearchTerm(nameToSearch)]);
+        customerId = res.rows[0]?.id ?? null;
       }
     }
-  }
 
-  const { data: newData } = await supabase.from("customers").select("*, customer_contacts(*)").eq("id", id).maybeSingle();
-  await logEvent("customer", id, "update", oldData, newData, "Client fields updated");
-  return formatClient(newData);
-}
-
-export async function searchClients(query) {
-  assertConfig();
-  const trimQuery = query.trim();
-  if (!trimQuery) return [];
-
-  // Search by display_name or matching contacts
-  const cleanPhone = trimQuery.replace(/\D/g, "");
-  const cleanEmail = trimQuery.trim().toLowerCase();
-
-  // Find contact matches first
-  let customerIds = [];
-  if (cleanPhone || cleanEmail) {
-    const { data: contacts } = await supabase
-      .from("customer_contacts")
-      .select("customer_id")
-      .or(`normalized_value.like.%${cleanPhone || "non_existent"}%,normalized_value.ilike.%${cleanEmail}%`);
-    if (contacts && contacts.length > 0) {
-      customerIds = contacts.map(c => c.customer_id);
+    if (!customerId) {
+      return createClient({
+        nickname: isPhone ? (nickname || "Cliente Nuevo") : (nickname || whatsapp || "Cliente Nuevo"),
+        currentWhatsApp: isPhone ? whatsapp : "",
+        usedEmails: email ? [email] : [],
+        notes: "",
+      }, { tx: t });
     }
-  }
 
-  // Get matching customers
-  let dbQuery = supabase.from("customers").select("*, customer_contacts(*)");
-  if (customerIds.length > 0) {
-    dbQuery = dbQuery.or(`id.in.(${customerIds.map(id => `"${id}"`).join(",")}),display_name.ilike.%${trimQuery}%,customer_code.ilike.%${trimQuery}%`);
-  } else {
-    dbQuery = dbQuery.or(`display_name.ilike.%${trimQuery}%,customer_code.ilike.%${trimQuery}%`);
-  }
-
-  const { data, error } = await dbQuery.order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data || []).map(formatClient);
-}
-
-export async function getOrCreateClient(whatsapp, nickname, email) {
-  assertConfig();
-  
-  let cleanPhone = "";
-  let isPhone = false;
-  
-  if (whatsapp) {
-    cleanPhone = whatsapp.replace(/\D/g, "");
-    if (cleanPhone.length >= 6) {
-      isPhone = true;
-    }
-  }
-
-  let customerId = null;
-
-  if (isPhone) {
-    // Look for client with primary or past whatsapp matching
-    const { data: matchedContacts } = await supabase
-      .from("customer_contacts")
-      .select("customer_id")
-      .eq("contact_type", "whatsapp")
-      .eq("normalized_value", cleanPhone);
-
-    if (matchedContacts && matchedContacts.length > 0) {
-      customerId = matchedContacts[0].customer_id;
-    }
-  } else {
-    // Treat the "whatsapp" parameter as the display name if nickname is empty
-    const nameToSearch = nickname || whatsapp;
-    if (nameToSearch) {
-      const { data: matchedCustomers } = await supabase
-        .from("customers")
-        .select("id")
-        .ilike("display_name", nameToSearch.trim())
-        .limit(1);
-      
-      if (matchedCustomers && matchedCustomers.length > 0) {
-        customerId = matchedCustomers[0].id;
-      }
-    }
-  }
-
-  if (customerId) {
+    const clientRecord = await getClientById(customerId, { tx: t });
     const updatedFields = {};
-    const clientRecord = await getClientById(customerId);
-    
     const targetNickname = isPhone ? nickname : (nickname || whatsapp);
-    if (targetNickname && targetNickname !== clientRecord.nickname) {
+    if (targetNickname && targetNickname !== clientRecord.nickname && targetNickname !== "Cliente Nuevo") {
       updatedFields.nickname = targetNickname;
     }
-    
-    if (isPhone && clientRecord.currentWhatsApp !== whatsapp) {
-      updatedFields.currentWhatsApp = whatsapp;
+    if (isPhone && clientRecord.currentWhatsApp !== whatsapp) updatedFields.currentWhatsApp = whatsapp;
+    if (email && !clientRecord.usedEmails.map((e) => e.toLowerCase()).includes(String(email).toLowerCase())) {
+      updatedFields.usedEmails = [email];
     }
-    
-    const emails = clientRecord.usedEmails || [];
-    if (email && !emails.includes(email)) {
-      emails.push(email);
-      updatedFields.usedEmails = emails;
-    }
-
-    if (Object.keys(updatedFields).length > 0) {
-      return await updateClient(customerId, updatedFields);
-    }
-    return clientRecord;
-  } else {
-    const targetNickname = isPhone ? (nickname || "Cliente Nuevo") : (nickname || whatsapp || "Cliente Nuevo");
-    const targetPhone = isPhone ? whatsapp : "";
-    
-    return await createClient({
-      nickname: targetNickname,
-      currentWhatsApp: targetPhone,
-      pastWhatsApps: [],
-      usedEmails: email ? [email] : [],
-      notes: ""
-    });
-  }
+    return Object.keys(updatedFields).length > 0 ? updateClient(customerId, updatedFields, { tx: t }) : clientRecord;
+  };
+  return tx ? run(tx) : withTransaction(run);
 }
 
-// --- FAMILY ACCOUNTS CRUD ---
-
-export async function getFamilyAccounts() {
-  assertConfig();
-  
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
-
-  while (hasMore) {
-    const { data, error } = await supabase
-      .from("platform_accounts")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (error) throw error;
-    
-    allData = allData.concat(data || []);
-
-    if (!data || data.length < pageSize) {
-      hasMore = false;
-    } else {
-      page++;
-    }
-  }
-
-  return allData.map(acc => ({
-    id: acc.id,
-    _id: acc.id,
-    service: acc.platform_code,
-    masterEmail: acc.account_email,
-    password: acc.account_password,
-    notes: acc.notes || "",
-    createdAt: acc.created_at,
-    ownerRenewalDate: acc.owner_renewal_date,
-    renewalCost: Number(acc.renewal_cost) || 0,
-    renewalCurrency: acc.renewal_currency || "PEN"
-  }));
-}
+// --- CUENTAS FAMILIARES ---
 
 export async function getFamilyAccountById(id) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("platform_accounts")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-
-  return {
-    id: data.id,
-    _id: data.id,
-    service: data.platform_code,
-    masterEmail: data.account_email,
-    password: data.account_password,
-    notes: data.notes || "",
-    createdAt: data.created_at,
-    ownerRenewalDate: data.owner_renewal_date,
-    renewalCost: Number(data.renewal_cost) || 0,
-    renewalCurrency: data.renewal_currency || "PEN"
-  };
+  return formatFamilyAccount(await queryOne("select * from platform_accounts where id = $1", [id]));
 }
 
-export async function createFamilyAccount(accountData) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("platform_accounts")
-    .insert({
-      platform_code: accountData.service,
-      account_email: accountData.masterEmail,
-      account_password: accountData.password,
-      notes: accountData.notes || "",
-      owner_renewal_date: accountData.ownerRenewalDate || null,
-      renewal_cost: accountData.renewalCost || 0,
-      renewal_currency: accountData.renewalCurrency || "PEN"
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  const result = {
-    id: data.id,
-    _id: data.id,
-    service: data.platform_code,
-    masterEmail: data.account_email,
-    password: data.account_password,
-    notes: data.notes || "",
-    createdAt: data.created_at,
-    ownerRenewalDate: data.owner_renewal_date,
-    renewalCost: Number(data.renewal_cost) || 0,
-    renewalCurrency: data.renewal_currency || "PEN"
+export async function createFamilyAccount(accountData, { tx = null } = {}) {
+  const run = async (t) => {
+    const res = await t.query(
+      `insert into platform_accounts(platform_code, account_email, account_password, notes,
+                                     owner_renewal_date, renewal_cost, renewal_currency)
+       values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+      [accountData.service, accountData.masterEmail, accountData.password, accountData.notes || "",
+       toDateStr(accountData.ownerRenewalDate), accountData.renewalCost || 0, accountData.renewalCurrency || "PEN"]
+    );
+    const result = formatFamilyAccount(res.rows[0]);
+    await logEvent("family_account", result.id, "create", null, result, "Family account created", { tx: t });
+    return result;
   };
-
-  await logEvent("family_account", data.id, "create", null, result, "Family account created");
-  return result;
+  return tx ? run(tx) : withTransaction(run);
 }
 
 export async function updateFamilyAccount(id, updatedFields) {
-  assertConfig();
-  const fields = {};
-  if (updatedFields.service !== undefined) fields.platform_code = updatedFields.service;
-  if (updatedFields.masterEmail !== undefined) fields.account_email = updatedFields.masterEmail;
-  if (updatedFields.password !== undefined) fields.account_password = updatedFields.password;
-  if (updatedFields.notes !== undefined) fields.notes = updatedFields.notes;
-  if (updatedFields.ownerRenewalDate !== undefined) fields.owner_renewal_date = updatedFields.ownerRenewalDate;
-  if (updatedFields.renewalCost !== undefined) fields.renewal_cost = updatedFields.renewalCost;
-  if (updatedFields.renewalCurrency !== undefined) fields.renewal_currency = updatedFields.renewalCurrency;
-  fields.updated_at = new Date().toISOString();
-
-  const { data: oldData } = await supabase.from("platform_accounts").select("*").eq("id", id).maybeSingle();
-
-  const { data, error } = await supabase
-    .from("platform_accounts")
-    .update(fields)
-    .eq("id", id)
-    .select()
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-
-  const result = {
-    id: data.id,
-    _id: data.id,
-    service: data.platform_code,
-    masterEmail: data.account_email,
-    password: data.account_password,
-    notes: data.notes || "",
-    createdAt: data.created_at,
-    ownerRenewalDate: data.owner_renewal_date,
-    renewalCost: Number(data.renewal_cost) || 0,
-    renewalCurrency: data.renewal_currency || "PEN"
+  const map = {
+    service: "platform_code",
+    masterEmail: "account_email",
+    password: "account_password",
+    notes: "notes",
+    ownerRenewalDate: "owner_renewal_date",
+    renewalCost: "renewal_cost",
+    renewalCurrency: "renewal_currency",
   };
-
-  await logEvent("family_account", id, "update", oldData, result, "Family account updated");
-  return result;
+  return withTransaction(async (tx) => {
+    const old = await tx.query("select * from platform_accounts where id = $1 for update", [id]);
+    if (!old.rows[0]) return null;
+    const sets = ["updated_at = now()"];
+    const params = [id];
+    for (const [key, column] of Object.entries(map)) {
+      if (updatedFields[key] === undefined) continue;
+      params.push(key === "ownerRenewalDate" ? toDateStr(updatedFields[key]) : updatedFields[key]);
+      sets.push(`${column} = $${params.length}`);
+    }
+    const res = await tx.query(`update platform_accounts set ${sets.join(", ")} where id = $1 returning *`, params);
+    const result = formatFamilyAccount(res.rows[0]);
+    await logEvent("family_account", id, "update", formatFamilyAccount(old.rows[0]), result, "Family account updated", { tx });
+    return result;
+  });
 }
 
 export async function deleteFamilyAccount(id) {
-  assertConfig();
-  const { data: oldData } = await supabase.from("platform_accounts").select("*").eq("id", id).maybeSingle();
-  const { error } = await supabase.from("platform_accounts").delete().eq("id", id);
-  if (error) throw error;
-  await logEvent("family_account", id, "delete", oldData, null, "Family account deleted");
+  await withTransaction(async (tx) => {
+    const old = await tx.query("select * from platform_accounts where id = $1 for update", [id]);
+    if (!old.rows[0]) return;
+    // Las suscripciones históricas se conservan, sin referencia al inventario que desaparece.
+    await tx.query(
+      `update subscriptions set account_slot_id = null, platform_account_id = null, updated_at = now()
+        where platform_account_id = $1
+           or account_slot_id in (select id from account_slots where platform_account_id = $1)`,
+      [id]
+    );
+    await tx.query("delete from account_slots where platform_account_id = $1", [id]);
+    await tx.query("delete from platform_accounts where id = $1", [id]);
+    await logEvent("family_account", id, "delete", formatFamilyAccount(old.rows[0]), null, "Family account deleted", { tx });
+  });
 }
 
-// --- MEMBER PROFILES (Slots) CRUD ---
+// --- CUPOS (member profiles) ---
 
-export async function getMemberProfiles(filters = {}) {
-  assertConfig();
-  
-  let allData = [];
-  let page = 0;
-  const pageSize = 1000;
-  let hasMore = true;
+const SLOT_SELECT = `
+  select s.*,
+         to_json(pa) as platform_accounts,
+         (select to_json(x) from (select c.*, ${CONTACTS_JSON} from customers c where c.id = s.customer_id) x) as customers,
+         (select coalesce(json_agg(sb order by sb.id desc), '[]'::json)
+            from subscriptions sb where sb.account_slot_id = s.id) as subscriptions
+    from account_slots s
+    left join platform_accounts pa on pa.id = s.platform_account_id`;
 
-  while (hasMore) {
-    let query = supabase
-      .from("account_slots")
-      .select("*, platform_accounts(id, platform_code, account_email, account_password, notes, owner_renewal_date, renewal_cost, renewal_currency), customers(id, display_name, customer_contacts(contact_value, normalized_value, contact_type, is_primary)), subscriptions(plan_price, renewal_date, subscription_status)")
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (filters.familyAccountId) {
-      query = query.eq("platform_account_id", filters.familyAccountId);
-    }
-    if (filters.status) {
-      query = query.eq("status", filters.status);
-    }
-
-    const { data, error } = await query.order("updated_at", { ascending: false });
-    if (error) throw error;
-
-    allData = allData.concat(data || []);
-
-    if (!data || data.length < pageSize) {
-      hasMore = false;
-    } else {
-      page++;
-    }
-  }
-
-  return allData.map(slot => formatMemberProfile(slot));
+export async function getMemberProfileById(id, { tx = null } = {}) {
+  const runner = tx || { query };
+  const res = await runner.query(`${SLOT_SELECT} where s.id = $1`, [id]);
+  return formatMemberProfile(res.rows[0]);
 }
 
+/** Cupos libres por servicio. Un cupo con reserva vencida vuelve a contar como libre (§15.2). */
 export async function getFreeSlotsStock() {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("account_slots")
-    .select("status, platform_accounts(platform_code)")
-    .eq("status", "free");
-  if (error) throw error;
-  
-  const activeStock = { tidal: 0, deezer: 0, qobuz: 0 };
-  if (data) {
-    data.forEach(item => {
-      const code = item.platform_accounts?.platform_code;
-      if (code && activeStock[code] !== undefined) {
-        activeStock[code]++;
-      }
-    });
+  const { rows } = await query(
+    `select pa.platform_code, count(*)::int as free
+       from account_slots s
+       join platform_accounts pa on pa.id = s.platform_account_id
+      where s.status = 'free' or (s.status = 'reserved' and s.reserved_until < now())
+      group by pa.platform_code`
+  );
+  const stock = Object.fromEntries(Object.keys(CONFIG.services).map((code) => [code, 0]));
+  for (const row of rows) {
+    if (stock[row.platform_code] !== undefined) stock[row.platform_code] = row.free;
   }
-  return activeStock;
+  return stock;
 }
 
-export async function getMemberProfileById(id) {
-  assertConfig();
-  const { data, error } = await supabase
-    .from("account_slots")
-    .select("*, platform_accounts(id, platform_code, account_email, account_password, notes, owner_renewal_date, renewal_cost, renewal_currency), customers(id, display_name, customer_contacts(contact_value, normalized_value, contact_type, is_primary)), subscriptions(plan_price, renewal_date, subscription_status)")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  return formatMemberProfile(data);
+export async function createMemberProfile(profileData, { tx = null } = {}) {
+  const run = async (t) => {
+    let slotNum = profileData.slotNumber;
+    if (!slotNum) {
+      const res = await t.query(
+        "select coalesce(max(slot_number), 0) + 1 as next from account_slots where platform_account_id = $1",
+        [profileData.familyAccountId]
+      );
+      slotNum = res.rows[0].next;
+    }
+    const res = await t.query(
+      `insert into account_slots(platform_account_id, customer_id, slot_number, member_email, email_type, member_password, status)
+       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [profileData.familyAccountId, profileData.clientId ?? null, slotNum,
+       profileData.memberEmail || "", profileData.emailType || "admin",
+       profileData.memberPassword || "", profileData.status || "free"]
+    );
+    return getMemberProfileById(res.rows[0].id, { tx: t });
+  };
+  return tx ? run(tx) : withTransaction(run);
 }
 
-export async function createMemberProfile(profileData) {
-  assertConfig();
-  let slotNum = profileData.slotNumber;
-  if (!slotNum) {
-    const { count } = await supabase
-      .from("account_slots")
-      .select("*", { count: "exact", head: true })
-      .eq("platform_account_id", profileData.familyAccountId);
-    slotNum = (count || 0) + 1;
-  }
+/**
+ * Edita un cupo y mantiene su suscripción coherente. Ya NO escribe en `payments`
+ * (defecto 1 de §2.3): el asiento contable lo registra quien cobra, nunca una edición.
+ */
+export async function updateMemberProfile(id, updatedFields, { tx = null } = {}) {
+  const run = async (t) => {
+    const oldRes = await t.query(`${SLOT_SELECT} where s.id = $1 for update of s`, [id]);
+    const oldSlot = oldRes.rows[0];
+    if (!oldSlot) return null;
 
-  const { data, error } = await supabase
-    .from("account_slots")
-    .insert({
-      platform_account_id: profileData.familyAccountId,
-      customer_id: profileData.clientId,
-      slot_number: slotNum,
-      member_email: profileData.memberEmail || "",
-      email_type: profileData.emailType || "admin",
-      member_password: profileData.memberPassword || "",
-      status: profileData.status || "free"
-    })
-    .select("*, platform_accounts(*)")
-    .single();
-  if (error) throw error;
+    const map = {
+      clientId: "customer_id",
+      memberEmail: "member_email",
+      emailType: "email_type",
+      memberPassword: "member_password",
+      status: "status",
+    };
+    const sets = ["updated_at = now()"];
+    const params = [id];
+    for (const [key, column] of Object.entries(map)) {
+      if (updatedFields[key] === undefined) continue;
+      params.push(updatedFields[key]);
+      sets.push(`${column} = $${params.length}`);
+    }
+    const nextStatus = updatedFields.status !== undefined ? updatedFields.status : oldSlot.status;
+    if (nextStatus !== "reserved") sets.push("reserved_until = null", "reserved_for_order = null");
+    await t.query(`update account_slots set ${sets.join(", ")} where id = $1`, params);
 
-  return formatMemberProfile(data);
-}
+    const currentClientId = updatedFields.clientId !== undefined ? updatedFields.clientId : oldSlot.customer_id;
 
-export async function updateMemberProfile(id, updatedFields) {
-  assertConfig();
+    if (nextStatus !== "free" && nextStatus !== "reserved" && currentClientId) {
+      // Un cupo no puede tener dos suscripciones vivas: si cambió de cliente, la anterior termina.
+      await t.query(
+        `update subscriptions set subscription_status = 'expired', updated_at = now()
+          where account_slot_id = $1 and customer_id is distinct from $2
+            and subscription_status in ('active','pending_payment')`,
+        [id, currentClientId]
+      );
 
-  // Retrieve current slot record before modifications
-  const { data: oldSlot } = await supabase
-    .from("account_slots")
-    .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)")
-    .eq("id", id)
-    .maybeSingle();
+      const existing = await t.query(
+        `select * from subscriptions
+          where account_slot_id = $1 and customer_id = $2
+            and subscription_status in ('active','pending_payment')
+          order by id desc limit 1`,
+        [id, currentClientId]
+      );
+      const renewalDateStr = updatedFields.renewalDate !== undefined ? toDateStr(updatedFields.renewalDate) : undefined;
 
-  if (!oldSlot) return null;
-
-  const fields = {};
-  if (updatedFields.clientId !== undefined) fields.customer_id = updatedFields.clientId;
-  if (updatedFields.memberEmail !== undefined) fields.member_email = updatedFields.memberEmail;
-  if (updatedFields.emailType !== undefined) fields.email_type = updatedFields.emailType;
-  if (updatedFields.memberPassword !== undefined) fields.member_password = updatedFields.memberPassword;
-  if (updatedFields.status !== undefined) fields.status = updatedFields.status;
-  fields.updated_at = new Date().toISOString();
-
-  // Perform slot update
-  const { error: slotUpdateError } = await supabase
-    .from("account_slots")
-    .update(fields)
-    .eq("id", id);
-  if (slotUpdateError) throw slotUpdateError;
-
-  const currentClientId = updatedFields.clientId !== undefined ? updatedFields.clientId : oldSlot.customer_id;
-  const currentStatus = updatedFields.status !== undefined ? updatedFields.status : oldSlot.status;
-
-  // Manage Subscription and Payment Ledgers
-  if (currentStatus !== "free" && currentClientId) {
-    const price = updatedFields.pricePen !== undefined ? updatedFields.pricePen : 0;
-    const renewalDate = updatedFields.renewalDate !== undefined ? updatedFields.renewalDate : null;
-    let renewalDateStr = null;
-    if (renewalDate) {
-      if (renewalDate instanceof Date) {
-        renewalDateStr = renewalDate.toISOString().substring(0, 10);
-      } else if (typeof renewalDate === "string") {
-        renewalDateStr = renewalDate.substring(0, 10);
+      if (existing.rows[0]) {
+        const subSets = ["updated_at = now()", "subscription_status = $2"];
+        const subParams = [existing.rows[0].id, nextStatus];
+        if (updatedFields.pricePen !== undefined) {
+          subParams.push(Number(updatedFields.pricePen) || 0);
+          subSets.push(`plan_price = $${subParams.length}`);
+        }
+        if (renewalDateStr !== undefined) {
+          subParams.push(renewalDateStr);
+          subSets.push(`renewal_date = $${subParams.length}::date`);
+        }
+        await t.query(`update subscriptions set ${subSets.join(", ")} where id = $1`, subParams);
+      } else {
+        await t.query(
+          `insert into subscriptions(
+             customer_id, platform_code, platform_account_id, account_slot_id,
+             activation_email, activation_email_owner, plan_price, currency,
+             start_date, renewal_date, subscription_status)
+           values ($1,$2,$3,$4,$5,$6,$7,'PEN',current_date, coalesce($8::date, current_date), $9)`,
+          [currentClientId, oldSlot.platform_accounts?.platform_code || "tidal",
+           oldSlot.platform_account_id, id,
+           updatedFields.memberEmail ?? oldSlot.member_email ?? "",
+           updatedFields.emailType ?? oldSlot.email_type ?? "admin",
+           Number(updatedFields.pricePen) || 0, renewalDateStr ?? null, nextStatus]
+        );
       }
+    } else if (nextStatus === "free") {
+      await t.query(
+        `update subscriptions set subscription_status = 'expired', updated_at = now()
+          where account_slot_id = $1 and subscription_status in ('active','pending_payment')`,
+        [id]
+      );
     }
 
-    // Check if there is an active subscription on this slot for this customer
-    const { data: existingSub } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("account_slot_id", id)
-      .eq("customer_id", currentClientId)
-      .eq("subscription_status", "active")
-      .maybeSingle();
-
-    let subscriptionId = existingSub?.id;
-
-    if (existingSub) {
-      // Update subscription dates and status
-      const { data: updatedSub } = await supabase
-        .from("subscriptions")
-        .update({
-          plan_price: price,
-          renewal_date: renewalDateStr,
-          subscription_status: currentStatus,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", existingSub.id)
-        .select()
-        .single();
-      
-      subscriptionId = updatedSub.id;
-    } else {
-      // Create a brand new active subscription record
-      const serviceCode = oldSlot.platform_accounts?.platform_code || "tidal";
-      const { data: newSub, error: newSubError } = await supabase
-        .from("subscriptions")
-        .insert({
-          customer_id: currentClientId,
-          platform_code: serviceCode,
-          platform_account_id: oldSlot.platform_account_id,
-          account_slot_id: id,
-          activation_email: updatedFields.memberEmail || oldSlot.member_email || "",
-          activation_email_owner: updatedFields.emailType || oldSlot.email_type || "admin",
-          plan_price: price,
-          currency: "PEN",
-          start_date: new Date().toISOString().substring(0, 10),
-          renewal_date: renewalDateStr || new Date().toISOString().substring(0, 10),
-          subscription_status: currentStatus
-        })
-        .select()
-        .maybeSingle();
-
-      if (newSubError) {
-        console.error("Detalle del error de Supabase al crear suscripción:", newSubError);
-        throw new Error("Error al crear suscripción en la base de datos: " + newSubError.message);
-      }
-
-      if (!newSub) {
-        throw new Error("No se pudo recuperar el registro de suscripción creado.");
-      }
-
-      subscriptionId = newSub.id;
-    }
-
-    // Record Payment Transaction if this was a renewal/purchase action
-    if (price > 0 && subscriptionId) {
-      await supabase.from("payments").insert({
-        customer_id: currentClientId,
-        subscription_id: subscriptionId,
-        amount: price,
-        currency: "PEN",
-        payment_method: "Manual / Panel Admin",
-        payment_status: "confirmed",
-        coverage_from: new Date().toISOString().substring(0, 10),
-        coverage_to: renewalDateStr || new Date().toISOString().substring(0, 10)
-      });
-    }
-  } else if (currentStatus === "free") {
-    // If the slot is freed up, expire/cancel any currently active subscriptions for this slot
-    await supabase
-      .from("subscriptions")
-      .update({
-        subscription_status: "expired",
-        updated_at: new Date().toISOString()
-      })
-      .eq("account_slot_id", id)
-      .eq("subscription_status", "active");
-  }
-
-  // Fetch updated slot
-  const { data: finalSlot } = await supabase
-    .from("account_slots")
-    .select("*, platform_accounts(*), customers(*, customer_contacts(*)), subscriptions(*)")
-    .eq("id", id)
-    .single();
-
-  const formattedProfile = formatMemberProfile(finalSlot);
-  await logEvent("member_profile", id, "update", oldSlot, formattedProfile, "Member slot updated");
-  return formattedProfile;
+    const formatted = await getMemberProfileById(id, { tx: t });
+    await logEvent("member_profile", id, "update", formatMemberProfile(oldSlot), formatted, "Member slot updated", { tx: t });
+    return formatted;
+  };
+  return tx ? run(tx) : withTransaction(run);
 }
 
 export async function deleteMemberProfile(id) {
-  assertConfig();
-  const { data: oldData } = await supabase.from("account_slots").select("*").eq("id", id).maybeSingle();
-  const { error } = await supabase.from("account_slots").delete().eq("id", id);
-  if (error) throw error;
-  await logEvent("member_profile", id, "delete", oldData, null, "Member slot deleted");
-}
-
-// --- STOCK & ORDER AUTO-ASSIGNMENT ---
-
-export async function assignStockAccount(orderId, service) {
-  assertConfig();
-
-  // 1. Fetch order
-  const order = await getOrderById(orderId);
-  if (!order) return null;
-
-  // 2. Fetch all accounts configured for this service
-  const { data: accounts } = await supabase
-    .from("platform_accounts")
-    .select("id")
-    .eq("platform_code", service);
-
-  if (!accounts || accounts.length === 0) return null;
-  const accountIds = accounts.map(a => a.id);
-
-  // 3. Find a free slot in these accounts with member_email filled out
-  const { data: freeSlots, error } = await supabase
-    .from("account_slots")
-    .select("*, platform_accounts(*)")
-    .in("platform_account_id", accountIds)
-    .eq("status", "free")
-    .neq("member_email", "")
-    .limit(1);
-
-  if (error || !freeSlots || freeSlots.length === 0) return null;
-  const slot = freeSlots[0];
-
-  // 4. Create or obtain permanent Client record
-  const client = await getOrCreateClient(order.whatsapp, order.fullName, order.email);
-  const clientId = client.id;
-
-  // 5. Calculate pricing and renewal dates
-  const pricePenNum = parsePrice(order.pricePen);
-  const durationMonths = parseDurationMonths(order.duration);
-  const renewalDateVal = calculateRenewalDate(new Date(), durationMonths);
-
-  // 6. Bind client to the slot and make active
-  const renewalDateStr = renewalDateVal.toISOString().substring(0, 10);
-  await updateMemberProfile(slot.id, {
-    clientId,
-    pricePen: pricePenNum,
-    renewalDate: renewalDateStr,
-    status: "active"
+  await withTransaction(async (tx) => {
+    const old = await tx.query("select * from account_slots where id = $1 for update", [id]);
+    if (!old.rows[0]) return;
+    await tx.query("update subscriptions set account_slot_id = null, updated_at = now() where account_slot_id = $1", [id]);
+    await tx.query("delete from account_slots where id = $1", [id]);
+    await logEvent("member_profile", id, "delete", old.rows[0], null, "Member slot deleted", { tx });
   });
-
-  // 7. Update the order object with the credentials delivered
-  const accountInfo = `Correo: ${slot.member_email} | Clave: ${slot.member_password}`;
-  await updateOrder(orderId, { assignedAccount: accountInfo });
-
-  return accountInfo;
 }
 
-// --- UTILITY LOGIC FUNCTIONS ---
+// --- OPERACIONES MASIVAS ---
 
-export function calculateRenewalDate(purchaseDate, monthsToAdd) {
-  let date = new Date(purchaseDate);
-  const day = date.getDate();
+export async function updateMemberProfilesBulk(ids, updatedFields) {
+  const results = [];
+  for (const id of ids) results.push(await updateMemberProfile(id, updatedFields));
+  return results;
+}
 
-  if (day === 31) {
-    date.setDate(1);
-    date.setMonth(date.getMonth() + 1);
+/**
+ * Renovación manual desde el panel: el cliente pagó fuera del sistema (WhatsApp).
+ * Extiende la cobertura y deja UN asiento `admin_manual` por cupo, en la misma transacción.
+ */
+export async function extendMemberProfilesBulk(ids, monthsToAdd, { performedBy = "admin" } = {}) {
+  const results = [];
+  for (const id of ids) {
+    const res = await withTransaction(async (tx) => {
+      const slot = await getMemberProfileById(id, { tx });
+      if (!slot || slot.status === "free" || !slot.clientId) return null;
+
+      const base = slot.renewalDate ? new Date(`${slot.renewalDate}T12:00:00`) : new Date();
+      const coverageFrom = slot.renewalDate || toDateStr(new Date());
+      const renewalDateStr = toDateStr(calculateRenewalDate(base, monthsToAdd));
+
+      const updated = await updateMemberProfile(id, { renewalDate: renewalDateStr, status: slot.status }, { tx });
+      const sub = await tx.query(
+        `select id from subscriptions where account_slot_id = $1 and customer_id = $2
+            and subscription_status in ('active','pending_payment') order by id desc limit 1`,
+        [id, slot.clientId.id]
+      );
+      if (slot.pricePen > 0) {
+        await insertPayment(tx, {
+          customerId: slot.clientId.id,
+          subscriptionId: sub.rows[0]?.id ?? null,
+          provider: "admin_manual",
+          paymentMethod: "Manual / Panel Admin",
+          grossAmount: slot.pricePen,
+          currency: "PEN",
+          salesChannel: "manual",
+          confirmedBy: performedBy,
+          coverageFrom,
+          coverageTo: renewalDateStr,
+          notes: `Renovación manual +${monthsToAdd} mes(es)`,
+        });
+      }
+      return updated;
+    });
+    if (res) results.push(res);
   }
-
-  date.setMonth(date.getMonth() + monthsToAdd);
-  return date;
+  return results;
 }
+
+export async function clearMemberProfilesBulk(ids) {
+  const results = [];
+  for (const id of ids) {
+    results.push(await updateMemberProfile(id, {
+      clientId: null,
+      memberEmail: "",
+      memberPassword: "",
+      status: "free",
+    }));
+  }
+  return results;
+}
+
+// --- UTILIDADES ---
+
+export { calculateRenewalDate } from "./renewal";
 
 const COUNTRY_MAP = {
   "51": { code: "PE", name: "Perú", flag: "🇵🇪" },
@@ -1070,82 +672,12 @@ const COUNTRY_MAP = {
   "58": { code: "VE", name: "Venezuela", flag: "🇻🇪" },
   "591": { code: "BO", name: "Bolivia", flag: "🇧🇴" },
   "593": { code: "EC", name: "Ecuador", flag: "🇪🇨" },
-  "502": { code: "GT", name: "Guatemala", flag: "🇬🇹" }
+  "502": { code: "GT", name: "Guatemala", flag: "🇬🇹" },
 };
 
 export function getCountryFromPhone(phoneNumber) {
   if (!phoneNumber) return { code: "INT", name: "Otro / Internacional", flag: "🌐" };
   const cleanPhone = phoneNumber.replace(/\D/g, "");
-
-  const prefix3 = cleanPhone.substring(0, 3);
-  if (COUNTRY_MAP[prefix3]) return COUNTRY_MAP[prefix3];
-
-  const prefix2 = cleanPhone.substring(0, 2);
-  if (COUNTRY_MAP[prefix2]) return COUNTRY_MAP[prefix2];
-
-  return { code: "INT", name: "Otro / Internacional", flag: "🌐" };
+  return COUNTRY_MAP[cleanPhone.substring(0, 3)] || COUNTRY_MAP[cleanPhone.substring(0, 2)] ||
+    { code: "INT", name: "Otro / Internacional", flag: "🌐" };
 }
-
-function parsePrice(priceStr) {
-  if (!priceStr) return 0;
-  const match = priceStr.match(/\d+(\.\d+)?/);
-  return match ? parseFloat(match[0]) : 0;
-}
-
-function parseDurationMonths(durationStr) {
-  if (!durationStr) return 1;
-  const match = durationStr.match(/\d+/);
-  return match ? parseInt(match[0]) : 1;
-}
-
-// --- BULK OPERATIONS API ---
-
-export async function updateMemberProfilesBulk(ids, updatedFields) {
-  assertConfig();
-  const results = [];
-  for (const id of ids) {
-    const res = await updateMemberProfile(id, updatedFields);
-    results.push(res);
-  }
-  return results;
-}
-
-export async function extendMemberProfilesBulk(ids, monthsToAdd) {
-  assertConfig();
-  const results = [];
-  for (const id of ids) {
-    const slot = await getMemberProfileById(id);
-    if (!slot || slot.status === "free") continue;
-
-    // Calculate new date based on individual current renewal date
-    let baseDate = slot.renewalDate ? new Date(slot.renewalDate) : new Date();
-    const newRenewalDate = calculateRenewalDate(baseDate, monthsToAdd);
-    const renewalDateStr = newRenewalDate.toISOString().substring(0, 10);
-
-    const res = await updateMemberProfile(id, {
-      pricePen: slot.pricePen,
-      renewalDate: renewalDateStr,
-      status: slot.status
-    });
-    results.push(res);
-  }
-  return results;
-}
-
-export async function clearMemberProfilesBulk(ids) {
-  assertConfig();
-  const results = [];
-  for (const id of ids) {
-    const res = await updateMemberProfile(id, {
-      clientId: null,
-      memberEmail: "",
-      memberPassword: "",
-      pricePen: 0,
-      renewalDate: null,
-      status: "free"
-    });
-    results.push(res);
-  }
-  return results;
-}
-

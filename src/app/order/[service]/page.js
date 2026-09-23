@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { CONFIG } from "../../../data/config";
+import { formatPen, formatUsdt } from "../../../lib/catalog";
 
 // --- SVG Icons ---
 function ArrowLeftIcon() {
@@ -61,7 +62,8 @@ export default function OrderPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("yape_plin"); // yape_plin or binance_pay
+  // Soles y USDT son monedas independientes: cada plan tiene su precio en cada una (§10.1).
+  const [currency, setCurrency] = useState("PEN");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -97,15 +99,13 @@ export default function OrderPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          // Solo el plan: el precio lo pone el servidor.
           service: serviceData.id,
           planId: selectedPlan.id,
-          duration: selectedPlan.duration,
-          pricePen: selectedPlan.pricePen,
-          priceUsd: selectedPlan.priceUsd,
           fullName,
           email,
           whatsapp,
-          paymentMethod,
+          currency,
         }),
       });
 
@@ -118,14 +118,15 @@ export default function OrderPage() {
       // Save order details to localStorage to allow recovery if they close/go back by accident
       localStorage.setItem("pendingCheckoutOrder", JSON.stringify({
         orderId: data.orderId,
+        checkoutUrl: data.checkoutUrl,
         serviceName: serviceData.name,
         planName: selectedPlan.duration,
-        price: paymentMethod === "binance_pay" ? `$ ${selectedPlan.priceUsd} USDT` : selectedPlan.pricePen,
+        price: currency === "USDT" ? formatUsdt(selectedPlan.priceUsdt) : formatPen(selectedPlan.pricePen),
         createdAt: Date.now()
       }));
 
-      // Redirect to checkout page
-      router.push(`/checkout/${data.orderId}`);
+      // El checkout lleva el token de acceso del pedido en la URL.
+      router.push(data.checkoutUrl);
     } catch (err) {
       setError(err.message || "Hubo un error de red. Intenta nuevamente.");
       setLoading(false);
@@ -205,10 +206,10 @@ export default function OrderPage() {
                       {plan.popular && <span className="popular-badge">Recomendado</span>}
                       <span className="plan-card-duration">{plan.duration}</span>
                       <span className="plan-card-price">
-                        {paymentMethod === "binance_pay" ? `$ ${plan.priceUsd}` : plan.pricePen}
+                        {currency === "USDT" ? formatUsdt(plan.priceUsdt) : formatPen(plan.pricePen)}
                       </span>
                       <span className="plan-card-rate-hint">
-                        {paymentMethod === "binance_pay" ? `${plan.pricePen} aprox` : `$ ${plan.priceUsd} aprox`}
+                        {currency === "USDT" ? `o ${formatPen(plan.pricePen)}` : `o ${formatUsdt(plan.priceUsdt)}`}
                       </span>
                     </button>
                   ))}
@@ -260,7 +261,7 @@ export default function OrderPage() {
                     required
                     disabled={loading}
                   />
-                  <p className="field-hint">Para soporte directo y confirmación del comprobante.</p>
+                  <p className="field-hint">Para soporte directo sobre tu cuenta.</p>
                 </div>
               </div>
 
@@ -269,13 +270,13 @@ export default function OrderPage() {
                 <span className="section-step-label">Paso 3: Medio de Pago</span>
                 <div className="payment-options-group">
                   {/* LOCAL */}
-                  <label className={`payment-radio-card ${paymentMethod === "yape_plin" ? "active" : ""}`}>
+                  <label className={`payment-radio-card ${currency === "PEN" ? "active" : ""}`}>
                     <input
                       type="radio"
-                      name="payment_method"
-                      value="yape_plin"
-                      checked={paymentMethod === "yape_plin"}
-                      onChange={() => setPaymentMethod("yape_plin")}
+                      name="currency"
+                      value="PEN"
+                      checked={currency === "PEN"}
+                      onChange={() => setCurrency("PEN")}
                       disabled={loading}
                     />
                     <div className="payment-card-content">
@@ -283,26 +284,26 @@ export default function OrderPage() {
                         <span className="payment-card-title">Yape / Plin</span>
                         <span className="badge-local-hint">Soles (Perú)</span>
                       </div>
-                      <p className="payment-card-desc">Transferencia instantánea en Soles peruanos.</p>
+                      <p className="payment-card-desc">Pagas en soles. También puedes usar tu saldo en soles.</p>
                     </div>
                   </label>
 
                   {/* BINANCE PAY */}
-                  <label className={`payment-radio-card ${paymentMethod === "binance_pay" ? "active" : ""}`}>
+                  <label className={`payment-radio-card ${currency === "USDT" ? "active" : ""}`}>
                     <input
                       type="radio"
-                      name="payment_method"
-                      value="binance_pay"
-                      checked={paymentMethod === "binance_pay"}
-                      onChange={() => setPaymentMethod("binance_pay")}
+                      name="currency"
+                      value="USDT"
+                      checked={currency === "USDT"}
+                      onChange={() => setCurrency("USDT")}
                       disabled={loading}
                     />
                     <div className="payment-card-content">
                       <div className="payment-card-header">
-                        <span className="payment-card-title">Binance Pay</span>
+                        <span className="payment-card-title">USDT · Binance Pay</span>
                         <span className="badge-crypto-hint">Crypto / USDT</span>
                       </div>
-                      <p className="payment-card-desc">Pagos internacionales descentralizados sin comisiones.</p>
+                      <p className="payment-card-desc">Confirmación automática en menos de un minuto.</p>
                     </div>
                   </label>
                 </div>
@@ -321,7 +322,7 @@ export default function OrderPage() {
                   </>
                 ) : (
                   <>
-                    <span>Generar Pedido • {paymentMethod === "binance_pay" ? `$ ${selectedPlan?.priceUsd || "0.00"}` : selectedPlan?.pricePen || "S/. 0.00"}</span>
+                    <span>Generar Pedido • {currency === "USDT" ? formatUsdt(selectedPlan?.priceUsdt) : formatPen(selectedPlan?.pricePen)}</span>
                   </>
                 )}
               </button>

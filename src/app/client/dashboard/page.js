@@ -49,33 +49,46 @@ function CloseIcon() {
   );
 }
 
+const PROVIDER_LABELS = {
+  manual_yape: "Yape / Plin",
+  taypi: "Yape / Plin",
+  binance_account: "USDT · Binance",
+  wallet_pen: "Saldo en soles",
+  wallet_usdt: "Saldo en USDT",
+  admin_manual: "Registrado por soporte",
+};
+
 export default function ClientDashboard() {
   const router = useRouter();
-  
+
   // Dashboard state
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
   const [activeSubs, setActiveSubs] = useState([]);
   const [expiredSubs, setExpiredSubs] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [paymentMethods, setPaymentMethods] = useState(null);
-  
-  // Modals & forms state
-  const [renewSub, setRenewSub] = useState(null); // Subscription object selected for renewal
-  const [selectedMethod, setSelectedMethod] = useState("yape");
-  const [opNumber, setOpNumber] = useState("");
-  const [payAmount, setPayAmount] = useState("");
-  const [receiptFile, setReceiptFile] = useState(null);
-  const [receiptPreview, setReceiptPreview] = useState("");
-  
+  const [plans, setPlans] = useState({});
+
+  // Renovación: se elige plan y moneda y se paga en el checkout (sin comprobantes).
+  const [renewSub, setRenewSub] = useState(null);
+  const [renewPlanId, setRenewPlanId] = useState("");
+  const [renewCurrency, setRenewCurrency] = useState("PEN");
+
+  // Saldo (§13.4)
+  const [wallet, setWallet] = useState(null);
+  const [topupMode, setTopupMode] = useState("");
+  const [topupAmount, setTopupAmount] = useState("");
+  const [topupReference, setTopupReference] = useState("");
+  const [topupIntent, setTopupIntent] = useState(null);
+
   // PIN change state
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [showPinForm, setShowPinForm] = useState(false);
-  
+
   // Clipboard copied tooltips state
   const [copiedId, setCopiedId] = useState("");
-  
+
   // Global message states
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
@@ -94,12 +107,16 @@ export default function ClientDashboard() {
         setError(data.error || "Error al obtener los datos");
         return;
       }
-      
+
       setClient(data.client);
       setActiveSubs(data.activeSubscriptions);
       setExpiredSubs(data.expiredSubscriptions);
       setPayments(data.payments);
-      setPaymentMethods(data.paymentMethods);
+      setPlans(data.plans || {});
+      fetch("/api/wallet")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((w) => setWallet(w?.enabled ? w : null))
+        .catch(() => {});
     } catch (err) {
       console.error(err);
       setError("Error de red al cargar el dashboard.");
@@ -121,72 +138,61 @@ export default function ClientDashboard() {
 
   // Open Renew Modal
   const openRenewModal = (sub) => {
+    const servicePlans = plans[sub.service] || [];
     setRenewSub(sub);
-    setPayAmount(sub.pricePen);
-    setSelectedMethod("yape");
-    setOpNumber("");
-    setReceiptFile(null);
-    setReceiptPreview("");
+    setRenewPlanId((servicePlans.find((p) => p.months === 1) || servicePlans[0])?.id || "");
+    setRenewCurrency("PEN");
     setError("");
     setSuccessMsg("");
   };
 
-  // Handle file select for receipt upload
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setReceiptFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setReceiptPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Submit Renewal Payment Report
-  const handleSubmitPayment = async (e) => {
+  // La renovación es un pedido: pasa por el mismo checkout y la misma liquidación.
+  const handleStartRenewal = async (e) => {
     e.preventDefault();
-    if (!payAmount || parseFloat(payAmount) <= 0) {
-      setError("Monto de pago inválido.");
+    if (!renewPlanId) {
+      setError("Elige un plan.");
       return;
     }
-
     setActionLoading(true);
     setError("");
-    setSuccessMsg("");
-
     try {
-      const formData = new FormData();
-      formData.append("subscriptionId", renewSub.id);
-      formData.append("paymentMethod", selectedMethod);
-      formData.append("operationNumber", opNumber.trim());
-      formData.append("amount", payAmount);
-      if (receiptFile) {
-        formData.append("file", receiptFile);
-      }
-
-      const res = await fetch("/api/client/renew", {
+      const res = await fetch("/api/client/renewal-order", {
         method: "POST",
-        body: formData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionId: renewSub.id, planId: renewPlanId, currency: renewCurrency }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
-        setError(data.message || data.error || "Error al reportar pago");
-        setActionLoading(false);
+        setError(data.error || "No se pudo iniciar la renovación.");
         return;
       }
-
-      setSuccessMsg("¡Comprobante enviado con éxito! El administrador verificará tu pago pronto.");
-      
-      setTimeout(() => {
-        setRenewSub(null);
-        fetchDashboardData();
-      }, 2500);
+      window.location.href = data.checkoutUrl;
     } catch (err) {
-      setError("Error al enviar el formulario. Verifica tu conexión.");
+      setError("Error de red. Verifica tu conexión.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTopup = async (e) => {
+    e.preventDefault();
+    setActionLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/wallet/topup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currency: "PEN", amount: topupAmount, reference: topupReference }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "No se pudo iniciar la recarga.");
+        return;
+      }
+      setTopupIntent(data.intent);
+      setSuccessMsg("Recarga registrada. Cuando verifiquemos tu Yape se sumará a tu saldo.");
+    } catch (err) {
+      setError("Error de red. Verifica tu conexión.");
     } finally {
       setActionLoading(false);
     }
@@ -332,7 +338,7 @@ export default function ClientDashboard() {
       {/* MAIN CONTAINER */}
       <main style={{ flex: 1, padding: "30px 20px" }}>
         <div className="container" style={{ maxWidth: "768px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "25px" }}>
-          
+
           {/* Welcome Banner */}
           <div className="glass-panel" style={{ padding: "20px 25px", borderRadius: "16px", background: "linear-gradient(135deg, rgba(0, 229, 255, 0.05) 0%, rgba(255, 0, 127, 0.02) 100%)", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
             <h2 style={{ fontFamily: "var(--font-title)", fontSize: "1.5rem", fontWeight: "800", color: "#fff", margin: 0 }}>
@@ -424,12 +430,98 @@ export default function ClientDashboard() {
             </div>
           )}
 
+          {/* MI SALDO (§13.4): dos saldos independientes, sin conversión */}
+          {wallet && (
+            <section className="glass-panel" style={{ borderRadius: "16px", padding: "24px", display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                <h3 style={{ fontFamily: "var(--font-title)", fontSize: "0.85rem", fontWeight: "800", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "1px", margin: 0 }}>
+                  Mi saldo
+                </h3>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" className={`btn ${topupMode === "PEN" ? "btn-primary" : "btn-secondary"}`} style={{ padding: "6px 14px", fontSize: "0.75rem" }} onClick={() => { setTopupMode(topupMode === "PEN" ? "" : "PEN"); setTopupIntent(null); }}>
+                    Recargar soles
+                  </button>
+                  <button type="button" className={`btn ${topupMode === "USDT" ? "btn-primary" : "btn-secondary"}`} style={{ padding: "6px 14px", fontSize: "0.75rem" }} onClick={() => setTopupMode(topupMode === "USDT" ? "" : "USDT")}>
+                    Recargar USDT
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px" }}>
+                  <span style={{ display: "block", fontSize: "0.65rem", color: "var(--text-dim)", fontWeight: "bold" }}>SOLES</span>
+                  <strong style={{ fontSize: "1.3rem", color: "#fff" }}>S/ {Number(wallet.balances.PEN).toFixed(2)}</strong>
+                </div>
+                <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px" }}>
+                  <span style={{ display: "block", fontSize: "0.65rem", color: "var(--text-dim)", fontWeight: "bold" }}>USDT</span>
+                  <strong style={{ fontSize: "1.3rem", color: "#fff" }}>{Number(wallet.balances.USDT).toFixed(3)} USDT</strong>
+                </div>
+              </div>
+              <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0 }}>
+                Con saldo tus compras y renovaciones se confirman al instante. Cada saldo se usa en su moneda; no hay retiros.
+              </p>
+
+              {topupMode === "USDT" && (
+                <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px", fontSize: "0.8rem", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <span>Envía <strong>cualquier monto</strong> en USDT por Binance Pay al Pay ID <code style={{ color: "var(--accent-cyan)" }}>{wallet.topupUsdt.payId}</code>{wallet.topupUsdt.nickname ? ` (${wallet.topupUsdt.nickname})` : ""}.</span>
+                  <span>En <strong>Note to Payee</strong> escribe exactamente:</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <code style={{ fontSize: "1.2rem", fontWeight: "800", letterSpacing: "0.08em", color: "#fff" }}>{wallet.topupUsdt.noteCode}</code>
+                    <button type="button" className="btn btn-secondary" style={{ padding: "4px 8px", border: "none" }} onClick={() => copyToClipboard(wallet.topupUsdt.noteCode, "wallet-note")}>
+                      {copiedId === "wallet-note" ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                  </div>
+                  <span style={{ color: "var(--text-muted)" }}>Es tu código permanente: sirve para todas tus recargas. Se acredita solo en menos de un minuto, con hasta 3 decimales.</span>
+                </div>
+              )}
+
+              {topupMode === "PEN" && (
+                topupIntent ? (
+                  <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px", fontSize: "0.8rem", display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <span>Yapea al <code style={{ color: "var(--accent-cyan)" }}>{topupIntent.instructions?.yape?.number}</code> ({topupIntent.instructions?.yape?.name}).</span>
+                    <span style={{ color: "var(--text-muted)" }}>Lo verificamos en nuestra app y se suma a tu saldo. {topupIntent.instructions?.reviewHours ? `Horario: ${topupIntent.instructions.reviewHours}.` : ""}</span>
+                  </div>
+                ) : (
+                  <form onSubmit={handleTopup} style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: "8px", alignItems: "end" }}>
+                    <input className="form-input" type="number" step="0.01" min="1" placeholder="Monto (S/)" value={topupAmount} onChange={(e) => setTopupAmount(e.target.value)} style={{ padding: "8px 12px", fontSize: "0.8rem" }} />
+                    <input className="form-input" placeholder="Nombre con el que yapeas (opcional)" value={topupReference} onChange={(e) => setTopupReference(e.target.value)} style={{ padding: "8px 12px", fontSize: "0.8rem" }} />
+                    <button type="submit" className="btn btn-primary" disabled={actionLoading} style={{ padding: "8px 14px", fontSize: "0.8rem" }}>Continuar</button>
+                  </form>
+                )
+              )}
+
+              {wallet.topupPen.pending.length > 0 && (
+                <span style={{ fontSize: "0.75rem", color: "var(--accent-cyan)" }}>
+                  {wallet.topupPen.pending.length} recarga(s) en verificación.
+                </span>
+              )}
+
+              {wallet.ledger.length > 0 && (
+                <details>
+                  <summary style={{ cursor: "pointer", fontSize: "0.75rem", color: "var(--text-dim)" }}>Movimientos del saldo</summary>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem", marginTop: "8px" }}>
+                    <tbody>
+                      {wallet.ledger.map((m) => (
+                        <tr key={m.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                          <td style={{ padding: "6px", color: "var(--text-muted)" }}>{new Date(m.createdAt).toLocaleDateString("es-PE")}</td>
+                          <td style={{ padding: "6px", color: "#ccc" }}>{{ topup: "Recarga", purchase: "Compra", refund: "Reembolso", overpay: "Excedente", adjustment: "Ajuste" }[m.reason] || m.reason}</td>
+                          <td style={{ padding: "6px", textAlign: "right", fontWeight: "bold", color: m.direction === "credit" ? "#34d399" : "#f87171" }}>
+                            {m.direction === "credit" ? "+" : "−"}{m.currency === "USDT" ? `${m.amount.toFixed(3)} USDT` : `S/ ${m.amount.toFixed(2)}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+            </section>
+          )}
+
           {/* ACTIVE SERVICES */}
           <section style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
             <h3 style={{ fontFamily: "var(--font-title)", fontSize: "0.85rem", fontWeight: "800", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "1px" }}>
               Servicios Contratados
             </h3>
-            
+
             {activeSubs.length === 0 ? (
               <div className="glass-panel text-center" style={{ padding: "40px", borderRadius: "16px", color: "var(--text-muted)" }}>
                 No tienes ninguna suscripción activa registrada en este momento.
@@ -438,10 +530,10 @@ export default function ClientDashboard() {
               activeSubs.map((sub) => {
                 const borderClass = getPlatformBorderClass(sub.service);
                 const accentColor = getPlatformBadgeColor(sub.service);
-                
+
                 let badgeStyle = { color: "#34d399", background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.15)", padding: "4px 10px", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: "bold" };
                 let timeLabel = `${sub.daysRemaining} días restantes`;
-                
+
                 if (sub.daysRemaining <= 5) {
                   badgeStyle = { color: "#fbbf24", background: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.15)", padding: "4px 10px", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: "bold" };
                 }
@@ -452,7 +544,7 @@ export default function ClientDashboard() {
 
                 return (
                   <div key={sub.id} className={`glass-panel ${borderClass}`} style={{ borderRadius: "16px", padding: "24px" }}>
-                    
+
                     {/* Header */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "15px" }}>
                       <div>
@@ -483,9 +575,9 @@ export default function ClientDashboard() {
                           {copiedId === `${sub.id}-email` ? <CheckIcon /> : <CopyIcon />}
                         </button>
                       </div>
-                      
+
                       <div style={{ borderTop: "1px solid rgba(255,255,255,0.04)", margin: "4px 0" }}></div>
-                      
+
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <div>
                           <span style={{ display: "block", fontSize: "0.65rem", color: "var(--text-dim)", fontWeight: "bold" }}>CONTRASEÑA</span>
@@ -507,9 +599,17 @@ export default function ClientDashboard() {
                         Vence: <strong style={{ color: "var(--text-main)" }}>{formatDisplayDate(sub.renewalDate)}</strong>
                       </span>
 
-                      {sub.status === "pending_payment" ? (
+                      {sub.openRenewal ? (
+                        <a
+                          href={sub.openRenewal.checkoutUrl}
+                          className="btn btn-primary"
+                          style={{ padding: "8px 18px", borderRadius: "9999px", fontSize: "0.75rem", fontWeight: "bold" }}
+                        >
+                          Continuar renovación
+                        </a>
+                      ) : sub.status === "pending_payment" ? (
                         <span style={{ fontSize: "0.75rem", color: "var(--accent-cyan)", fontWeight: "bold", background: "rgba(0, 229, 255, 0.05)", border: "1px solid rgba(0, 229, 255, 0.1)", padding: "6px 12px", borderRadius: "8px" }}>
-                          Comprobante en validación
+                          Pago en validación
                         </span>
                       ) : (
                         <button
@@ -560,10 +660,10 @@ export default function ClientDashboard() {
             <h3 style={{ fontFamily: "var(--font-title)", fontSize: "0.85rem", fontWeight: "800", color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "1px" }}>
               Historial de Transacciones
             </h3>
-            
+
             {payments.length === 0 ? (
               <div className="glass-panel text-center" style={{ padding: "20px", borderRadius: "16px", color: "var(--text-muted)", fontSize: "0.8rem" }}>
-                No tienes registros de renovaciones reportadas todavía.
+                Todavía no tienes pagos registrados.
               </div>
             ) : (
               <div className="glass-panel" style={{ borderRadius: "16px", border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", padding: "10px" }}>
@@ -586,6 +686,9 @@ export default function ClientDashboard() {
                       } else if (p.payment_status === "rejected") {
                         statusStyle = { color: "#f87171", fontWeight: "bold" };
                         statusText = "Rechazado";
+                      } else if (p.payment_status === "refunded") {
+                        statusStyle = { color: "#60a5fa", fontWeight: "bold" };
+                        statusText = "Reembolsado al saldo";
                       }
 
                       return (
@@ -594,10 +697,10 @@ export default function ClientDashboard() {
                             {new Date(p.created_at).toLocaleDateString("es-ES")}
                           </td>
                           <td style={{ padding: "10px", fontWeight: "bold", color: "#fff" }}>
-                            S/. {p.amount.toFixed(2)}
+                            {p.currency === "USDT" ? `${Number(p.amount).toFixed(3)} USDT` : `S/ ${Number(p.amount).toFixed(2)}`}
                           </td>
-                          <td style={{ padding: "10px", textTransform: "capitalize", color: "#ccc" }}>
-                            {p.payment_method}
+                          <td style={{ padding: "10px", color: "#ccc" }}>
+                            {PROVIDER_LABELS[p.provider] || p.payment_method}
                           </td>
                           <td style={{ padding: "10px", textAlign: "right" }}>
                             <span style={statusStyle}>{statusText}</span>
@@ -623,7 +726,7 @@ export default function ClientDashboard() {
       {renewSub && (
         <div className="admin-modal-overlay" style={{ background: "rgba(0,0,0,0.85)", zIndex: 100 }}>
           <div className="admin-modal-container glass-panel" style={{ maxWidth: "460px", padding: "30px", borderRadius: "20px", border: "1px solid rgba(255,255,255,0.1)", position: "relative" }}>
-            
+
             {/* Close */}
             <button
               onClick={() => setRenewSub(null)}
@@ -637,7 +740,7 @@ export default function ClientDashboard() {
               Renovar {renewSub.serviceName}
             </h3>
             <p className="section-instruction" style={{ marginBottom: "20px" }}>
-              Sigue las instrucciones de transferencia e ingresa los datos de tu comprobante.
+              Elige el periodo y la moneda. Pagas en la siguiente pantalla y la renovación se aplica sola, sin enviar comprobantes.
             </p>
 
             {error && (
@@ -651,148 +754,51 @@ export default function ClientDashboard() {
               </div>
             )}
 
-            <form onSubmit={handleSubmitPayment} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-              
-              {/* Payment Info Box */}
-              <div style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: "12px", padding: "15px" }}>
-                <label style={{ display: "block", color: "#fff", fontSize: "0.8rem", fontWeight: "bold", marginBottom: "8px" }}>
-                  1. Método de Pago Utilizado
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-                  {Object.entries(paymentMethods || {}).map(([key, method]) => (
+            <form onSubmit={handleStartRenewal} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <label style={{ color: "#fff", fontSize: "0.8rem", fontWeight: "bold" }}>1. Periodo</label>
+                {(plans[renewSub.service] || []).map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    onClick={() => setRenewPlanId(plan.id)}
+                    style={{
+                      display: "flex", justifyContent: "space-between", padding: "10px 14px", borderRadius: "10px", cursor: "pointer",
+                      border: renewPlanId === plan.id ? "1px solid var(--accent-cyan)" : "1px solid rgba(255,255,255,0.06)",
+                      background: renewPlanId === plan.id ? "rgba(0, 229, 255, 0.08)" : "rgba(0,0,0,0.3)",
+                      color: "#fff", fontSize: "0.8rem",
+                    }}
+                  >
+                    <span>{plan.duration}</span>
+                    <strong>{renewCurrency === "USDT" ? `${plan.priceUsdt.toFixed(2)} USDT` : `S/ ${plan.pricePen.toFixed(2)}`}</strong>
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <label style={{ color: "#fff", fontSize: "0.8rem", fontWeight: "bold" }}>2. Moneda</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  {[["PEN", "Soles · Yape/Plin"], ["USDT", "USDT · Binance"]].map(([code, label]) => (
                     <button
-                      key={key}
+                      key={code}
                       type="button"
-                      onClick={() => setSelectedMethod(key)}
+                      onClick={() => setRenewCurrency(code)}
                       style={{
-                        padding: "8px 5px",
-                        fontSize: "0.75rem",
-                        fontWeight: "bold",
-                        border: selectedMethod === key ? "1px solid var(--accent-cyan)" : "1px solid rgba(255,255,255,0.06)",
-                        background: selectedMethod === key ? "rgba(0, 229, 255, 0.08)" : "rgba(0,0,0,0.3)",
-                        color: selectedMethod === key ? "var(--accent-cyan)" : "var(--text-muted)",
-                        borderRadius: "10px",
-                        cursor: "pointer",
-                        textTransform: "capitalize"
+                        padding: "10px 6px", fontSize: "0.75rem", fontWeight: "bold", borderRadius: "10px", cursor: "pointer",
+                        border: renewCurrency === code ? "1px solid var(--accent-cyan)" : "1px solid rgba(255,255,255,0.06)",
+                        background: renewCurrency === code ? "rgba(0, 229, 255, 0.08)" : "rgba(0,0,0,0.3)",
+                        color: renewCurrency === code ? "var(--accent-cyan)" : "var(--text-muted)",
                       }}
                     >
-                      {key}
+                      {label}
                     </button>
                   ))}
                 </div>
-
-                {/* Account Details & QR */}
-                {paymentMethods && paymentMethods[selectedMethod] && (
-                  <div style={{ marginTop: "15px", background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.03)", borderRadius: "10px", padding: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem" }}>
-                      <span style={{ color: "var(--text-dim)" }}>Titular:</span>
-                      <strong style={{ color: "#fff" }}>{paymentMethods[selectedMethod].name}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.75rem" }}>
-                      <div>
-                        <span style={{ color: "var(--text-dim)" }}>
-                          {selectedMethod === "binancePay" ? "Binance Pay ID:" : "Número de cuenta:"}
-                        </span>
-                        <code style={{ color: "var(--accent-cyan)", fontWeight: "bold", marginLeft: "4px", fontSize: "0.85rem" }}>
-                          {paymentMethods[selectedMethod].number || paymentMethods[selectedMethod].payId}
-                        </code>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(paymentMethods[selectedMethod].number || paymentMethods[selectedMethod].payId, "modal-pay-detail")}
-                        className="btn btn-secondary"
-                        style={{ padding: "4px 8px", borderRadius: "6px", border: "none", cursor: "pointer", fontSize: "0.75rem" }}
-                      >
-                        {copiedId === "modal-pay-detail" ? <CheckIcon /> : <CopyIcon />}
-                      </button>
-                    </div>
-
-                    {paymentMethods[selectedMethod].qrImage && (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "10px", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: "10px" }}>
-                        <span style={{ fontSize: "0.7rem", color: "var(--text-dim)", marginBottom: "6px" }}>Código QR de transferencia</span>
-                        <img
-                          src={paymentMethods[selectedMethod].qrImage}
-                          alt={`QR ${selectedMethod}`}
-                          style={{ width: "110px", height: "110px", objectFit: "contain", background: "#fff", borderRadius: "8px", padding: "4px" }}
-                          onError={(e) => { e.target.style.display = "none"; }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                {wallet && (
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                    Tu saldo: S/ {Number(wallet.balances.PEN).toFixed(2)} · {Number(wallet.balances.USDT).toFixed(3)} USDT. Si alcanza, podrás pagar con saldo al instante.
+                  </span>
                 )}
               </div>
-
-              {/* Form Input fields */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <label style={{ display: "block", color: "#fff", fontSize: "0.8rem", fontWeight: "bold" }}>
-                  2. Datos de Transferencia
-                </label>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                  <div>
-                    <label style={{ display: "block", color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: "4px" }} htmlFor="modal-amount">Monto Depositado (S/.)</label>
-                    <input
-                      id="modal-amount"
-                      type="number"
-                      step="0.01"
-                      className="form-input"
-                      style={{ padding: "8px 12px", fontSize: "0.8rem" }}
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      disabled={actionLoading}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: "4px" }} htmlFor="modal-op">Número de Operación</label>
-                    <input
-                      id="modal-op"
-                      type="text"
-                      className="form-input"
-                      style={{ padding: "8px 12px", fontSize: "0.8rem" }}
-                      placeholder="Referencia o Nro."
-                      value={opNumber}
-                      onChange={(e) => setOpNumber(e.target.value)}
-                      disabled={actionLoading}
-                    />
-                  </div>
-                </div>
-
-                {/* File Upload Capture */}
-                <div>
-                  <label style={{ display: "block", color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: "4px" }}>Captura del Comprobante (Opcional)</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <label style={{ flex: 1, border: "1px dashed rgba(255,255,255,0.15)", background: "rgba(0,0,0,0.2)", borderRadius: "12px", padding: "10px 0", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-dim)", marginBottom: "4px" }}>
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                      </svg>
-                      <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", fontWeight: "bold" }}>Subir Imagen</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        style={{ display: "none" }}
-                        onChange={handleFileChange}
-                        disabled={actionLoading}
-                      />
-                    </label>
-
-                    {receiptPreview && (
-                      <div style={{ width: "55px", height: "55px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", overflow: "hidden", background: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <img src={receiptPreview} alt="Receipt preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </div>
-                    )}
-                  </div>
-                  {receiptFile && (
-                    <span style={{ display: "block", fontSize: "0.65rem", color: "var(--text-dim)", marginTop: "4px", truncate: "true", maxWidth: "250px" }}>
-                      Archivo: {receiptFile.name}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Submit Buttons */}
               <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
                 <button
                   type="button"
@@ -805,18 +811,13 @@ export default function ClientDashboard() {
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
+                  disabled={actionLoading || !renewPlanId}
                   className="btn btn-primary"
-                  style={{ flex: 1, padding: "12px", borderRadius: "9999px", fontSize: "0.85rem", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  style={{ flex: 1, padding: "12px", borderRadius: "9999px", fontSize: "0.85rem" }}
                 >
-                  {actionLoading ? (
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  ) : (
-                    "Reportar Pago"
-                  )}
+                  {actionLoading ? "Preparando…" : "Continuar al pago"}
                 </button>
               </div>
-
             </form>
           </div>
         </div>

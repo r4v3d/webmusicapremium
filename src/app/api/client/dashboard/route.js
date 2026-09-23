@@ -1,150 +1,106 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../../lib/db";
+import { query } from "../../../../lib/pg";
+import { getClientById } from "../../../../lib/db";
 import { getCustomerSession } from "../../../../lib/libClientAuth";
+import { resolveSlotCredentials } from "../../../../lib/credentials";
 import { CONFIG } from "../../../../data/config";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    // Validate session
     const customerId = await getCustomerSession();
     if (!customerId) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    // Fetch customer details
-    const { data: customer, error: customerError } = await supabase
-      .from("customers")
-      .select("*, customer_contacts(*)")
-      .eq("id", customerId)
-      .maybeSingle();
-
-    if (customerError) throw customerError;
-    if (!customer) {
+    const client = await getClientById(customerId);
+    if (!client) {
       return NextResponse.json({ error: "Cliente no encontrado" }, { status: 404 });
     }
 
-    // Fetch customer subscriptions with related family accounts and slots
-    const { data: subscriptions, error: subError } = await supabase
-      .from("subscriptions")
-      .select(`
-        *,
-        platform_accounts:platform_account_id(*),
-        account_slots:account_slot_id(*)
-      `)
-      .eq("customer_id", customerId)
-      .order("renewal_date", { ascending: true }); // Soonest to expire first
+    const { rows: subscriptions } = await query(
+      `select sb.*,
+              to_json(pa) as platform_account,
+              to_json(s)  as slot,
+              (select json_build_object('order_id', o.order_id, 'access_token', o.access_token, 'status', o.status)
+                 from orders o
+                where o.renew_subscription_id = sb.id and o.status in ('pending','awaiting_payment','underpaid')
+                order by o.created_at desc limit 1) as open_renewal
+         from subscriptions sb
+         left join platform_accounts pa on pa.id = sb.platform_account_id
+         left join account_slots s on s.id = sb.account_slot_id
+        where sb.customer_id = $1
+        order by sb.renewal_date asc nulls last`,
+      [customerId]
+    );
 
-    if (subError) throw subError;
-
-    // Process and format subscriptions for display
     const activeSubscriptions = [];
     const expiredSubscriptions = [];
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    for (const sub of (subscriptions || [])) {
-      // Calculate remaining days
+    for (const sub of subscriptions) {
       let daysRemaining = 0;
       let isExpired = true;
-      let renewalDateObj = null;
-
       if (sub.renewal_date) {
-        renewalDateObj = new Date(sub.renewal_date);
-        renewalDateObj.setHours(23, 59, 59, 999); // End of renewal day
-        const diffTime = renewalDateObj - today;
-        daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const renewal = new Date(`${sub.renewal_date}T23:59:59`);
+        daysRemaining = Math.ceil((renewal - today) / (1000 * 60 * 60 * 24));
         isExpired = daysRemaining < 0;
       }
 
-      // Resolve login credentials
-      // Account Slot takes priority for profile details.
-      const slot = sub.account_slots;
-      const account = sub.platform_accounts;
-
-      let emailAcc = "";
-      let passwordAcc = "";
-      let profileLabel = "";
-
-      if (slot) {
-        // If email type is "admin", the user logs in with the master email of the family account.
-        // If it is "customer", they use the member email.
-        emailAcc = slot.email_type === "admin" && account 
-          ? account.account_email 
-          : slot.member_email || account?.account_email || "";
-        
-        // Similarly for passwords
-        passwordAcc = slot.member_password || account?.account_password || "";
-        profileLabel = slot.slot_label || `Perfil ${slot.slot_number || ""}`;
-      } else if (account) {
-        // Complete account subscription
-        emailAcc = account.account_email || "";
-        passwordAcc = account.account_password || "";
+      const slot = sub.slot;
+      const account = sub.platform_account;
+      let credentials = { email: sub.activation_email || "", password: "" };
+      let profileLabel = "Sin asignar";
+      // Un cupo reasignado a otro cliente no debe mostrar credenciales ajenas.
+      if (slot && String(slot.customer_id) === String(customerId)) {
+        credentials = resolveSlotCredentials(slot, account);
+        profileLabel = slot.slot_label || `Perfil ${slot.slot_number || ""}`.trim();
+      } else if (!slot && account) {
+        credentials = { email: account.account_email || "", password: account.account_password || "" };
         profileLabel = "Cuenta Completa";
-      } else {
-        // Fallback to subscription values
-        emailAcc = sub.activation_email || "";
-        passwordAcc = "";
-        profileLabel = "Sin asignar";
       }
+      const live = !isExpired && !["expired", "cancelled"].includes(sub.subscription_status);
 
-      // Check for pending payments under this subscription
-      const { data: pendingPayments } = await supabase
-        .from("payments")
-        .select("id, amount, payment_method, created_at, proof_url")
-        .eq("subscription_id", sub.id)
-        .eq("payment_status", "pending");
-
-      const hasPendingReport = pendingPayments && pendingPayments.length > 0;
-
-      const formattedSub = {
+      const formatted = {
         id: sub.id,
         service: sub.platform_code || "tidal",
         serviceName: CONFIG.services[sub.platform_code]?.name || (sub.platform_code || "Tidal").toUpperCase(),
-        email: emailAcc,
-        password: passwordAcc,
+        email: live ? credentials.email : "",
+        password: live ? credentials.password : "",
         profile: profileLabel,
-        pricePen: sub.plan_price || 0,
+        pricePen: Number(sub.plan_price) || 0,
+        currency: sub.currency || "PEN",
         renewalDate: sub.renewal_date,
         daysRemaining: isExpired ? 0 : daysRemaining,
         status: sub.subscription_status,
-        hasPendingReport,
-        pendingReportDetails: hasPendingReport ? pendingPayments[0] : null
+        openRenewal: sub.open_renewal
+          ? { orderId: sub.open_renewal.order_id, checkoutUrl: `/checkout/${sub.open_renewal.order_id}?t=${sub.open_renewal.access_token}` }
+          : null,
       };
-
-      if (isExpired || sub.subscription_status === "expired" || sub.subscription_status === "cancelled") {
-        expiredSubscriptions.push(formattedSub);
-      } else {
-        activeSubscriptions.push(formattedSub);
-      }
+      (live ? activeSubscriptions : expiredSubscriptions).push(formatted);
     }
 
-    // Retrieve last 10 payments for payment history
-    const { data: paymentHistory, error: paymentError } = await supabase
-      .from("payments")
-      .select("id, amount, currency, payment_method, payment_status, created_at, notes")
-      .eq("customer_id", customerId)
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (paymentError) console.error("Payment history fetch error:", paymentError);
-
-    // Format contact phone number
-    const contacts = customer.customer_contacts || [];
-    const phone = contacts.find(c => c.contact_type === "whatsapp")?.contact_value || "";
+    const { rows: paymentHistory } = await query(
+      `select id, gross_amount as amount, currency, provider, payment_method, payment_status, order_id, created_at, notes
+         from payments where customer_id = $1
+        order by created_at desc limit 10`,
+      [customerId]
+    );
 
     return NextResponse.json({
       success: true,
       client: {
-        id: customer.id,
-        nickname: customer.display_name || customer.legal_name || "Cliente",
-        phone,
-        email: contacts.find(c => c.contact_type === "email")?.contact_value || ""
+        id: client.id,
+        nickname: client.nickname || "Cliente",
+        phone: client.currentWhatsApp,
+        email: client.usedEmails[0] || "",
       },
       activeSubscriptions,
       expiredSubscriptions,
-      payments: paymentHistory || [],
-      paymentMethods: CONFIG.payments
+      payments: paymentHistory,
+      plans: Object.fromEntries(Object.entries(CONFIG.services).map(([code, s]) => [code, s.plans])),
     });
   } catch (error) {
     console.error("Fetch dashboard data error:", error);

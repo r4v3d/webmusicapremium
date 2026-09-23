@@ -1,8 +1,10 @@
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { supabase, updateMemberProfile, createFamilyAccount, createMemberProfile } from "../../../../lib/db";
+import { query } from "../../../../lib/pg";
+import { updateMemberProfile, createFamilyAccount, createMemberProfile, getFreeSlotsStock } from "../../../../lib/db";
+import { announceStock } from "../../../../lib/telegramBot";
 
 export async function GET() {
   try {
@@ -11,22 +13,29 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const { data: slots, error } = await supabase
-      .from("account_slots")
-      .select("id, member_email, member_password, updated_at, platform_accounts(platform_code, account_email)")
-      .eq("status", "free");
+    // Libres + reservados (con su cuenta atrás, §15.3). Una reserva vencida cuenta como libre.
+    const { rows: slots } = await query(
+      `select s.id, s.member_email, s.member_password, s.updated_at, s.status, s.reserved_until, s.reserved_for_order,
+              pa.platform_code, pa.account_email
+         from account_slots s
+         join platform_accounts pa on pa.id = s.platform_account_id
+        where s.status = 'free' or s.status = 'reserved'
+        order by s.updated_at desc`
+    );
 
-    if (error) throw error;
-
-    const freeProfiles = (slots || []).map(p => {
-      const parent = p.platform_accounts;
+    const now = Date.now();
+    const freeProfiles = slots.map((p) => {
+      const reserved = p.status === "reserved" && p.reserved_until && new Date(p.reserved_until).getTime() > now;
       return {
         id: p.id,
-        service: parent ? parent.platform_code : "unknown",
+        service: p.platform_code || "unknown",
         accountData: `${p.member_email || ""}:${p.member_password || ""}`,
-        familyMasterEmail: parent ? parent.account_email : "No anotado",
+        familyMasterEmail: p.account_email || "No anotado",
         isUsed: false,
-        createdAt: p.updated_at || new Date().toISOString()
+        reserved,
+        reservedUntil: reserved ? p.reserved_until : null,
+        reservedForOrder: reserved ? p.reserved_for_order : null,
+        createdAt: p.updated_at || new Date().toISOString(),
       };
     });
 
@@ -82,13 +91,13 @@ export async function POST(req) {
     }
 
     // 1. Get free slots of this service directly from DB
-    const { data: freeSlots, error: freeError } = await supabase
-      .from("account_slots")
-      .select("id, slot_number, platform_accounts!inner(id, platform_code)")
-      .eq("status", "free")
-      .eq("platform_accounts.platform_code", service);
-
-    if (freeError) throw freeError;
+    const { rows: freeSlots } = await query(
+      `select s.id, s.slot_number from account_slots s
+         join platform_accounts pa on pa.id = s.platform_account_id
+        where s.status = 'free' and pa.platform_code = $1
+        order by s.id`,
+      [service]
+    );
 
     let slotsUpdated = 0;
     let familiesCreated = 0;
@@ -157,6 +166,11 @@ export async function POST(req) {
         slotsUpdated++;
       }
     }
+
+    after(async () => {
+      const stock = await getFreeSlotsStock().catch(() => null);
+      await announceStock(service, newItems.length, stock?.[service] ?? null).catch((e) => console.error("announceStock:", e));
+    });
 
     return NextResponse.json({
       success: true,

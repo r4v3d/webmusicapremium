@@ -1,0 +1,86 @@
+# Caddyfile · @@DOMAIN@@   (§4.6 y §4.8)
+# Gestionado por deploy/bootstrap/40-caddy.sh — los cambios a mano se pierden.
+
+{
+	email @@EMAIL@@
+	# Cloudflare va delante (§4.8): sin esto, todas las peticiones parecen venir
+	# de Cloudflare y el rate limit por IP y la auditoría de §18 no sirven.
+	# Rangos de https://www.cloudflare.com/ips/ — revísalos una vez al año.
+	servers {
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	}
+}
+
+@@DOMAIN@@ {
+	log {
+		output file @@LOG_DIR@@/caddy-access.log {
+			roll_size 20mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# --- Webhooks: el cuerpo debe llegar byte a byte ---
+	# La firma HMAC de TAYPI (§11) se calcula sobre el cuerpo crudo. Sin
+	# compresión, sin caché y sin reescrituras en esta ruta.
+	handle /api/webhooks/* {
+		header {
+			Cache-Control "no-store"
+		}
+		reverse_proxy 127.0.0.1:@@APP_PORT@@ {
+			header_up Host {host}
+			header_up X-Real-IP {client_ip}
+			# Un webhook lento no debe cortarse a mitad de una liquidación.
+			transport http {
+				read_timeout 120s
+				write_timeout 120s
+			}
+		}
+	}
+
+	# --- Resto de la API: nunca en caché ---
+	handle /api/* {
+		header {
+			Cache-Control "no-store, no-cache, must-revalidate"
+		}
+		reverse_proxy 127.0.0.1:@@APP_PORT@@ {
+			header_up Host {host}
+			header_up X-Real-IP {client_ip}
+		}
+	}
+
+	# --- Estáticos de Next: inmutables, se pueden cachear con fuerza ---
+	handle /_next/static/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:@@APP_PORT@@
+	}
+
+	# --- Todo lo demás (HTML, imágenes) ---
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:@@APP_PORT@@ {
+			header_up Host {host}
+			header_up X-Real-IP {client_ip}
+		}
+	}
+
+	# Página propia si la app está caída durante un despliegue.
+	handle_errors 502 503 504 {
+		respond "El sitio está en mantenimiento. Vuelve en un minuto." 503
+	}
+}
+
+www.@@DOMAIN@@ {
+	redir https://@@DOMAIN@@{uri} permanent
+}

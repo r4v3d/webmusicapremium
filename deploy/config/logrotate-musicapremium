@@ -1,0 +1,15 @@
+# Rotación de logs de la app y de Caddy (§4.8 punto 6: lo que llena el disco
+# no son los datos, son los logs y los dumps).
+@@LOG_DIR@@/*.log {
+	daily
+	rotate 14
+	missingok
+	notifempty
+	compress
+	delaycompress
+	copytruncate
+	su root root
+	create 0640 @@APP_USER@@ @@APP_USER@@
+	# 100 MB de tope por si un bucle de errores llena el archivo antes del corte diario.
+	maxsize 100M
+}

@@ -1,29 +1,35 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../../../lib/db";
-import { setCustomerSession } from "../../../../../lib/libClientAuth";
+import { query } from "../../../../../lib/pg";
+import { otpCodesMatch, setCustomerSession } from "../../../../../lib/libClientAuth";
+import { rateLimitDb } from "../../../../../lib/rateLimitDb";
+import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
 
 export async function POST(req) {
   try {
+    const limited = await rateLimitDb(getClientKey(req, "verify-otp"), { limit: 8, windowMs: 15 * 60 * 1000 });
+    if (!limited.ok) {
+      return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos de código. Espera unos minutos.");
+    }
+
     const { customerId, otpCode } = await req.json();
     if (!customerId || !otpCode) {
       return NextResponse.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
-    // Retrieve auth record
-    const { data: authRecord, error: fetchError } = await supabase
-      .from("customer_auth")
-      .select("*")
-      .eq("customer_id", customerId)
-      .maybeSingle();
+    // Además del límite por IP, 5 intentos por cliente: un OTP de 6 dígitos no resiste fuerza bruta distribuida.
+    const perCustomer = await rateLimitDb(`otp-verify:${customerId}`, { limit: 5, windowMs: 15 * 60 * 1000 });
+    if (!perCustomer.ok) {
+      return rateLimitedJson(perCustomer.retryAfterMs, "Demasiados intentos. Solicita un código nuevo en unos minutos.");
+    }
 
-    if (fetchError) throw fetchError;
+    const { rows } = await query("select * from customer_auth where customer_id = $1", [customerId]);
+    const authRecord = rows[0];
 
     if (!authRecord) {
       return NextResponse.json({ error: "Sesión no iniciada o inválida" }, { status: 400 });
     }
 
-    // Verify OTP code and expiration
-    const isCodeMatch = authRecord.otp_code === otpCode.trim();
+    const isCodeMatch = otpCodesMatch(authRecord.otp_code, otpCode);
     const isExpired = new Date(authRecord.otp_expires_at) < new Date();
 
     if (!isCodeMatch) {
@@ -34,17 +40,11 @@ export async function POST(req) {
       return NextResponse.json({ error: "El código ha expirado. Solicita uno nuevo." }, { status: 400 });
     }
 
-    // Clear OTP code to make it single-use
-    await supabase
-      .from("customer_auth")
-      .update({
-        otp_code: null,
-        otp_expires_at: null,
-        updated_at: new Date().toISOString()
-      })
-      .eq("customer_id", customerId);
+    await query(
+      "update customer_auth set otp_code = null, otp_expires_at = null, updated_at = now() where customer_id = $1",
+      [customerId]
+    );
 
-    // Save session in HTTP-only cookie
     await setCustomerSession(customerId);
 
     return NextResponse.json({

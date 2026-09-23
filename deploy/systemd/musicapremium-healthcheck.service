@@ -1,0 +1,15 @@
+[Unit]
+Description=@@APP_NAME@@ · chequeo de salud (disco, servicios, respaldos)
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/@@APP_NAME@@-healthcheck
+Environment=TZ=@@APP_TZ@@
+# No falla la unidad si encuentra problemas: los registra en alerts.log.
+SuccessExitStatus=0 1
+TimeoutStartSec=5min
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@@APP_NAME@@-health

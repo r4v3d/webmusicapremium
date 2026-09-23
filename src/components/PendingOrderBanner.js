@@ -16,8 +16,8 @@ export default function PendingOrderBanner() {
         try {
           const parsed = JSON.parse(saved);
           const timeElapsed = Date.now() - parsed.createdAt;
-          // Expiry limit: 15 minutes (900,000 ms)
-          if (timeElapsed < 900000) {
+          // Hasta 60 min: es la vigencia más larga de un intento (USDT); el checkout muestra el estado real.
+          if (timeElapsed < 60 * 60 * 1000) {
             setPendingOrder(parsed);
             // Delay slightly for slide-in animation
             setTimeout(() => setVisible(true), 300);
@@ -65,7 +65,7 @@ export default function PendingOrderBanner() {
           </span>
         </div>
         <div className="banner-actions">
-          <Link href={`/checkout/${pendingOrder.orderId}`} className="btn-banner-action">
+          <Link href={pendingOrder.checkoutUrl || `/checkout/${pendingOrder.orderId}`} className="btn-banner-action">
             Continuar al Pago
           </Link>
           <button onClick={handleDismiss} className="btn-banner-dismiss" aria-label="Descartar orden">

@@ -1,0 +1,56 @@
+[Unit]
+Description=@@APP_NAME@@ · web Next.js (standalone)
+Documentation=https://@@DOMAIN@@
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+# Si falla 5 veces en 60 s, systemd deja de insistir y la unidad queda en
+# failed, que es lo que detecta el healthcheck. En systemd moderno estas dos
+# directivas van en [Unit], no en [Service].
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=@@APP_USER@@
+Group=@@APP_USER@@
+WorkingDirectory=@@APP_DIR@@/current
+# El build standalone de Next genera server.js; lo produce deploy.sh.
+ExecStart=/usr/bin/node server.js
+EnvironmentFile=@@ENV_FILE@@
+Environment=NODE_ENV=production
+Environment=PORT=@@APP_PORT@@
+# Solo localhost: quien atiende internet es Caddy.
+Environment=HOSTNAME=127.0.0.1
+Environment=TZ=@@APP_TZ@@
+Environment=NODE_OPTIONS=--max-old-space-size=1536
+
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+
+# --- Endurecimiento: el proceso web no necesita tocar casi nada del sistema ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=@@APP_DIR@@ @@LOG_DIR@@
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@@APP_NAME@@-web
+
+[Install]
+WantedBy=multi-user.target

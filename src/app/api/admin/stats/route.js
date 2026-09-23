@@ -2,7 +2,8 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { supabase, getFamilyAccounts, getFreeSlotsStock } from "../../../../lib/db";
+import { query } from "../../../../lib/pg";
+import { formatDatabaseError, getFreeSlotsStock } from "../../../../lib/db";
 
 export async function GET() {
   try {
@@ -11,60 +12,36 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const accounts = await getFamilyAccounts();
-    const activeStock = await getFreeSlotsStock();
+    const [activeStock, counts, revenue] = await Promise.all([
+      getFreeSlotsStock(),
+      query(
+        `select count(*)::int as total,
+                count(*) filter (where status in ('pending','awaiting_payment','underpaid'))::int as pending,
+                count(*) filter (where status in ('paid','delivered'))::int as paid
+           from orders`
+      ),
+      // Dos libros que nunca se suman (§10.1): ventas confirmadas por moneda.
+      query(
+        `select currency, coalesce(sum(net_amount), 0) as net, coalesce(sum(gross_amount), 0) as gross
+           from payments
+          where payment_status = 'confirmed' and order_id is not null
+          group by currency`
+      ),
+    ]);
 
-    // Calculate order metrics using fast count queries
-    const { count: totalOrders, error: errTotal } = await supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true });
-    if (errTotal) throw errTotal;
-
-    const { count: pendingOrders, error: errPending } = await supabase
-      .from("orders")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "pending");
-    if (errPending) throw errPending;
-
-    const { data: paidOrdersList, error: errPaid } = await supabase
-      .from("orders")
-      .select("price_pen, price_usd, payment_method")
-      .eq("status", "paid");
-    if (errPaid) throw errPaid;
-
-    const paidOrders = paidOrdersList ? paidOrdersList.length : 0;
-
-    // Helper to extract numeric value from price strings (e.g. "S/. 22.00" -> 22)
-    const parsePrice = (priceStr) => {
-      if (!priceStr) return 0;
-      const match = priceStr.match(/\d+(\.\d+)?/);
-      return match ? parseFloat(match[0]) : 0;
-    };
-
-    let totalRevenuePen = 0;
-    let totalRevenueUsd = 0;
-
-    if (paidOrdersList) {
-      paidOrdersList.forEach(o => {
-        if (o.payment_method === "binance_pay") {
-          totalRevenueUsd += parsePrice(o.price_usd);
-        } else {
-          totalRevenuePen += parsePrice(o.price_pen);
-        }
-      });
-    }
-
+    const byCurrency = Object.fromEntries(revenue.rows.map((r) => [r.currency, r]));
     return NextResponse.json({
-      totalOrders,
-      pendingOrders,
-      paidOrders,
-      totalRevenuePen: totalRevenuePen.toFixed(2),
-      totalRevenueUsd: totalRevenueUsd.toFixed(2),
-      activeStock
+      totalOrders: counts.rows[0].total,
+      pendingOrders: counts.rows[0].pending,
+      paidOrders: counts.rows[0].paid,
+      totalRevenuePen: Number(byCurrency.PEN?.net || 0).toFixed(2),
+      totalRevenueUsdt: Number(byCurrency.USDT?.net || 0).toFixed(2),
+      // Compatibilidad con el panel anterior.
+      totalRevenueUsd: Number(byCurrency.USDT?.net || 0).toFixed(2),
+      activeStock,
     }, { status: 200 });
-
   } catch (error) {
     console.error("Fetch Stats Error:", error);
-    return NextResponse.json({ message: `Error de base de datos: ${error.message}` }, { status: 500 });
+    return NextResponse.json({ message: formatDatabaseError(error) }, { status: 500 });
   }
 }

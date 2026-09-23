@@ -1,0 +1,12 @@
+[Unit]
+Description=Prueba mensual de restauración de @@PG_DB@@ (§4.7)
+
+[Timer]
+# Día 1 de cada mes, 04:30 local.
+OnCalendar=*-*-01 04:30:00
+Persistent=true
+RandomizedDelaySec=600
+Unit=@@APP_NAME@@-restore-test.service
+
+[Install]
+WantedBy=timers.target

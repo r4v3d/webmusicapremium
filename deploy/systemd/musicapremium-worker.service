@@ -1,0 +1,49 @@
+[Unit]
+Description=@@APP_NAME@@ · worker de conciliación
+Documentation=https://@@DOMAIN@@
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+# A propósito NO depende de la web: sobrevive a los despliegues (§4.6).
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Service]
+Type=simple
+User=@@APP_USER@@
+Group=@@APP_USER@@
+WorkingDirectory=@@APP_DIR@@/current
+# Bundle de esbuild generado por `npm run build` (worker.js + src/lib).
+ExecStart=/usr/bin/node worker.cjs
+EnvironmentFile=@@ENV_FILE@@
+Environment=NODE_ENV=production
+Environment=TZ=@@APP_TZ@@
+Environment=NODE_OPTIONS=--max-old-space-size=512
+
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=@@APP_DIR@@ @@LOG_DIR@@
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@@APP_NAME@@-worker
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=@@APP_NAME@@ · respaldo cifrado de PostgreSQL
+After=postgresql.service
+Requires=postgresql.service
+# Si el respaldo falla, se dispara la unidad de alerta.
+OnFailure=@@APP_NAME@@-backup-failed.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/@@APP_NAME@@-backup
+EnvironmentFile=-/etc/@@APP_NAME@@/backup.env
+Environment=TZ=@@APP_TZ@@
+# El dump comprime: no debe competir con el servicio web.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@@APP_NAME@@-backup

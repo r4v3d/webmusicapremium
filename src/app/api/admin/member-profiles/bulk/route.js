@@ -27,7 +27,7 @@ export async function PUT(req) {
       if (status !== undefined) fields.status = status;
       if (pricePen !== undefined) fields.pricePen = parseFloat(pricePen) || 0;
       if (renewalDate !== undefined) {
-        fields.renewalDate = renewalDate ? new Date(renewalDate) : null;
+        fields.renewalDate = renewalDate ? String(renewalDate).substring(0, 10) : null;
       }
       
       result = await updateMemberProfilesBulk(profileIds, fields);

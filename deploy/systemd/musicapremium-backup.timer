@@ -1,0 +1,14 @@
+[Unit]
+Description=Respaldo diario de @@PG_DB@@
+
+[Timer]
+# 03:15 hora local (@@APP_TZ@@). Madrugada en Lima: poco tráfico.
+OnCalendar=*-*-* 03:15:00
+# Si el servidor estaba apagado a esa hora, corre al arrancar.
+Persistent=true
+# Evita que todos los timers salten en el mismo segundo.
+RandomizedDelaySec=300
+Unit=@@APP_NAME@@-backup.service
+
+[Install]
+WantedBy=timers.target

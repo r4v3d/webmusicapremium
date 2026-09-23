@@ -1,0 +1,18 @@
+[Unit]
+Description=@@APP_NAME@@ · prueba de restauración en base desechable
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/@@APP_NAME@@-restore-test
+EnvironmentFile=-/etc/@@APP_NAME@@/backup.env
+Environment=TZ=@@APP_TZ@@
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=30min
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=@@APP_NAME@@-restore-test

@@ -1,0 +1,13 @@
+[Unit]
+Description=@@APP_NAME@@ · alerta de respaldo fallido
+
+[Service]
+Type=oneshot
+# Deja rastro en el journal con prioridad err y en alerts.log, que es el archivo
+# que revisa el healthcheck. El correo de alerta se enchufa en la fase 4, cuando
+# exista notify.js.
+# Se usa tee en lugar de printf con \n porque systemd desescapa las ExecStart y
+# las secuencias de escape no llegan intactas al shell.
+ExecStart=/usr/bin/logger -t @@APP_NAME@@-alert -p daemon.err "FALLO EL RESPALDO de @@PG_DB@@. Revisa: journalctl -u @@APP_NAME@@-backup -n 80"
+ExecStart=/bin/sh -c 'echo "$(date -Is) FALLO EL RESPALDO de @@PG_DB@@" >> @@LOG_DIR@@/alerts.log'
+SyslogIdentifier=@@APP_NAME@@-alert

@@ -1,19 +1,24 @@
 import { NextResponse } from "next/server";
+import { isAdminSessionToken } from "./lib/session";
 
-export function proxy(request) {
+export async function proxy(request) {
   const session = request.cookies.get("admin_session")?.value;
   const { pathname } = request.nextUrl;
+  let isAdmin = false;
+  try {
+    isAdmin = await isAdminSessionToken(session);
+  } catch (e) {
+    isAdmin = false;
+  }
 
-  // Protect /admin from unauthorized access
   if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
-    if (session !== "authenticated") {
+    if (!isAdmin) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }
   }
 
-  // Prevent authenticated admin from going back to login screen
   if (pathname === "/admin/login") {
-    if (session === "authenticated") {
+    if (isAdmin) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
   }
@@ -22,6 +27,5 @@ export function proxy(request) {
 }
 
 export const config = {
-  // Match all admin routes
   matcher: ["/admin/:path*"],
 };

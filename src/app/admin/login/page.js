@@ -59,7 +59,8 @@ export default function AdminLoginPage() {
                 id="password-field"
                 type="password"
                 className="form-input"
-                placeholder="••••••••"
+                placeholder="Contraseña"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

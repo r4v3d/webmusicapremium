@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useState, useEffect, useRef, useCallback } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CONFIG } from "../../../data/config";
 
@@ -40,161 +40,200 @@ function WhatsAppIcon() {
   );
 }
 
+const OPEN_STATUSES = ["pending", "awaiting_payment", "underpaid"];
+const CLOSED_INTENT = ["expired", "cancelled", "failed"];
+
+function money(amount, currency) {
+  const n = Number(amount) || 0;
+  return currency === "USDT" ? `${n.toFixed(2)} USDT` : `S/ ${n.toFixed(2)}`;
+}
+
+function formatTime(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function clearPendingBanner(orderId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem("pendingCheckoutOrder") || "null");
+    if (saved?.orderId === orderId) localStorage.removeItem("pendingCheckoutOrder");
+  } catch {}
+}
+
+function CopyField({ label, value, copyValue, id, copied, onCopy, big = false }) {
+  return (
+    <div className="payment-field-item">
+      <span className="field-label">{label}</span>
+      <div className="field-value-wrap">
+        <code className={big ? "field-code checkout-note-code" : "field-code"}>{value}</code>
+        <button type="button" onClick={() => onCopy(copyValue ?? value, id)} className="btn-copy">
+          <CopyIcon />
+          <span>{copied === id ? "¡Copiado!" : "Copiar"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QrBox({ src, alt, variant = "" }) {
+  return (
+    <div className="qr-code-holder">
+      <div className={`qr-visual ${variant}`}>
+        {src ? <img src={src} alt={alt} className="qr-image-display" /> : <span className="qr-logo-brand">{alt}</span>}
+      </div>
+    </div>
+  );
+}
+
+function CheckoutLoading() {
+  return (
+    <div className="checkout-loading">
+      <span className="page-spinner"></span>
+      <p>Cargando información del pago...</p>
+    </div>
+  );
+}
+
 export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<CheckoutLoading />}>
+      <Checkout />
+    </Suspense>
+  );
+}
+
+function Checkout() {
   const { orderId } = useParams();
-  const [order, setOrder] = useState(null);
+  // El token de acceso del pedido viaja en la URL (?t=...), §14.4.
+  const token = useSearchParams().get("t") || "";
+  const [view, setView] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  
-  // Timer state (15 minutes in seconds)
-  const [timeLeft, setTimeLeft] = useState(900);
-  const [timerActive, setTimerActive] = useState(true);
-  
-  // Simulation and UI states
-  const [simulating, setSimulating] = useState(false);
-  const [copiedText, setCopiedText] = useState("");
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+  const [copied, setCopied] = useState("");
+  const [reference, setReference] = useState("");
+  const [binanceOrderId, setBinanceOrderId] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+  const autoStarted = useRef(false);
 
-  const intervalRef = useRef(null);
+  const applyView = useCallback((data) => {
+    setView(data);
+    if (data?.order && !OPEN_STATUSES.includes(data.order.status)) clearPendingBanner(orderId);
+  }, [orderId]);
 
-  // Update payment status (Mock API request)
-  async function updateOrderStatus(newStatus) {
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/orders/${orderId}?t=${encodeURIComponent(token || "")}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status === 404 ? "Pedido no encontrado. Abre el enlace completo que recibiste al crear el pedido." : "No se pudo cargar el pedido.");
+    const data = await res.json();
+    applyView(data);
+    return data;
+  }, [orderId, token, applyView]);
+
+  const startIntent = useCallback(async (provider) => {
+    setBusy(`intent:${provider}`);
+    setNotice("");
     try {
-      const response = await fetch(`/api/orders/${orderId}`, {
+      const res = await fetch("/api/payments/intents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ orderId, token, provider, customerReference: reference || undefined }),
       });
-      const data = await response.json();
-      if (response.ok) {
-        setOrder(data.order);
-        if (newStatus !== "pending") {
-          setTimerActive(false);
-          const saved = localStorage.getItem("pendingCheckoutOrder");
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (parsed.orderId === orderId) {
-                localStorage.removeItem("pendingCheckoutOrder");
-              }
-            } catch (e) {}
-          }
-        }
+      const data = await res.json();
+      if (!res.ok) {
+        setNotice(data.message || "No se pudo iniciar el pago.");
+        if (data.code === "no_stock") await load().catch(() => {});
+        return;
       }
-    } catch (err) {
-      console.error("Error updating status:", err);
+      applyView(data);
+    } catch {
+      setNotice("Error de red. Intenta de nuevo.");
+    } finally {
+      setBusy("");
     }
-  }
+  }, [orderId, token, reference, load, applyView]);
 
-  // Fetch order details
+  // Carga inicial y arranque automático del intento con el proveedor por defecto.
   useEffect(() => {
-    async function fetchOrder() {
+    (async () => {
       try {
-        const response = await fetch(`/api/orders/${orderId}`);
-        if (!response.ok) {
-          throw new Error("Pedido no encontrado.");
-        }
-        const data = await response.json();
-        setOrder(data);
-        
-        // If payment is already completed, failed or expired, stop timer and clear localStorage
-        if (data.status !== "pending") {
-          setTimerActive(false);
-          const saved = localStorage.getItem("pendingCheckoutOrder");
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (parsed.orderId === orderId) {
-                localStorage.removeItem("pendingCheckoutOrder");
-              }
-            } catch (e) {}
-          }
+        const data = await load();
+        const needsIntent = data.order.status === "pending" && (!data.intent || CLOSED_INTENT.includes(data.intent.status));
+        if (needsIntent && data.defaultProviderId && !autoStarted.current) {
+          autoStarted.current = true;
+          await startIntent(data.defaultProviderId);
         }
       } catch (err) {
         setError(err.message);
       } finally {
         setLoading(false);
       }
-    }
+    })();
+  }, [token]);
 
-    fetchOrder();
-  }, [orderId]);
-
-  // Countdown timer logic
+  // Polling cada 5 s mientras el pago esté abierto (§11.6 punto 4).
+  const status = view?.order?.status;
+  const waitingCredentials = ["paid", "delivered"].includes(status) && !view?.credentials && !view?.limited;
   useEffect(() => {
-    if (!timerActive || timeLeft <= 0) return;
+    if (!view || !(OPEN_STATUSES.includes(status) || waitingCredentials)) return undefined;
+    const id = setInterval(() => { load().catch(() => {}); }, 5000);
+    return () => clearInterval(id);
+  }, [view, status, waitingCredentials, load]);
 
-    intervalRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(intervalRef.current);
-          setTimerActive(false);
-          // Auto-expire order in DB
-          updateOrderStatus("expired");
-          return 0;
-        }
-        return prev - 1;
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const copy = (text, id) => {
+    navigator.clipboard.writeText(String(text));
+    setCopied(id);
+    setTimeout(() => setCopied(""), 2000);
+  };
+
+  const refresh = async () => {
+    if (!view?.intent) return;
+    setBusy("refresh");
+    setNotice("");
+    try {
+      const res = await fetch(`/api/payments/intents/${view.intent.id}/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ t: token, customerReference: reference || undefined }),
       });
-    }, 1000);
-
-    return () => clearInterval(intervalRef.current);
-  }, [timerActive, timeLeft]);
-
-  // Helper to format time (MM:SS)
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+      const data = await res.json();
+      if (data.order) applyView(data);
+      setNotice(data.message || "");
+    } catch {
+      setNotice("Error de red. Intenta de nuevo.");
+    } finally {
+      setBusy("");
+    }
   };
 
-  // Simulate confirmed Binance payment
-  const handleSimulatePayment = () => {
-    setSimulating(true);
-    setTimeout(() => {
-      updateOrderStatus("paid");
-      setSimulating(false);
-    }, 1500);
+  const claimBinance = async (e) => {
+    e.preventDefault();
+    setBusy("claim");
+    setNotice("");
+    try {
+      const res = await fetch("/api/payments/binance/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, token, binanceOrderId }),
+      });
+      const data = await res.json();
+      if (data.order) applyView(data);
+      setNotice(data.message || "");
+    } catch {
+      setNotice("Error de red. Intenta de nuevo.");
+    } finally {
+      setBusy("");
+    }
   };
 
-  // Copy text to clipboard
-  const handleCopyToClipboard = (text, label) => {
-    navigator.clipboard.writeText(text);
-    setCopiedText(label);
-    setTimeout(() => setCopiedText(""), 2000);
-  };
+  if (loading) return <CheckoutLoading />;
 
-  // Send Whatsapp confirmation details
-  const getWhatsAppLink = () => {
-    if (!order) return "";
-    const currency = order.paymentMethod === "binance_pay" ? "USD" : "Soles";
-    const amount = order.paymentMethod === "binance_pay" ? order.priceUsd : order.pricePen;
-    const paymentLabel = order.paymentMethod === "binance_pay" ? "Binance Pay" : "Yape / Plin";
-
-    const msg = `¡Hola! Acabo de hacer un pedido en Música Premium Barato.
-
-*Detalles del Pedido:*
-• *ID de Orden:* ${order.orderId}
-• *Servicio:* ${order.service.toUpperCase()} Premium
-• *Duración:* ${order.duration}
-• *Método de Pago:* ${paymentLabel}
-• *Monto:* ${amount}
-• *Correo de envío:* ${order.email}
-• *WhatsApp de contacto:* ${order.whatsapp}
-
-Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gracias!`;
-
-    return `https://wa.me/${CONFIG.whatsappNumber}?text=${encodeURIComponent(msg)}`;
-  };
-
-  if (loading) {
-    return (
-      <div className="checkout-loading">
-        <span className="page-spinner"></span>
-        <p>Cargando información del pago...</p>
-      </div>
-    );
-  }
-
-  if (error || !order) {
+  if (error || !view) {
     return (
       <div className="checkout-error">
         <div className="error-card glass-panel">
@@ -206,15 +245,262 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
     );
   }
 
-  const serviceConfig = CONFIG.services[order.service] || { accentColor: "#d4af37", bgGradient: "" };
-  const serviceThemeClass = `theme-${order.service}`;
+  const { order, intent, credentials, providers, wallet } = view;
+  const currency = order.currency;
+  const amount = currency === "USDT" ? order.amountUsdt : order.amountPen;
+  const serviceName = CONFIG.services[order.service]?.name || String(order.service || "").toUpperCase();
+  const secondsLeft = intent?.expiresAt ? (new Date(intent.expiresAt).getTime() - now) / 1000 : null;
+  const intentOpen = intent && !CLOSED_INTENT.includes(intent.status) && !["paid", "overpaid"].includes(intent.status);
+  const supportLink = `https://wa.me/${CONFIG.whatsappNumber}?text=${encodeURIComponent(`Hola, necesito ayuda con mi pedido ${order.orderId} (${serviceName} ${order.duration}).`)}`;
+
+  const renderPaid = () => (
+    <div className="success-panel glass-panel text-center">
+      <div className="success-icon-wrap"><CheckIcon /></div>
+      <h1 className="success-title">¡Pago Confirmado!</h1>
+      <p className="success-subtitle">
+        {order.isRenewal
+          ? <>Tu suscripción de <strong>{serviceName}</strong> quedó renovada{order.renewalDate ? <> hasta el <strong>{order.renewalDate}</strong></> : null}.</>
+          : <>Tu cuenta premium de <strong>{serviceName} ({order.duration})</strong> está activa.</>}
+      </p>
+
+      {credentials ? (
+        <div className="assigned-credentials-card glass-panel text-left">
+          <h3>Tus Datos de Acceso Premium</h3>
+          <p className="credentials-info-hint">Inicia sesión en la app oficial de {serviceName} con estos datos. También te los enviamos por correo.</p>
+          <div className="credentials-row">
+            <span className="cred-label">Usuario / Correo:</span>
+            <div className="cred-value-wrap">
+              <code>{credentials.email}</code>
+              <button onClick={() => copy(credentials.email, "cred_user")} className="btn-copy-mini"><CopyIcon /><span>{copied === "cred_user" ? "¡Copiado!" : "Copiar"}</span></button>
+            </div>
+          </div>
+          {credentials.password && (
+            <div className="credentials-row">
+              <span className="cred-label">Contraseña:</span>
+              <div className="cred-value-wrap">
+                <code>{credentials.password}</code>
+                <button onClick={() => copy(credentials.password, "cred_pass")} className="btn-copy-mini"><CopyIcon /><span>{copied === "cred_pass" ? "¡Copiado!" : "Copiar"}</span></button>
+              </div>
+            </div>
+          )}
+          {order.renewalDate && <p className="credentials-info-hint">Vence el <strong>{order.renewalDate}</strong>.</p>}
+        </div>
+      ) : (
+        <div className="no-credentials-assigned-card glass-panel">
+          <p>
+            {view.limited
+              ? "Tu pago está confirmado. Por seguridad, las credenciales de este pedido se muestran en el enlace original o en tu correo."
+              : order.awaitingStock
+              ? "Tu pago está confirmado y estamos preparando tu cuenta. Te la enviamos por correo en cuanto esté lista; no necesitas hacer nada más."
+              : "Estamos preparando tus credenciales…"}
+          </p>
+        </div>
+      )}
+
+      <div className="success-details-card">
+        <h3>Detalles de la Orden</h3>
+        <div className="detail-row"><span>ID de Pedido:</span><strong>#{order.orderId}</strong></div>
+        <div className="detail-row"><span>Plataforma:</span><strong>{serviceName} Premium</strong></div>
+        <div className="detail-row"><span>Periodo contratado:</span><strong>{order.duration}</strong></div>
+        <div className="detail-row"><span>Monto:</span><strong className="success-amount">{money(amount, currency)}</strong></div>
+        <div className="detail-row"><span>Correo registrado:</span><strong>{order.email}</strong></div>
+      </div>
+
+      <div className="success-actions">
+        <a href={supportLink} target="_blank" rel="noopener noreferrer" className="btn btn-whatsapp"><WhatsAppIcon /><span>Soporte por WhatsApp</span></a>
+        <Link href="/client/dashboard" className="btn btn-secondary">Ir a mi panel</Link>
+      </div>
+    </div>
+  );
+
+  const renderClosed = (title, text, retry = false) => (
+    <div className="expired-panel glass-panel text-center">
+      <h2>{title}</h2>
+      <p>{text}</p>
+      {notice && <p className="checkout-notice">{notice}</p>}
+      <div className="success-actions">
+        {retry && view.defaultProviderId && (
+          <button type="button" className="btn btn-primary" disabled={!!busy} onClick={() => startIntent(view.defaultProviderId)}>
+            {busy ? "Reservando…" : "Reintentar el pago"}
+          </button>
+        )}
+        <Link href={`/order/${order.service}`} className="btn btn-secondary">Crear Nuevo Pedido</Link>
+      </div>
+    </div>
+  );
+
+  const renderInstructions = () => {
+    if (!intentOpen) {
+      return (
+        <div className="payment-type-block">
+          <h2>Preparando tu pago…</h2>
+          <p className="payment-description">Estamos reservando tu cupo.</p>
+        </div>
+      );
+    }
+    const missing = intent.status === "underpaid" ? intent.missing : null;
+    const toPay = missing ?? intent.amountExpected;
+
+    if (intent.ui === "pay_id_note") {
+      const ins = intent.instructions || {};
+      return (
+        <div className="payment-type-block">
+          <h2>Pago con USDT · Binance Pay</h2>
+          <p className="payment-description">
+            Envía <strong>{money(toPay, "USDT")}</strong> al Pay ID de abajo y escribe en <strong>«Note to Payee»</strong> exactamente el código del pedido. Se confirma solo en menos de un minuto.
+          </p>
+          <QrBox src={ins.qrImage} alt="Binance Pay" />
+          <div className="payment-fields-list">
+            <CopyField label="Binance Pay ID:" value={ins.payId} id="payid" copied={copied} onCopy={copy} />
+            {ins.nickname && <div className="payment-field-item"><span className="field-label">Titular:</span><div className="field-value-wrap"><strong className="field-text">{ins.nickname}</strong></div></div>}
+            <CopyField label="Monto exacto:" value={money(toPay, "USDT")} copyValue={Number(toPay).toFixed(2)} id="amount" copied={copied} onCopy={copy} />
+            <CopyField label="Note to Payee (obligatorio):" value={intent.noteCode} id="note" copied={copied} onCopy={copy} big />
+          </div>
+          <p className="credentials-info-hint">
+            Se acreditan hasta 3 decimales. Si el monto llega por debajo, el pedido queda pendiente y te mostramos cuánto falta. ¿Olvidaste la nota? Pega abajo el Order ID o escríbenos.
+          </p>
+          <form className="checkout-inline-form" onSubmit={claimBinance}>
+            <input className="form-input" inputMode="numeric" placeholder="Order ID de Binance (opcional)" value={binanceOrderId} onChange={(e) => setBinanceOrderId(e.target.value)} />
+            <button type="submit" className="btn btn-primary" disabled={!!busy || binanceOrderId.replace(/\D/g, "").length < 8}>
+              {busy === "claim" ? "Verificando…" : "Verificar al instante"}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    if (intent.ui === "dynamic_qr") {
+      return (
+        <div className="payment-type-block">
+          <h2>Pago con Yape o Plin</h2>
+          <p className="payment-description">Escanea el QR con Yape o Plin y paga <strong>{money(toPay, "PEN")}</strong>. La confirmación es automática.</p>
+          <QrBox src={intent.qrImage} alt="QR de pago" variant="purple" />
+          {intent.checkoutUrl && <a href={intent.checkoutUrl} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">Abrir en el móvil</a>}
+        </div>
+      );
+    }
+
+    // static_qr: Yape/Plin con verificación de un clic en el panel (§11.1).
+    const ins = intent.instructions || {};
+    return (
+      <div className="payment-type-block">
+        <h2>Pago con Yape o Plin</h2>
+        <p className="payment-description">
+          Transfiere <strong>exactamente {money(toPay, "PEN")}</strong>. No necesitas enviar capturas: verificamos el ingreso directamente en nuestra cuenta.
+        </p>
+        <div className="qrs-showcase-grid">
+          <div className="qr-card">
+            <QrBox src={ins.yape?.qrImage} alt="Yape" variant="purple" />
+            <span className="qr-name">YAPE</span>
+            <span className="qr-phone-number">{ins.yape?.number}</span>
+          </div>
+          <div className="qr-card">
+            <QrBox src={ins.plin?.qrImage} alt="Plin" variant="blue" />
+            <span className="qr-name">PLIN</span>
+            <span className="qr-phone-number">{ins.plin?.number}</span>
+          </div>
+        </div>
+        <div className="payment-fields-list">
+          <div className="payment-field-item"><span className="field-label">Titular:</span><div className="field-value-wrap"><strong className="field-text">{ins.yape?.name}</strong></div></div>
+          <CopyField label="Número celular:" value={ins.yape?.number} copyValue={String(ins.yape?.number || "").replace(/\s+/g, "")} id="phone" copied={copied} onCopy={copy} />
+          <div className="payment-field-item"><span className="field-label">Total a transferir:</span><div className="field-value-wrap"><strong className="field-price">{money(toPay, "PEN")}</strong></div></div>
+        </div>
+        <label className="form-label" htmlFor="yape-ref">Para encontrar tu pago más rápido (opcional)</label>
+        <input
+          id="yape-ref"
+          className="form-input"
+          placeholder="Últimos 3 dígitos del Nº de operación o el nombre con el que yapeaste"
+          value={reference}
+          maxLength={80}
+          onChange={(e) => setReference(e.target.value)}
+        />
+        <p className="credentials-info-hint">
+          Tu pedido queda en verificación; normalmente tarda pocos minutos. {ins.reviewHours ? `Horario de verificación: ${ins.reviewHours}.` : ""}
+        </p>
+      </div>
+    );
+  };
+
+  const renderPayment = () => (
+    <div className="payment-grid">
+      <section className="payment-details-card glass-panel">
+        {(providers.length > 1 || wallet) && (
+          <div className="checkout-provider-switch">
+            {wallet && (
+              <button
+                type="button"
+                className={`btn ${wallet.enough ? "btn-primary" : "btn-secondary"}`}
+                disabled={!wallet.enough || !!busy}
+                onClick={() => startIntent(wallet.providerId)}
+                title={wallet.enough ? "" : "Tu saldo no alcanza"}
+              >
+                {busy === `intent:${wallet.providerId}` ? "Pagando…" : `Pagar con mi saldo (${money(wallet.balance, currency)})${wallet.enough ? " · inmediato" : " · insuficiente"}`}
+              </button>
+            )}
+            {providers.length > 1 && providers.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`btn ${intent?.provider === p.id ? "btn-primary" : "btn-secondary"}`}
+                disabled={!!busy || intent?.provider === p.id}
+                onClick={() => startIntent(p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {intent?.status === "underpaid" && (
+          <div className="error-alert">
+            Recibimos {money(intent.amountReceived, currency)}; faltan <strong>{money(intent.missing, currency)}</strong>. Envía la diferencia de la misma forma y se completa solo.
+          </div>
+        )}
+        {renderInstructions()}
+      </section>
+
+      <section className="checkout-summary-panel">
+        {secondsLeft !== null && intentOpen && intent.status !== "underpaid" && (
+          <div className="timer-card glass-panel">
+            <div className="timer-header"><ClockIcon /><span>Tu cupo está reservado por</span></div>
+            <div className="timer-countdown">{formatTime(secondsLeft)}</div>
+            <p className="timer-warning-hint">Paga antes de que termine la reserva para asegurar tu cupo.</p>
+          </div>
+        )}
+
+        <div className="summary-details-card glass-panel">
+          <h3>Resumen de la Orden</h3>
+          <div className="summary-row"><span>Producto:</span><strong>{serviceName} Premium{order.isRenewal ? " (renovación)" : ""}</strong></div>
+          <div className="summary-row"><span>Duración del plan:</span><strong>{order.duration}</strong></div>
+          <div className="summary-row"><span>Método de pago:</span><strong className="payment-label-value">{intent?.label || "—"}</strong></div>
+          <div className="summary-row"><span>Correo:</span><strong>{order.email}</strong></div>
+          <div className="summary-total-row"><span>Total:</span><strong>{money(amount, currency)}</strong></div>
+        </div>
+
+        <div className="checkout-action-buttons">
+          {intentOpen && (
+            <button type="button" className="btn btn-primary checkout-btn" disabled={!!busy} onClick={refresh}>
+              {busy === "refresh" ? "Revisando…" : "Ya pagué y no aparece"}
+            </button>
+          )}
+          {notice && <p className="checkout-notice">{notice}</p>}
+          <p className="credentials-info-hint">Cuando confirmemos tu pago, esta página se actualizará sola con tus credenciales.</p>
+          <a href={supportLink} target="_blank" rel="noopener noreferrer" className="btn btn-whatsapp checkout-btn"><WhatsAppIcon /><span>¿Dudas? Soporte por WhatsApp</span></a>
+        </div>
+      </section>
+    </div>
+  );
+
+  let body;
+  if (["paid", "delivered"].includes(status)) body = renderPaid();
+  else if (status === "expired") body = renderClosed("Pedido Expirado", "La reserva de tu cupo venció. Si ya pagaste, no te preocupes: lo verificamos igual. Si no, puedes reintentar el pago.", true);
+  else if (status === "cancelled") body = renderClosed("Pedido cancelado", "No había stock disponible al momento del pago. No se te cobró nada.");
+  else if (status === "refunded") body = renderClosed("Pedido reembolsado", "El monto de este pedido se devolvió a tu saldo. Puedes usarlo en tu próxima compra.");
+  else body = renderPayment();
 
   return (
-    <div className={`checkout-wrapper ${serviceThemeClass}`}>
+    <div className={`checkout-wrapper theme-${order.service}`}>
       <div className="checkout-bg-glow"></div>
-
       <div className="container">
-        {/* CHECKOUT HEADER */}
         <header className="checkout-page-header">
           <Link href="/" className="checkout-brand">
             <span className="brand-dot"></span>
@@ -222,360 +508,10 @@ Adjunto el comprobante de mi pago. Quedo a la espera de la entrega. ¡Muchas gra
           </Link>
           <div className="order-badge-id">ID de Orden: <strong>#{order.orderId}</strong></div>
         </header>
-
-        {/* MAIN BODY */}
         <main className="checkout-container animate-fade-in">
-          {/* SUCCESS SCREEN */}
-          {order.status === "paid" ? (
-            <div className="success-panel glass-panel text-center">
-              <div className="success-icon-wrap">
-                <CheckIcon />
-              </div>
-              <h1 className="success-title">¡Pago Confirmado!</h1>
-              <p className="success-subtitle">
-                Hemos verificado tu pago correctamente. Tu cuenta premium de <strong>{order.service.toUpperCase()} ({order.duration})</strong> ha sido activada.
-              </p>
-
-              {/* ACCOUNT CREDENTIALS BOX (IF ASSIGNED FROM STOCK) */}
-              {order.assignedAccount ? (
-                <div className="assigned-credentials-card glass-panel text-left">
-                  <h3>Tus Datos de Acceso Premium</h3>
-                  <p className="credentials-info-hint">Inicia sesión en la app oficial de {order.service.toUpperCase()} con estos datos:</p>
-                  
-                  <div className="credentials-row">
-                    <span className="cred-label">Usuario / Correo:</span>
-                    <div className="cred-value-wrap">
-                      <code>{order.assignedAccount.split(":")[0]}</code>
-                      <button
-                        onClick={() => handleCopyToClipboard(order.assignedAccount.split(":")[0], "cred_user")}
-                        className="btn-copy-mini"
-                      >
-                        <CopyIcon />
-                        <span>{copiedText === "cred_user" ? "Copiado!" : "Copiar"}</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {order.assignedAccount.includes(":") && (
-                    <div className="credentials-row">
-                      <span className="cred-label">Contraseña:</span>
-                      <div className="cred-value-wrap">
-                        <code>{order.assignedAccount.split(":")[1]}</code>
-                        <button
-                          onClick={() => handleCopyToClipboard(order.assignedAccount.split(":")[1], "cred_pass")}
-                          className="btn-copy-mini"
-                        >
-                          <CopyIcon />
-                          <span>{copiedText === "cred_pass" ? "Copiado!" : "Copiar"}</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="no-credentials-assigned-card glass-panel">
-                  <p>Estamos preparando las credenciales de tu cuenta. Te enviaremos un correo de confirmación de inmediato o puedes contactarnos por WhatsApp para agilizar la entrega.</p>
-                </div>
-              )}
-
-              <div className="success-details-card">
-                <h3>Detalles de la Orden</h3>
-                <div className="detail-row">
-                  <span>ID de Pedido:</span>
-                  <strong>#{order.orderId}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Plataforma:</span>
-                  <strong>{order.service.toUpperCase()} Premium</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Periodo contratado:</span>
-                  <strong>{order.duration}</strong>
-                </div>
-                <div className="detail-row">
-                  <span>Monto Recibido:</span>
-                  <strong className="success-amount">
-                    {order.paymentMethod === "binance_pay" ? `$ ${order.priceUsd}` : order.pricePen}
-                  </strong>
-                </div>
-                <div className="detail-row">
-                  <span>Correo registrado:</span>
-                  <strong>{order.email}</strong>
-                </div>
-              </div>
-
-              <div className="success-actions">
-                <a
-                  href={getWhatsAppLink()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-whatsapp"
-                >
-                  <WhatsAppIcon />
-                  <span>Pedir Soporte / Entrega por WhatsApp</span>
-                </a>
-                <Link href="/" className="btn btn-secondary">
-                  Volver a la Página Principal
-                </Link>
-              </div>
-            </div>
-          ) : order.status === "expired" ? (
-            <div className="expired-panel glass-panel text-center">
-              <h2>Pedido Expirado</h2>
-              <p>El tiempo para completar el pago ha terminado. Si deseas continuar, por favor realiza un nuevo pedido.</p>
-              <Link href={`/order/${order.service}`} className="btn btn-primary">Crear Nuevo Pedido</Link>
-            </div>
-          ) : (
-            /* ACTIVE PAYMENT INSTRUCTIONS */
-            <div className="payment-grid">
-              
-              {/* LEFT COLUMN: QR & DETAILS */}
-              <section className="payment-details-card glass-panel">
-                {order.paymentMethod === "binance_pay" ? (
-                  /* BINANCE PAY DETAILS */
-                  <div className="payment-type-block">
-                    <h2>Pago con Binance Pay</h2>
-                    <p className="payment-description">Transfiere el monto exacto en USDT mediante Binance Pay o billetera externa para confirmación automática/manual.</p>
-
-                    {/* QR Code Placeholder */}
-                    <div className="qr-code-holder">
-                      <div className="qr-visual">
-                        {CONFIG.payments.binancePay.qrImage ? (
-                          <img
-                            src={CONFIG.payments.binancePay.qrImage}
-                            alt="Binance Pay QR"
-                            className="qr-image-display"
-                          />
-                        ) : (
-                          <>
-                            {/* We use styled SVG to represent QR code box premium */}
-                            <svg width="180" height="180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                              <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                              <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                              <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                            </svg>
-                            <span className="qr-logo-brand binance">Binance</span>
-                          </>
-                        )}
-                      </div>
-                      <span className="qr-hint-text">Escanea para pagar</span>
-                    </div>
-
-                    <div className="payment-fields-list">
-                      <div className="payment-field-item">
-                        <span className="field-label">Binance Pay ID:</span>
-                        <div className="field-value-wrap">
-                          <code className="field-code">{CONFIG.payments.binancePay.payId}</code>
-                          <button
-                            onClick={() => handleCopyToClipboard(CONFIG.payments.binancePay.payId, "payid")}
-                            className="btn-copy"
-                          >
-                            <CopyIcon />
-                            <span>{copiedText === "payid" ? "Copiado!" : "Copiar"}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="payment-field-item">
-                        <span className="field-label">Dirección USDT (TRC20):</span>
-                        <div className="field-value-wrap">
-                          <code className="field-code">{CONFIG.payments.binancePay.usdtAddress}</code>
-                          <button
-                            onClick={() => handleCopyToClipboard(CONFIG.payments.binancePay.usdtAddress, "usdt")}
-                            className="btn-copy"
-                          >
-                            <CopyIcon />
-                            <span>{copiedText === "usdt" ? "Copiado!" : "Copiar"}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="payment-field-item">
-                        <span className="field-label">Monto a Enviar:</span>
-                        <div className="field-value-wrap">
-                          <strong className="field-price">$ {order.priceUsd} USDT</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* YAPE / PLIN DETAILS */
-                  <div className="payment-type-block">
-                    <h2>Pago con Yape o Plin</h2>
-                    <p className="payment-description">Realiza la transferencia por celular y comparte tu comprobante por WhatsApp para la entrega de la cuenta.</p>
-
-                    {/* QR Showcase */}
-                    <div className="qrs-showcase-grid">
-                      <div className="qr-card">
-                        <div className="qr-code-holder">
-                          <div className="qr-visual purple">
-                            {CONFIG.payments.yape.qrImage ? (
-                              <img
-                                src={CONFIG.payments.yape.qrImage}
-                                alt="Yape QR"
-                                className="qr-image-display"
-                              />
-                            ) : (
-                              <>
-                                <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                                  <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                                  <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                                  <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                                  <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                                </svg>
-                                <span className="qr-logo-brand yape">Yape</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <span className="qr-name">YAPE</span>
-                        <span className="qr-phone-number">{CONFIG.payments.yape.number}</span>
-                      </div>
-
-                      <div className="qr-card">
-                        <div className="qr-code-holder">
-                          <div className="qr-visual blue">
-                            {CONFIG.payments.plin.qrImage ? (
-                              <img
-                                src={CONFIG.payments.plin.qrImage}
-                                alt="Plin QR"
-                                className="qr-image-display"
-                              />
-                            ) : (
-                              <>
-                                <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="qr-mesh">
-                                  <rect x="2" y="2" width="6" height="6" fill="currentColor"></rect>
-                                  <rect x="16" y="2" width="6" height="6" fill="currentColor"></rect>
-                                  <rect x="2" y="16" width="6" height="6" fill="currentColor"></rect>
-                                  <path d="M10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4zM16 10h4v4h-4zM10 16h4v4h-4zM16 16h4v4h-4z"></path>
-                                </svg>
-                                <span className="qr-logo-brand plin">Plin</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <span className="qr-name">PLIN</span>
-                        <span className="qr-phone-number">{CONFIG.payments.plin.number}</span>
-                      </div>
-                    </div>
-
-                    <div className="payment-fields-list">
-                      <div className="payment-field-item">
-                        <span className="field-label">Titular de Cuenta:</span>
-                        <div className="field-value-wrap">
-                          <strong className="field-text">{CONFIG.payments.yape.name}</strong>
-                        </div>
-                      </div>
-
-                      <div className="payment-field-item">
-                        <span className="field-label">Número celular:</span>
-                        <div className="field-value-wrap">
-                          <code className="field-code">{CONFIG.payments.yape.number}</code>
-                          <button
-                            onClick={() => handleCopyToClipboard(CONFIG.payments.yape.number.replace(/\s+/g, ""), "phone")}
-                            className="btn-copy"
-                          >
-                            <CopyIcon />
-                            <span>{copiedText === "phone" ? "Copiado!" : "Copiar"}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="payment-field-item">
-                        <span className="field-label">Total a transferir:</span>
-                        <div className="field-value-wrap">
-                          <strong className="field-price">{order.pricePen} Soles</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* RIGHT COLUMN: TIMER & STATUS SUMMARY */}
-              <section className="checkout-summary-panel">
-                {/* TIMER BLOCK */}
-                <div className="timer-card glass-panel">
-                  <div className="timer-header">
-                    <ClockIcon />
-                    <span>Tiempo restante para pagar</span>
-                  </div>
-                  <div className="timer-countdown">{formatTime(timeLeft)}</div>
-                  <p className="timer-warning-hint">Realiza el pago antes de que expire el temporizador para asegurar la rápida entrega.</p>
-                </div>
-
-                {/* SUMMARY DETAILS */}
-                <div className="summary-details-card glass-panel">
-                  <h3>Resumen de la Orden</h3>
-                  <div className="summary-row">
-                    <span>Producto:</span>
-                    <strong>{order.service.toUpperCase()} Premium</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Duración del plan:</span>
-                    <strong>{order.duration}</strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Método de pago:</span>
-                    <strong className="payment-label-value">
-                      {order.paymentMethod === "binance_pay" ? "Binance Pay" : "Yape / Plin"}
-                    </strong>
-                  </div>
-                  <div className="summary-row">
-                    <span>Correo del usuario:</span>
-                    <strong>{order.email}</strong>
-                  </div>
-                  <div className="summary-total-row">
-                    <span>Total:</span>
-                    <strong>
-                      {order.paymentMethod === "binance_pay" ? `$ ${order.priceUsd}` : order.pricePen}
-                    </strong>
-                  </div>
-                </div>
-
-                {/* ACTIONS */}
-                <div className="checkout-action-buttons">
-                  <a
-                    href={getWhatsAppLink()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn-whatsapp checkout-btn"
-                  >
-                    <WhatsAppIcon />
-                    <span>Enviar Comprobante por WhatsApp</span>
-                  </a>
-
-                  {/* BINANCE PAY PAYMENT SIMULATION */}
-                  {order.paymentMethod === "binance_pay" && (
-                    <div className="simulation-block glass-panel">
-                      <span className="simulation-label">¿Deseas simular la pasarela?</span>
-                      <p className="simulation-desc">Binance Pay confirmará la transacción automáticamente cuando detecte el pago.</p>
-                      
-                      <button
-                        onClick={handleSimulatePayment}
-                        className={`btn btn-secondary simulation-btn ${simulating ? "btn-disabled" : ""}`}
-                        disabled={simulating}
-                      >
-                        {simulating ? (
-                          <>
-                            <span className="simulation-spinner"></span>
-                            <span>Verificando transacción...</span>
-                          </>
-                        ) : (
-                          <span>Simular Confirmación de Pago</span>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-            </div>
-          )}
+          {body}
         </main>
       </div>
-
     </div>
   );
 }

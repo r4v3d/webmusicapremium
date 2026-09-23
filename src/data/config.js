@@ -2,7 +2,9 @@ export const CONFIG = {
   appName: "Música Premium Barato",
   tagline: "Disfruta de la mejor calidad de sonido sin pagar de más",
   description: "Cuentas premium de Tidal, Deezer y Qobuz al mejor precio del mercado. Soporte garantizado y activación inmediata.",
-  adminPasswordDefault: "admin1234", // Contraseña por defecto del panel (reemplazar o usar variable de entorno ADMIN_PASSWORD)
+  checkoutTimeoutMinutes: 15,
+  // Mientras Yape se verifique a mano, el cliente ve en qué horario se confirma (§23).
+  manualReviewHours: "Todos los días de 9:00 a 23:00 (hora de Perú)",
   whatsappNumber: "51923282640", // Reemplaza con tu número de WhatsApp real (código de país + número, ej: 51999999999)
   whatsappChannelUrl: "https://whatsapp.com/channel/0029VaqrOWcEKyZHhnDyhY14", // Reemplaza con el enlace de tu canal de WhatsApp
   socials: {
@@ -23,7 +25,7 @@ export const CONFIG = {
     },
     binancePay: {
       payId: "99190804", // Reemplaza con tu Binance Pay ID
-      usdtAddress: "TY3m4... (Red TRC20)", // Opcional: Tu dirección de depósito USDT
+      nickname: "Jorge P.", // Nombre que Binance muestra al pagador
       qrImage: "/images/binance-qr.png" // Opcional: QR de Binance Pay (colócalo en /public/images/)
     }
   },
@@ -43,10 +45,10 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "tidal-1m", duration: "1 Mes", pricePen: "S/. 4.00", priceUsd: "1.19", popular: false },
-        { id: "tidal-2m", duration: "2 Meses", pricePen: "S/. 6.00", priceUsd: "1.79", popular: false },
-        { id: "tidal-6m", duration: "6 Meses", pricePen: "S/. 15.00", priceUsd: "4.49", popular: false },
-        { id: "tidal-12m", duration: "12 Meses", pricePen: "S/. 25.00", priceUsd: "7.49", popular: true }
+        { id: "tidal-1m", months: 1, duration: "1 Mes", pricePen: 6, priceUsdt: 1.79, popular: false },
+        { id: "tidal-2m", months: 2, duration: "2 Meses", pricePen: 9, priceUsdt: 2.69, popular: false },
+        { id: "tidal-6m", months: 6, duration: "6 Meses", pricePen: 25, priceUsdt: 7.29, popular: false },
+        { id: "tidal-12m", months: 12, duration: "12 Meses", pricePen: 45, priceUsdt: 13.29, popular: true }
       ]
     },
     deezer: {
@@ -64,10 +66,10 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "deezer-1m", duration: "1 Mes", pricePen: "S/. 6.00", priceUsd: "1.79", popular: false },
-        { id: "deezer-2m", duration: "2 Meses", pricePen: "S/. 9.00", priceUsd: "2.69", popular: false },
-        { id: "deezer-6m", duration: "6 Meses", pricePen: "S/. 25.00", priceUsd: "7.29", popular: false },
-        { id: "deezer-12m", duration: "12 Meses", pricePen: "S/. 45.00", priceUsd: "13.29", popular: true }
+        { id: "deezer-1m", months: 1, duration: "1 Mes", pricePen: 6, priceUsdt: 1.79, popular: false },
+        { id: "deezer-2m", months: 2, duration: "2 Meses", pricePen: 9, priceUsdt: 2.69, popular: false },
+        { id: "deezer-6m", months: 6, duration: "6 Meses", pricePen: 25, priceUsdt: 7.29, popular: false },
+        { id: "deezer-12m", months: 12, duration: "12 Meses", pricePen: 45, priceUsdt: 13.29, popular: true }
       ]
     },
     qobuz: {
@@ -85,7 +87,7 @@ export const CONFIG = {
         "Garantía completa durante todo el periodo adquirido"
       ],
       plans: [
-        { id: "qobuz-1m", duration: "1 Mes", pricePen: "S/. 9.00", priceUsd: "2.69", popular: true },
+        { id: "qobuz-1m", months: 1, duration: "1 Mes", pricePen: 9, priceUsdt: 2.69, popular: true },
       ]
     }
   },

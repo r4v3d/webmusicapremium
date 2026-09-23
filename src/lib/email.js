@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { CONFIG } from "../data/config";
+import { escapeHtml, parseAssignedAccount } from "./credentials";
 
 // Helper to calculate the expiration date based on duration and purchase date
 export function calculateExpirationDate(durationStr, purchaseDateStr) {
@@ -28,33 +29,57 @@ export function formatDate(date) {
   return `${d}/${m}/${y}`;
 }
 
-export async function sendOrderEmail(order) {
+function smtpTransport() {
   const emailUser = process.env.EMAIL_USER;
   const emailPass = process.env.EMAIL_PASS;
+  if (!emailUser || !emailPass) return null;
+  return {
+    from: emailUser,
+    transporter: nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: Number(process.env.SMTP_PORT || 465),
+      secure: (process.env.SMTP_PORT || "465") === "465",
+      auth: { user: emailUser, pass: emailPass },
+    }),
+  };
+}
 
-  // If email credentials are not configured, skip silently
-  if (!emailUser || !emailPass) {
-    console.warn("SMTP email credentials (EMAIL_USER / EMAIL_PASS) not configured. Skipping email.");
-    return false;
+/** Envío simple (alertas al admin). Devuelve { sent, skipped, error }. */
+export async function sendPlainEmail({ to, subject, text, html }) {
+  const smtp = smtpTransport();
+  if (!smtp || !to) return { sent: false, skipped: true };
+  try {
+    await smtp.transporter.sendMail({
+      from: `"Música Premium Barato" <${smtp.from}>`,
+      to,
+      subject,
+      text,
+      html: html || `<pre style="font-family:monospace">${escapeHtml(text || "")}</pre>`,
+    });
+    return { sent: true, skipped: false };
+  } catch (error) {
+    return { sent: false, skipped: false, error: error.message };
   }
+}
 
-  // Setup Nodemailer transporter with Gmail SMTP
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      user: emailUser,
-      pass: emailPass,
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+/**
+ * Correo de entrega. `renewalDate` ('YYYY-MM-DD') sale de subscriptions.renewal_date;
+ * solo si falta se calcula desde `duration` (pedidos antiguos).
+ * Devuelve { sent, skipped, error }: `skipped` = SMTP sin configurar.
+ */
+export async function sendOrderEmail(order, { renewalDate = null } = {}) {
+  const smtp = smtpTransport();
+  if (!smtp) {
+    console.warn("SMTP email credentials (EMAIL_USER / EMAIL_PASS) not configured. Skipping email.");
+    return { sent: false, skipped: true };
+  }
+  const { from: emailUser, transporter } = smtp;
 
   // Calculate dates
-  const purchaseDate = order.createdAt ? new Date(order.createdAt) : new Date();
-  const expirationDate = calculateExpirationDate(order.duration, order.createdAt);
+  const purchaseDate = order.paidAt ? new Date(order.paidAt) : order.createdAt ? new Date(order.createdAt) : new Date();
+  const expirationDate = renewalDate
+    ? new Date(`${String(renewalDate).substring(0, 10)}T12:00:00`)
+    : calculateExpirationDate(order.duration || "1", order.createdAt);
 
   const formattedPurchaseDate = formatDate(purchaseDate);
   const formattedExpirationDate = formatDate(expirationDate);
@@ -69,20 +94,18 @@ export async function sendOrderEmail(order) {
   // Split account credentials if formatted as email:password
   let credentialsHtml = "";
   if (order.assignedAccount) {
-    if (order.assignedAccount.includes(":")) {
-      const parts = order.assignedAccount.split(":");
-      const username = parts[0].trim();
-      const password = parts.slice(1).join(":").trim();
+    const { email: username, password } = parseAssignedAccount(order.assignedAccount);
+    if (username && password) {
       credentialsHtml = `
         <div style="background-color: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 20px; margin-bottom: 24px;">
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="padding: 6px 0; color: #9ca3af; font-size: 14px; width: 100px;">Correo:</td>
-              <td style="padding: 6px 0; font-family: monospace; font-size: 16px; color: #ffffff; font-weight: bold; word-break: break-all;">${username}</td>
+              <td style="padding: 6px 0; font-family: monospace; font-size: 16px; color: #ffffff; font-weight: bold; word-break: break-all;">${escapeHtml(username)}</td>
             </tr>
             <tr>
               <td style="padding: 6px 0; color: #9ca3af; font-size: 14px;">Contraseña:</td>
-              <td style="padding: 6px 0; font-family: monospace; font-size: 16px; color: ${accentColor}; font-weight: bold; word-break: break-all;">${password}</td>
+              <td style="padding: 6px 0; font-family: monospace; font-size: 16px; color: ${accentColor}; font-weight: bold; word-break: break-all;">${escapeHtml(password)}</td>
             </tr>
           </table>
         </div>
@@ -91,7 +114,7 @@ export async function sendOrderEmail(order) {
       credentialsHtml = `
         <div style="background-color: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 20px; margin-bottom: 24px; text-align: center;">
           <span style="display: block; color: #9ca3af; font-size: 14px; margin-bottom: 6px;">Código / Cuenta de Acceso:</span>
-          <code style="font-family: monospace; font-size: 18px; color: ${accentColor}; font-weight: bold; display: block; word-break: break-all;">${order.assignedAccount}</code>
+          <code style="font-family: monospace; font-size: 18px; color: ${accentColor}; font-weight: bold; display: block; word-break: break-all;">${escapeHtml(order.assignedAccount)}</code>
         </div>
       `;
     }
@@ -133,7 +156,7 @@ export async function sendOrderEmail(order) {
               <!-- Greeting & Status -->
               <tr>
                 <td style="padding-bottom: 24px;">
-                  <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 700; color: #ffffff; text-align: center;">¡Gracias por tu compra, ${order.fullName}!</h1>
+                  <h1 style="margin: 0 0 10px 0; font-size: 24px; font-weight: 700; color: #ffffff; text-align: center;">¡Gracias por tu compra, ${escapeHtml(order.fullName || "")}!</h1>
                   <p style="margin: 0; font-size: 15px; color: #9ca3af; text-align: center; line-height: 1.5;">Tu pago ha sido verificado y aprobado con éxito. Aquí tienes los detalles de tu cuenta premium.</p>
                 </td>
               </tr>
@@ -169,7 +192,7 @@ export async function sendOrderEmail(order) {
                     </tr>
                     <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                       <td style="color: #9ca3af;">Periodo Adquirido:</td>
-                      <td style="text-align: right; color: ${accentColor}; font-weight: 600;">${order.duration}</td>
+                      <td style="text-align: right; color: ${accentColor}; font-weight: 600;">${escapeHtml(order.duration || "")}</td>
                     </tr>
                     <tr>
                       <td style="color: #9ca3af; font-weight: bold;">Fecha de Vencimiento:</td>
@@ -215,10 +238,10 @@ export async function sendOrderEmail(order) {
   try {
     await transporter.sendMail(mailOptions);
     console.log(`Order email sent successfully to ${order.email}`);
-    return true;
+    return { sent: true, skipped: false };
   } catch (error) {
     console.error("Error sending order email:", error);
-    return false;
+    return { sent: false, skipped: false, error: error.message };
   }
 }
 
@@ -244,9 +267,6 @@ export async function sendOTPEmail(email, code) {
       user: emailUser,
       pass: emailPass,
     },
-    tls: {
-      rejectUnauthorized: false
-    }
   });
 
   const emailHtml = `
@@ -278,7 +298,7 @@ export async function sendOTPEmail(email, code) {
               <tr>
                 <td style="padding: 20px 0; text-align: center;">
                   <div style="background-color: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 15px; display: inline-block; letter-spacing: 5px; font-family: monospace; font-size: 32px; color: #00e5ff; font-weight: bold;">
-                    ${code}
+                    ${escapeHtml(code)}
                   </div>
                 </td>
               </tr>
@@ -298,7 +318,7 @@ export async function sendOTPEmail(email, code) {
   const mailOptions = {
     from: `"Música Premium Barato" <${emailUser}>`,
     to: email,
-    subject: `Código de verificación: ${code}`,
+    subject: "Código de verificación",
     html: emailHtml,
   };
 

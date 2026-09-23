@@ -33,9 +33,28 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# infraestructura: vars.sh lleva la clave pública SSH y el nombre del repo
+deploy/bootstrap/vars.sh
+
+# credenciales del servidor: nunca al repositorio
+contabo.txt
+*.key
+*-backup.key
+members_data.txt
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# worker empaquetado (npm run build:worker)
+/.worker
+
+# base local de desarrollo (npm run db:dev)
+/.pglite-dev
+
+# locales: no se publican (el repo es público)
+.claude/settings.local.json
+*.mp4

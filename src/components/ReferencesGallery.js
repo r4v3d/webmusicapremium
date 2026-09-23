@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 
 export default function ReferencesGallery({ images = [] }) {
   const [expanded, setExpanded] = useState(false);
@@ -97,14 +98,15 @@ export default function ReferencesGallery({ images = [] }) {
             <div key={index} className="reference-gallery-card glass-panel">
               {!isBroken ? (
                 <div className="card-image-wrapper" onClick={() => setLightboxIndex(index)}>
-                  <img
+                  <Image
                     src={path}
                     alt={getReferenceLabel(path, index)}
+                    fill
+                    sizes="(max-width: 768px) 50vw, 220px"
                     className="reference-screenshot-img"
                     onError={() => handleImageError(index)}
                     onContextMenu={(e) => e.preventDefault()}
                     onDragStart={(e) => e.preventDefault()}
-                    loading="lazy"
                   />
                   <div className="image-hover-overlay">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -174,9 +176,11 @@ export default function ReferencesGallery({ images = [] }) {
                 Toca la derecha o desliza para ver más referencias
               </div>
               <div className="lightbox-image-wrapper">
-                <img
+                <Image
                   src={images[lightboxIndex]}
                   alt={getReferenceLabel(images[lightboxIndex], lightboxIndex)}
+                  width={900}
+                  height={1200}
                   className="lightbox-main-img"
                   onContextMenu={(e) => e.preventDefault()}
                   onDragStart={(e) => e.preventDefault()}

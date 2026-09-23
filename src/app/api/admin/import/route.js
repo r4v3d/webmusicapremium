@@ -1,7 +1,30 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { supabase } from "../../../../lib/db";
-import { createFamilyAccount, createMemberProfile, getOrCreateClient, updateMemberProfile } from "../../../../lib/db";
+import { query } from "../../../../lib/pg";
+import { createFamilyAccount, createMemberProfile, getFreeSlotsStock, getOrCreateClient, updateMemberProfile } from "../../../../lib/db";
+import { parseDateInput, previewImport } from "../../../../lib/importParse";
+import { announceStock } from "../../../../lib/telegramBot";
+
+async function findAccount(service, masterEmail) {
+  const res = await query(
+    "select id, account_password from platform_accounts where platform_code = $1 and account_email = $2 order by id limit 1",
+    [service, masterEmail]
+  );
+  return res.rows[0] || null;
+}
+
+async function createFiveSlots(accId) {
+  await query(
+    `insert into account_slots(platform_account_id, slot_number, status, email_type, member_email, member_password)
+     select $1, n, 'free', 'admin', '', '' from generate_series(1, 5) as n`,
+    [accId]
+  );
+}
+
+async function slotsOf(accId) {
+  const res = await query("select * from account_slots where platform_account_id = $1 order by slot_number asc", [accId]);
+  return res.rows;
+}
 
 export async function POST(req) {
   try {
@@ -10,7 +33,7 @@ export async function POST(req) {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const { service, mode, rawInput } = await req.json();
+    const { service, mode, rawInput, dryRun } = await req.json();
 
     if (!service || !mode || !rawInput) {
       return NextResponse.json({ message: "Plataforma, modo y datos de entrada son requeridos." }, { status: 400 });
@@ -21,71 +44,25 @@ export async function POST(req) {
       return NextResponse.json({ message: "No se encontraron datos para importar." }, { status: 400 });
     }
 
+    if (dryRun) {
+      const preview = previewImport(mode, rawInput);
+      return NextResponse.json({
+        success: true,
+        dryRun: true,
+        preview,
+        validCount: preview.filter((row) => row.ok).length,
+        errorCount: preview.filter((row) => !row.ok).length,
+      });
+    }
+
     let importedCount = 0;
     let familiesCreated = 0;
     let slotsUpdated = 0;
 
-    // Helper: calculate default renewal date (+30 days)
     const getDefaultRenewalDate = () => {
       const d = new Date();
       d.setDate(d.getDate() + 30);
       return d.toISOString().substring(0, 10);
-    };
-
-    // Helper: parse flexible date formats (DD/MM, DD-MM, YYYY-MM-DD, or DD)
-    const parseDateInput = (str) => {
-      if (!str) return null;
-      str = str.trim();
-      
-      // Try YYYY-MM-DD
-      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-        return str;
-      }
-      
-      // Try DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY or DD-MM-YY
-      let match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-      if (match) {
-        const day = parseInt(match[1], 10);
-        const month = parseInt(match[2], 10);
-        let year = parseInt(match[3], 10);
-        if (year < 100) {
-          year = 2000 + year;
-        }
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      }
-      
-      // Try DD/MM or DD-MM
-      match = str.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
-      if (match) {
-        const day = parseInt(match[1], 10);
-        const month = parseInt(match[2], 10);
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth() + 1;
-        
-        let year = currentYear;
-        // If parsed month is early next year and we are at the end of the year, adjust year
-        if (month < currentMonth && (currentMonth - month) >= 9) {
-          year = currentYear + 1;
-        } else if (month > currentMonth && (month - currentMonth) >= 9) {
-          year = currentYear - 1;
-        }
-        
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      }
-      
-      // Try just a day number (e.g. "25" or "5")
-      if (/^\d{1,2}$/.test(str)) {
-        const day = parseInt(str, 10);
-        if (day >= 1 && day <= 31) {
-          const now = new Date();
-          const currentYear = now.getFullYear();
-          const currentMonth = now.getMonth() + 1;
-          return `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        }
-      }
-      
-      return null;
     };
 
     let skippedLogs = [];
@@ -136,33 +113,23 @@ export async function POST(req) {
 
         try {
           // Check if exists in the current service
-          const { data: existing } = await supabase
-            .from("platform_accounts")
-            .select("id")
-            .eq("platform_code", service)
-            .eq("account_email", masterEmail)
-            .maybeSingle();
+          const existing = await findAccount(service, masterEmail);
 
           let accId;
           if (existing) {
             accId = existing.id;
-            const { error: updateErr } = await supabase
-              .from("platform_accounts")
-              .update({
-                account_password: password,
-                notes: notes,
-                owner_renewal_date: renewalDateStr,
-                updated_at: new Date().toISOString()
-              })
-              .eq("id", accId);
-            if (updateErr) throw updateErr;
+            await query(
+              `update platform_accounts set account_password = $2, notes = $3, owner_renewal_date = $4::date, updated_at = now()
+                where id = $1`,
+              [accId, password, notes, renewalDateStr]
+            );
           } else {
             // Check if the email already exists globally under another platform
-            const { data: globalExisting } = await supabase
-              .from("platform_accounts")
-              .select("id, platform_code")
-              .eq("account_email", masterEmail)
-              .maybeSingle();
+            const globalRes = await query(
+              "select id, platform_code from platform_accounts where account_email = $1 order by id limit 1",
+              [masterEmail]
+            );
+            const globalExisting = globalRes.rows[0];
 
             if (globalExisting) {
               skippedLogs.push(`Línea ${lineIndex} omitida (El correo titular '${masterEmail}' ya está registrado en la plataforma '${globalExisting.platform_code.toUpperCase()}')`);
@@ -179,22 +146,7 @@ export async function POST(req) {
             accId = newAcc.id;
             familiesCreated++;
 
-            // Auto-generate 5 slots for new family
-            const slotsToCreate = [];
-            for (let i = 1; i <= 5; i++) {
-              slotsToCreate.push({
-                platform_account_id: accId,
-                slot_number: i,
-                status: "free",
-                email_type: "admin",
-                member_email: "",
-                member_password: ""
-              });
-            }
-            const { error: slotsErr } = await supabase
-              .from("account_slots")
-              .insert(slotsToCreate);
-            if (slotsErr) throw slotsErr;
+            await createFiveSlots(accId);
           }
           importedCount++;
         } catch (err) {
@@ -236,12 +188,7 @@ export async function POST(req) {
         }
 
         // 1. Find or create master family account
-        let { data: family } = await supabase
-          .from("platform_accounts")
-          .select("id, account_password")
-          .eq("platform_code", service)
-          .eq("account_email", masterEmail)
-          .maybeSingle();
+        const family = await findAccount(service, masterEmail);
 
         let accId;
         if (!family) {
@@ -254,22 +201,7 @@ export async function POST(req) {
           accId = newAcc.id;
           familiesCreated++;
 
-          // Auto-generate 5 slots for new family
-          const slotsToCreate = [];
-          for (let i = 1; i <= 5; i++) {
-            slotsToCreate.push({
-              platform_account_id: accId,
-              slot_number: i,
-              status: "free",
-              email_type: "admin",
-              member_email: "",
-              member_password: ""
-            });
-          }
-          const { error: slotsErr } = await supabase
-            .from("account_slots")
-            .insert(slotsToCreate);
-          if (slotsErr) throw slotsErr;
+          await createFiveSlots(accId);
         } else {
           accId = family.id;
         }
@@ -280,11 +212,7 @@ export async function POST(req) {
 
         // 3. Find a slot in this family account to assign
         // Try to find a slot matching memberEmail or the first free slot
-        const { data: slots } = await supabase
-          .from("account_slots")
-          .select("*")
-          .eq("platform_account_id", accId)
-          .order("slot_number", { ascending: true });
+        const slots = await slotsOf(accId);
 
         let targetSlot = slots.find(s => s.member_email === memberEmail);
         if (!targetSlot) {
@@ -350,12 +278,7 @@ export async function POST(req) {
         }
 
         // 1. Find or create family account
-        let { data: family } = await supabase
-          .from("platform_accounts")
-          .select("id")
-          .eq("platform_code", service)
-          .eq("account_email", masterEmail)
-          .maybeSingle();
+        const family = await findAccount(service, masterEmail);
 
         let accId;
         if (!family) {
@@ -368,32 +291,13 @@ export async function POST(req) {
           accId = newAcc.id;
           familiesCreated++;
 
-          // Auto-generate 5 slots for new family
-          const slotsToCreate = [];
-          for (let i = 1; i <= 5; i++) {
-            slotsToCreate.push({
-              platform_account_id: accId,
-              slot_number: i,
-              status: "free",
-              email_type: "admin",
-              member_email: "",
-              member_password: ""
-            });
-          }
-          const { error: slotsErr } = await supabase
-            .from("account_slots")
-            .insert(slotsToCreate);
-          if (slotsErr) throw slotsErr;
+          await createFiveSlots(accId);
         } else {
           accId = family.id;
         }
 
         // 2. Find a slot in this family account to assign
-        const { data: slots } = await supabase
-          .from("account_slots")
-          .select("*")
-          .eq("platform_account_id", accId)
-          .order("slot_number", { ascending: true });
+        const slots = await slotsOf(accId);
 
         let targetSlot = slots.find(s => s.member_email === memberEmail);
         if (!targetSlot) {
@@ -432,6 +336,14 @@ export async function POST(req) {
     
     if (skippedLogs.length > 0) {
       finalMessage += `\n\n[ATENCIÓN] Ocurrieron omisiones:\n${skippedLogs.join("\n")}`;
+    }
+
+    // Anuncio automático de stock al canal de Telegram (§17), como el bot de referencia.
+    if (mode === "stock_members" && slotsUpdated > 0) {
+      after(async () => {
+        const stock = await getFreeSlotsStock().catch(() => null);
+        await announceStock(service, slotsUpdated, stock?.[service] ?? null).catch((e) => console.error("announceStock:", e));
+      });
     }
 
     return NextResponse.json({

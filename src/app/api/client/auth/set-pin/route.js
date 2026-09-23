@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "../../../../../lib/db";
+import { query } from "../../../../../lib/pg";
 import { getCustomerSession, hashPin } from "../../../../../lib/libClientAuth";
 
 export async function POST(req) {
@@ -21,31 +21,13 @@ export async function POST(req) {
       return NextResponse.json({ error: "El PIN debe tener exactamente 6 dígitos numéricos" }, { status: 400 });
     }
 
-    const pinHash = hashPin(pin);
+    const pinHash = await hashPin(pin);
 
-    // Update PIN in database using a lock-friendly UPDATE
-    const { data, error: updateError } = await supabase
-      .from("customer_auth")
-      .update({
-        pin_hash: pinHash,
-        updated_at: new Date().toISOString()
-      })
-      .eq("customer_id", customerId)
-      .select();
-
-    if (updateError) throw updateError;
-
-    // Fallback: If no row was updated (extremely rare), insert it
-    if (!data || data.length === 0) {
-      const { error: insertError } = await supabase
-        .from("customer_auth")
-        .insert({
-          customer_id: customerId,
-          pin_hash: pinHash,
-          updated_at: new Date().toISOString()
-        });
-      if (insertError) throw insertError;
-    }
+    await query(
+      `insert into customer_auth(customer_id, pin_hash, updated_at) values ($1, $2, now())
+       on conflict (customer_id) do update set pin_hash = excluded.pin_hash, updated_at = now()`,
+      [customerId, pinHash]
+    );
 
     return NextResponse.json({
       success: true,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
-import { updateMemberProfile, getClients, createClient, updateClient, getCountryFromPhone, getOrCreateClient } from "../../../../lib/db";
+import { updateMemberProfile, getOrCreateClient } from "../../../../lib/db";
 
 export async function PUT(req) {
   try {
@@ -43,7 +43,8 @@ export async function PUT(req) {
       emailType,
       memberPassword,
       pricePen: status === "free" ? 0 : parseFloat(pricePen) || 0,
-      renewalDate: status === "free" ? null : (renewalDate ? new Date(renewalDate) : null),
+      // 'YYYY-MM-DD' tal cual: un new Date() aquí la corría un día por la zona horaria.
+      renewalDate: status === "free" ? null : (renewalDate ? String(renewalDate).substring(0, 10) : null),
       status
     };
 
