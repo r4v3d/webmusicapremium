@@ -146,7 +146,7 @@ Si necesitas entrar durante un baneo, el VNC del panel de Contabo no pasa por fa
 **No entro por SSH después del paso 10.** Abre el VNC desde el panel de Contabo, entra como root y ejecuta:
 
 ```bash
-rm /etc/ssh/sshd_config.d/99-musicapremium.conf && systemctl restart ssh
+rm /etc/ssh/sshd_config.d/00-musicapremium.conf && systemctl restart ssh
 ```
 
 El paso 10 se niega a correr si no hay clave instalada, así que esto no debería pasar.

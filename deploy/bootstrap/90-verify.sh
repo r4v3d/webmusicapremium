@@ -73,7 +73,7 @@ if systemctl is-active --quiet postgresql; then
     [[ "$got" == "$want" ]] && check "${k} = ${got}" || bad "${k} = ${got:-?} (esperado ${want})"
   done
   # El reparto de privilegios de §4.3: la app NO debe poder crear tablas.
-  APP_PW="$(env_get DATABASE_URL | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
+  APP_PW="$( { env_get DATABASE_URL || true; } | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
   if [[ -n "$APP_PW" ]]; then
     PGPASSWORD="$APP_PW" psql -h 127.0.0.1 -U "$PG_APP_ROLE" -d "$PG_DB" -Atqc 'select 1' >/dev/null 2>&1 \
       && check "${PG_APP_ROLE} conecta con su contraseña" || bad "${PG_APP_ROLE} no puede conectar"

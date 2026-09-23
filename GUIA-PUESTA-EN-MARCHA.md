@@ -8,8 +8,9 @@
 |---|---|
 | Clave SSH para entrar al VPS | ✅ Creada y funcionando (`~/.ssh/musicapremium_deploy`) |
 | Servidor: usuario `deploy`, firewall, fail2ban, swap, hora de Lima | ✅ Hecho (pasos 00 y 10 del kit) |
-| PostgreSQL, Node, Caddy, respaldos | ❌ Falta (pasos 20 a 50) |
-| DNS de `cheapmusic.best` | ⚠️ Pasa por Cloudflare con la nube **naranja** y hoy no muestra ninguna página |
+| PostgreSQL 18.6, Node 22, Caddy con HTTPS, respaldos cifrados | ✅ Hecho (pasos 20 a 50; verificación: 58 en verde) |
+| SSH todavía acepta contraseña | ⚠️ Corregido en el kit: repetir el paso 10 |
+| DNS de `cheapmusic.best` | ✅ Apunta al VPS (nube gris) |
 | Código nuevo en GitHub | ❌ Solo está en tu PC. El repositorio es **público** |
 
 Tu tienda actual sigue funcionando en Vercel mientras haces todo esto. No se apaga nada hasta la etapa 9.
@@ -71,16 +72,21 @@ git push origin main
 Caddy necesita que el dominio llegue directo al servidor para sacar el certificado HTTPS. Por eso, durante esta etapa, la nube debe estar **gris**.
 
 1. Entra a **dash.cloudflare.com**, haz clic en `cheapmusic.best` y en el menú de la izquierda elige **DNS → Records**.
-2. Deja exactamente estos tres registros. Edita los que existan y borra cualquier otro de tipo A, AAAA o CNAME para `@` o `www`:
+2. **No toques** los registros del correo ni del worker: los tres `MX` (`route1/2/3.mx.cloudflare.net`), los dos `TXT` (DKIM `cf2024-1._domainkey` y SPF `v=spf1…`) y el `Worker` de `otp`. El correo por Email Routing y tu worker no dependen del registro `A`, así que siguen funcionando igual.
+3. **Edita el registro `A` de `cheapmusic.best`**, el que hoy apunta a `162.255.119.125` (la página de estacionamiento del registrador, que es la que redirige a `www`):
+   - *Content (IPv4):* `169.58.139.103`
+   - *Proxy status:* apágalo para que diga **DNS only** (nube gris).
+   - Pulsa **Save**.
+4. **Agrega dos registros nuevos** con **Add record**:
 
    | Tipo | Nombre | Contenido | Proxy |
    |---|---|---|---|
-   | A | `@` | `169.58.139.103` | **Gris** ("Solo DNS") |
-   | AAAA | `@` | `2a02:c207:2349:2331::1` | **Gris** |
-   | CNAME | `www` | `cheapmusic.best` | **Gris** |
+   | AAAA | `@` | `2a02:c207:2349:2331::1` | **DNS only** (gris) |
+   | CNAME | `www` | `cheapmusic.best` | **DNS only** (gris) |
 
-   La nube se cambia haciendo clic sobre ella en cada registro hasta que diga "Solo DNS".
-3. Hoy el dominio redirige a `www`. Eso lo hace una regla de Cloudflare: en **Rules → Redirect Rules** (y en **Page Rules**, si existe) desactiva cualquier regla sobre `cheapmusic.best`.
+   El `www` también resuelve el aviso de Cloudflare "Visitors cannot reach www". El servidor redirige `www` al dominio principal por su cuenta, así que no necesitas crear una regla de redirección.
+
+Al terminar deberías tener 9 registros: los 7 de antes (con el `A` cambiado) más el `AAAA` y el `CNAME`.
 
 Espera 5 minutos y comprueba desde Git Bash, en tu PC:
 

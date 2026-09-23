@@ -55,8 +55,10 @@ ok "PostgreSQL reiniciado con la configuración nueva"
 
 log "Roles y contraseñas"
 # Reutiliza las contraseñas ya emitidas para no invalidar el env en cada corrida.
-APP_PW="$(env_get DATABASE_URL 2>/dev/null | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
-MIG_PW="$(env_get DATABASE_MIGRATION_URL 2>/dev/null | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
+# `|| true`: en la primera corrida el env aún no existe (lo crea el paso 30) y,
+# con pipefail, env_get fallando cortaría el script aquí sin ningún mensaje.
+APP_PW="$( { env_get DATABASE_URL 2>/dev/null || true; } | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
+MIG_PW="$( { env_get DATABASE_MIGRATION_URL 2>/dev/null || true; } | sed -nE 's|^postgres://[^:]+:([^@]+)@.*$|\1|p')"
 [[ -n "$APP_PW" ]] || { APP_PW="$(gen_pw)"; NEW_APP_PW=1; }
 [[ -n "$MIG_PW" ]] || { MIG_PW="$(gen_pw)"; NEW_MIG_PW=1; }
 

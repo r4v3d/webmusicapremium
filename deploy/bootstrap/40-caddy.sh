@@ -47,7 +47,12 @@ install -d -m 1775 -o "$APP_USER" -g caddy "$LOG_DIR"
 render "${KIT_DIR}/config/Caddyfile" /etc/caddy/Caddyfile 0644 root:caddy
 
 caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null 2>&1 || true
-caddy validate --config /etc/caddy/Caddyfile >/dev/null \
+# Repara logs que una corrida anterior dejó con dueño root (antes se validaba como root).
+find "$LOG_DIR" -maxdepth 1 -name 'caddy-*.log' ! -user caddy -exec chown caddy:caddy {} + 2>/dev/null || true
+find "$LOG_DIR" -maxdepth 1 -name 'caddy-*.log' -exec chmod 0640 {} + 2>/dev/null || true
+# Se valida como el usuario caddy: `caddy validate` abre los archivos de log, y
+# como root los crearía con dueño root y el servicio luego no podría escribirlos.
+runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config /etc/caddy/Caddyfile >/dev/null \
   || die "El Caddyfile no valida. No se recargó el servicio."
 ok "Caddyfile válido"
 

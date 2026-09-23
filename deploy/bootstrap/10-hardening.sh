@@ -64,7 +64,10 @@ else
   ALLOWED_USERS="${APP_USER}"
 fi
 install -d -m 0755 /etc/ssh/sshd_config.d
-cat >/etc/ssh/sshd_config.d/99-musicapremium.conf <<EOF
+# "00-": sshd aplica la PRIMERA directiva que encuentra y lee sshd_config.d en
+# orden alfabético. Con "99-" ganaba 50-cloud-init.conf (PasswordAuthentication yes).
+rm -f /etc/ssh/sshd_config.d/99-musicapremium.conf
+cat >/etc/ssh/sshd_config.d/00-musicapremium.conf <<EOF
 # Gestionado por deploy/bootstrap/10-hardening.sh — no editar a mano.
 PermitRootLogin ${ROOT_POLICY}
 PasswordAuthentication no
@@ -85,7 +88,10 @@ EOF
 # hay que neutralizar las líneas del archivo base.
 sed -i -E 's/^[[:space:]]*(PasswordAuthentication|PermitRootLogin)[[:space:]]+.*/# &/' /etc/ssh/sshd_config
 sshd -t || die "La configuración de sshd no valida. NO se reinició el servicio."
-ok "Configuración validada"
+# Comprueba el valor EFECTIVO, no solo el archivo: otro drop-in podría imponerse.
+effective_pw="$(sshd -T 2>/dev/null | awk '$1 == "passwordauthentication" {print $2}')"
+[[ "$effective_pw" == "no" ]]   || die "sshd sigue aceptando contraseña (efectivo: ${effective_pw:-?}). Revisa /etc/ssh/sshd_config.d/."
+ok "Configuración validada (contraseña cerrada de verdad)"
 
 log "Firewall UFW: solo 22, 80 y 443"
 ufw --force default deny incoming >/dev/null
@@ -140,7 +146,7 @@ Abre otra terminal y verifica que entras con la clave:
     ssh -i ~/.ssh/musicapremium_deploy ${APP_USER}@169.58.139.103
 
 Si falla, NO cierres esta sesión: revierte con
-    rm /etc/ssh/sshd_config.d/99-musicapremium.conf && systemctl restart ssh
+    rm /etc/ssh/sshd_config.d/00-musicapremium.conf && systemctl restart ssh
 
 EOF
 ok "Paso 10 completo."
