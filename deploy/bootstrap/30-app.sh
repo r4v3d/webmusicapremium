@@ -21,6 +21,15 @@ EOF
   ok "Node $(node -v) · npm $(npm -v)"
 fi
 
+# El package-lock.json se genera con npm 11. npm 10 (el que trae Node 22) lo
+# lee distinto y `npm ci` falla con "Missing: @emnapi/... from lock file".
+if [[ "$(npm -v | cut -d. -f1)" -lt 11 ]]; then
+  npm install -g npm@11 --no-audit --no-fund >/dev/null
+  ok "npm actualizado a $(npm -v)"
+else
+  ok "npm $(npm -v)"
+fi
+
 log "Árbol de directorios en ${APP_DIR}"
 #   repo/     clon del git, donde se hace npm ci y npm run build
 #   current/  salida standalone que ejecutan los servicios

@@ -34,6 +34,13 @@ fi
 REV="$(as_app 'git rev-parse --short HEAD' 2>/dev/null || echo 'sin-git')"
 log "Revisión: ${REV}"
 
+# El lockfile se genera con npm 11; con npm 10, `npm ci` lo rechaza.
+if [[ "$(npm -v | cut -d. -f1)" -lt 11 ]]; then
+  log "Actualizando npm a la versión 11"
+  npm install -g npm@11 --no-audit --no-fund >/dev/null || die "No se pudo actualizar npm."
+  ok "npm $(npm -v)"
+fi
+
 log "Instalando dependencias (npm ci)"
 # Con devDependencies: el build de Next necesita tailwind y eslint-config-next.
 # El output standalone solo copia las dependencias de producción que el código

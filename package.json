@@ -32,5 +32,10 @@
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
     "vitest": "^5.0.0"
+  },
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=22",
+    "npm": ">=11"
   }
 }
