@@ -53,7 +53,7 @@ next-env.d.ts
 /.worker
 
 # base local de desarrollo (npm run db:dev)
-/.pglite-dev
+/.pglite-dev*
 
 # locales: no se publican (el repo es público)
 .claude/settings.local.json
