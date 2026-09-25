@@ -328,17 +328,16 @@ export default function WhatsAppBillingTab() {
                           </span>
                         </div>
 
-                        {/* DESKTOP VIEW (TABLE) */}
-                        <div className="hidden-mobile-table-wrapper" style={{ overflowX: 'auto' }}>
-                          <table className="admin-table whatsapp-billing-table">
+                        <div className="table-responsive">
+                          <table className="admin-table admin-table--stack whatsapp-billing-table">
                             <thead>
                               <tr>
                                 <th></th>
                                 <th>Cliente</th>
                                 <th>Servicio</th>
                                 <th>Correo Perfil</th>
-                                <th>Precio</th>
-                                <th style={{ width: '45%' }}>Mensaje Personalizado</th>
+                                <th className="num">Precio</th>
+                                <th className="wa-col-message">Mensaje Personalizado</th>
                                 <th>Acción</th>
                               </tr>
                             </thead>
@@ -347,10 +346,10 @@ export default function WhatsAppBillingTab() {
                                 const phoneNum = slot.clientId?.currentWhatsApp || "";
                                 const msgText = getMessageForSlot(slot);
                                 const contacted = Boolean(contactedSlotIds[slot.id]);
-                                
+
                                 return (
                                   <tr key={slot.id} className={contacted ? "row-contacted" : ""}>
-                                    <td>
+                                    <td className="cell-half wa-cell-check">
                                       <input
                                         type="checkbox"
                                         checked={selectedBillingIds.includes(slot.id)}
@@ -358,161 +357,46 @@ export default function WhatsAppBillingTab() {
                                         aria-label={`Seleccionar ${slot.clientId?.nickname || slot.memberEmail}`}
                                       />
                                     </td>
-                                    <td>
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                        <span style={{ fontWeight: 'bold' }}>{slot.clientId?.nickname || "Sin Apodo"}</span>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Código: {slot.clientId?.customerCode || "---"}</span>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan, #00e5ff)' }}>{getCountryFlag(phoneNum)} {phoneNum}</span>
+                                    <td className="cell-primary">
+                                      <div className="wa-client">
+                                        <strong>{slot.clientId?.nickname || "Sin Apodo"}</strong>
+                                        <span className="cell-sub">Código: {slot.clientId?.customerCode || "---"}</span>
+                                        <span className="wa-phone">{getCountryFlag(phoneNum)} {phoneNum}</span>
                                       </div>
                                     </td>
-                                    <td>
+                                    <td className="cell-half wa-cell-service">
                                       <span className={`service-badge badge-${slot.service}`}>
                                         {slot.service ? slot.service.toUpperCase() : ""}
                                       </span>
                                     </td>
-                                    <td style={{ fontSize: '0.85rem' }}>{slot.memberEmail}</td>
-                                    <td style={{ fontWeight: '600' }}>S/. {slot.pricePen || "0.00"}</td>
-                                    <td>
+                                    <td data-label="Perfil" className="cell-email cell-small">{slot.memberEmail}</td>
+                                    <td data-label="Precio" className="num"><strong>S/. {slot.pricePen || "0.00"}</strong></td>
+                                    <td data-label="Mensaje" className="cell-block">
                                       <textarea
-                                        className="form-input form-textarea"
+                                        className="form-input form-textarea wa-message"
                                         rows={2}
-                                        style={{ fontSize: '0.8rem', width: '100%', resize: 'vertical', minHeight: '60px' }}
+                                        aria-label="Mensaje personalizado"
                                         value={msgText}
                                         onChange={(e) => handleMessageChange(slot.id, e.target.value)}
                                       />
                                     </td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn-whatsapp-send"
-                                        onClick={() => openWhatsApp(slot)}
-                                        style={{
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'center',
-                                          gap: '6px',
-                                          background: contacted ? '#128C7E' : '#25D366',
-                                          color: '#fff',
-                                          padding: '8px 12px',
-                                          borderRadius: '6px',
-                                          fontSize: '0.8rem',
-                                          fontWeight: 'bold',
-                                          border: 'none',
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        <WhatsAppIcon size={14} />
-                                        <span>{contacted ? "Reenviar" : "Enviar"}</span>
-                                      </button>
+                                    <td className="cell-actions">
+                                      <div className="cell-actions-inner">
+                                        <button
+                                          type="button"
+                                          className={`btn-whatsapp-send ${contacted ? "is-contacted" : ""}`}
+                                          onClick={() => openWhatsApp(slot)}
+                                        >
+                                          <WhatsAppIcon size={14} />
+                                          <span>{contacted ? "Reenviar" : "Enviar"}</span>
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
                               })}
                             </tbody>
                           </table>
-                        </div>
-
-                        {/* MOBILE VIEW (CARDS) */}
-                        <div className="visible-mobile-cards-list" style={{ display: 'none', flexDirection: 'column', gap: '15px' }}>
-                          {slots.map(slot => {
-                            const phoneNum = slot.clientId?.currentWhatsApp || "";
-                            const msgText = getMessageForSlot(slot);
-                            const contacted = Boolean(contactedSlotIds[slot.id]);
-                            
-                            return (
-                              <div 
-                                key={slot.id} 
-                                className="mobile-billing-card" 
-                                style={{
-                                  background: 'rgba(255, 255, 255, 0.02)',
-                                  border: '1px solid rgba(255,255,255,0.06)',
-                                  borderRadius: '10px',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  gap: '12px',
-                                  opacity: contacted ? 0.7 : 1
-                                }}
-                              >
-                                {/* Card Header */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                  <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedBillingIds.includes(slot.id)}
-                                      onChange={() => toggleBillingSelect(slot.id)}
-                                    />
-                                    <div>
-                                    <h4 style={{ margin: '0 0 2px 0', fontSize: '0.95rem', fontWeight: 'bold' }}>
-                                      {slot.clientId?.nickname || "Sin Apodo"}
-                                    </h4>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                      Cód: {slot.clientId?.customerCode || "---"} | WhatsApp: {phoneNum}
-                                    </span>
-                                    </div>
-                                  </label>
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                    <span className={`service-badge badge-${slot.service}`} style={{ fontSize: '0.7rem', padding: '2px 6px' }}>
-                                      {slot.service ? slot.service.toUpperCase() : ""}
-                                    </span>
-                                    <span style={{ fontWeight: 'bold', fontSize: '0.85rem' }}>
-                                      S/. {slot.pricePen || "0.00"}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Card body */}
-                                <div style={{ fontSize: '0.8rem', background: 'rgba(0,0,0,0.15)', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Perfil:</span>
-                                    <span style={{ fontWeight: '500', wordBreak: 'break-all' }}>{slot.memberEmail}</span>
-                                  </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Vence:</span>
-                                    <span style={{ fontWeight: '500', color: isToday ? 'var(--accent-cyan, #00e5ff)' : '#ef4444' }}>{formatDate(slot.renewalDate)}</span>
-                                  </div>
-                                </div>
-
-                                {/* Text editor for customized message */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '500' }}>Mensaje personalizado:</label>
-                                  <textarea
-                                    className="form-input form-textarea"
-                                    rows={3}
-                                    style={{ fontSize: '0.8rem', width: '100%', resize: 'none' }}
-                                    value={msgText}
-                                    onChange={(e) => handleMessageChange(slot.id, e.target.value)}
-                                  />
-                                </div>
-
-                                {/* Action button */}
-                                <button
-                                  type="button"
-                                  onClick={() => openWhatsApp(slot)}
-                                  className="btn-whatsapp-send-mobile"
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '8px',
-                                    background: contacted ? '#128C7E' : '#25D366',
-                                    color: '#fff',
-                                    padding: '12px 16px',
-                                    borderRadius: '8px',
-                                    fontSize: '0.9rem',
-                                    fontWeight: 'bold',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    textAlign: 'center',
-                                    boxShadow: '0 4px 10px rgba(37, 211, 102, 0.2)'
-                                  }}
-                                >
-                                  <WhatsAppIcon size={16} />
-                                  <span>{contacted ? "Reenviar WhatsApp" : "Enviar WhatsApp"}</span>
-                                </button>
-
-                              </div>
-                            );
-                          })}
                         </div>
 
                       </div>

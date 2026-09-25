@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useAdmin } from "../AdminContext";
 import { CopyIcon, PlusIcon, TrashIcon, getCountryFlag } from "../adminHelpers";
 import { SecretField } from "../adminUi";
@@ -51,12 +51,14 @@ export default function FamiliesTab() {
     toggleSelectSlot
   } = useAdmin();
   const detailRef = useRef(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilterCount = [tablePlatformFilter, tableStatusFilter, tableExpiryFilter].filter((v) => v !== "all").length;
 
-  // En móvil la ficha queda debajo de la lista: llevarla a la vista al elegir un cliente.
+  // En móvil el directorio es maestro-detalle: la ficha reemplaza a la lista.
   const selectClient = (c) => {
     setSelectedClient(c);
     if (window.matchMedia("(max-width: 768px)").matches) {
-      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: "instant", block: "start" }));
     }
   };
 
@@ -252,7 +254,7 @@ export default function FamiliesTab() {
             {activeSubTab === "tableList" && (
               <div className="table-list-subtab animate-fade-in">
                 {/* Advanced Filters */}
-                <div className="table-filters-bar">
+                <div className={`table-filters-bar ${showFilters ? "filters-open" : ""}`}>
                   <div className="search-input-wrap">
                     <input
                       type="text"
@@ -262,6 +264,14 @@ export default function FamiliesTab() {
                       onChange={(e) => setTableSearchQuery(e.target.value)}
                     />
                   </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary admin-btn-compact filters-toggle"
+                    aria-expanded={showFilters}
+                    onClick={() => setShowFilters((v) => !v)}
+                  >
+                    Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""} {showFilters ? "▲" : "▼"}
+                  </button>
                   
                   <select
                     className="form-input form-select-input"
@@ -503,7 +513,7 @@ export default function FamiliesTab() {
             )}
 
             {activeSubTab === "directory" && (
-              <div className="client-directory-panel glass-panel" style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
+              <div className={`client-directory-panel glass-panel ${selectedClient ? "has-selection" : ""}`} style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
                 <div className="directory-sidebar">
                   <h3>Directorio</h3>
                   <div className="search-input-wrap">
@@ -555,6 +565,9 @@ export default function FamiliesTab() {
                 <div className="directory-detail-view" ref={detailRef}>
                   {selectedClient ? (
                     <div className="client-detail-card glass-panel" style={{ height: '100%', borderRadius: 'var(--radius-lg)' }}>
+                      <button type="button" className="btn btn-secondary admin-btn-compact directory-back-btn" onClick={() => setSelectedClient(null)}>
+                        ← Clientes
+                      </button>
                       <div className="client-detail-header">
                         <div className="client-main-name">
                           {getCountryFlag(selectedClient.currentWhatsApp)} {selectedClient.nickname || "Cliente Sin Apodo"}

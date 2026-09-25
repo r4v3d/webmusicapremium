@@ -754,7 +754,9 @@ export default function AdminDashboardPage() {
         if (data.length > 0) {
           const exists = selectedClient && data.find(c => (c._id || c.id).toString() === (selectedClient._id || selectedClient.id).toString());
           if (!exists) {
-            setSelectedClient(data[0]);
+            // En móvil el directorio es maestro-detalle: preseleccionar ocultaría la lista.
+            const isMobile = window.matchMedia("(max-width: 768px)").matches;
+            setSelectedClient(isMobile ? null : data[0]);
           } else {
             // update existing selected client ref with new data
             setSelectedClient(data.find(c => (c._id || c.id).toString() === (selectedClient._id || selectedClient.id).toString()));

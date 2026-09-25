@@ -3904,38 +3904,6 @@ a {
   transform: translateY(0);
 }
 
-/* Responsive Handling: 768px */
-@media (max-width: 768px) {
-  .hidden-mobile-table-wrapper {
-    display: none !important;
-  }
-  .visible-mobile-cards-list {
-    display: flex !important;
-  }
-}
-
-@media (min-width: 769px) {
-  .hidden-mobile-table-wrapper {
-    display: block !important;
-  }
-  .visible-mobile-cards-list {
-    display: none !important;
-  }
-}
-
-.mobile-billing-card {
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.mobile-billing-card:focus-within {
-  border-color: var(--accent-cyan, #00e5ff) !important;
-  box-shadow: 0 4px 15px rgba(0, 229, 255, 0.1);
-}
-
-.btn-whatsapp-send-mobile:hover {
-  background: #20ba5a !important;
-}
-
 /* Organizer & Consolidation Panel Styles */
 .organizer-stats-grid {
   display: grid;
@@ -5633,9 +5601,6 @@ a {
   padding: 20px;
   border-radius: 12px;
 }
-.mobile-billing-card {
-  padding: 15px;
-}
 
 /* --- Conciliación / Hoy --- */
 .hoy-list-actions {
@@ -5707,9 +5672,6 @@ a {
   .wa-queue-toolbar > .btn {
     flex: 1 1 calc(50% - 5px);
     min-height: 40px;
-  }
-  .mobile-billing-card {
-    padding: 12px;
   }
 
   /* Renovaciones */
@@ -5961,4 +5923,149 @@ a {
    sección vuelve a su estilo base al terminar la animación. */
 .admin-dashboard-wrapper .animate-fade-in {
   animation-fill-mode: none;
+}
+
+/* --- WhatsApp: una sola tabla que en móvil se apila --- */
+.whatsapp-billing-table .wa-col-message {
+  width: 42%;
+}
+.wa-client {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wa-phone {
+  font-size: 0.75rem;
+  color: var(--accent-cyan);
+}
+.whatsapp-billing-table .wa-message {
+  width: 100%;
+  min-height: 60px;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+.btn-whatsapp-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #25d366;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-whatsapp-send.is-contacted {
+  background: #128c7e;
+}
+
+/* --- Clientes: filtros plegables en móvil --- */
+.filters-toggle {
+  display: none;
+}
+
+/* --- Directorio: maestro-detalle en móvil --- */
+.directory-back-btn {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .wa-cell-check {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .admin-table--stack td.wa-cell-service {
+    grid-row: 1;
+    grid-column: 2;
+    justify-content: flex-end;
+    padding-top: 12px;
+  }
+  .admin-table--stack td.wa-cell-check {
+    padding-top: 12px;
+  }
+  .wa-cell-check input {
+    width: 20px;
+    height: 20px;
+  }
+  .whatsapp-billing-table .wa-message {
+    font-size: 16px;
+    min-height: 88px;
+  }
+  .admin-table--stack .btn-whatsapp-send {
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  .table-filters-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .table-filters-bar > .search-input-wrap {
+    grid-column: 1;
+  }
+  .filters-toggle {
+    display: inline-flex;
+    min-height: 44px;
+  }
+  .table-filters-bar > select,
+  .table-filters-bar > select:last-child {
+    display: none;
+    grid-column: 1 / -1;
+  }
+  .table-filters-bar.filters-open > select {
+    display: block;
+  }
+
+  .client-directory-panel.has-selection .directory-sidebar,
+  .client-directory-panel:not(.has-selection) .directory-detail-view {
+    display: none;
+  }
+  .directory-back-btn {
+    display: inline-flex;
+    margin-bottom: 12px;
+    min-height: 40px;
+  }
+  .directory-detail-view {
+    scroll-margin-top: calc(var(--admin-header-h) + 70px);
+  }
+
+  /* Números: métricas de cada plataforma en dos columnas */
+  .profit-table tbody td[data-label] {
+    grid-column: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left !important;
+    gap: 2px;
+  }
+  .profit-table tbody td[data-label]::before {
+    max-width: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .client-directory-panel.has-selection {
+    padding: 0 !important;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+  .client-detail-card {
+    padding: 16px;
+    min-width: 0;
+  }
+  .client-main-name {
+    font-size: 1.2rem;
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+  .client-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .client-detail-grid > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
