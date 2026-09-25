@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CopyIcon } from "./adminHelpers";
 
 export const STATUS_LABELS = {
@@ -164,6 +164,132 @@ export function formatDateTimePe(value) {
   });
 }
 
+/** "hace 5 min", "hace 3 h", "ayer"… y la fecha completa si es más antiguo. */
+export function formatRelative(value, now) {
+  if (!value) return "";
+  const date = new Date(value);
+  const ms = date.getTime();
+  if (Number.isNaN(ms)) return String(value);
+  const secs = Math.round((now - ms) / 1000);
+  if (secs < 0) return formatDateTimePe(value);
+  if (secs < 45) return "hace un momento";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "ayer";
+  if (days < 7) return `hace ${days} días`;
+  return formatDateTimePe(value);
+}
+
+function useNow(intervalMs) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+/** Fecha relativa con la absoluta en el tooltip. */
+export function RelativeTime({ value }) {
+  const now = useNow(30000);
+  if (!value) return <span className="text-muted">—</span>;
+  return (
+    <time dateTime={new Date(value).toISOString()} title={formatDateTimePe(value)} className="relative-time">
+      {formatRelative(value, now)}
+    </time>
+  );
+}
+
+/** "Actualizado hace X s" con botón para refrescar a mano. */
+export function RefreshStatus({ lastUpdated, onRefresh }) {
+  const now = useNow(5000);
+  const [busy, setBusy] = useState(false);
+  const secs = lastUpdated ? Math.max(0, Math.round((now - lastUpdated) / 1000)) : null;
+  const label = secs == null ? "Sin datos" : secs < 60 ? `hace ${secs} s` : `hace ${Math.round(secs / 60)} min`;
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="admin-refresh-status" aria-live="polite">
+      <span>Actualizado {label}</span>
+      <button type="button" className={`admin-refresh-btn ${busy ? "is-busy" : ""}`} onClick={refresh} disabled={busy} aria-label="Actualizar ahora" title="Actualizar ahora">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="23 4 23 10 17 10" />
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/** true en pantallas de ≤768 px; se actualiza al rotar o redimensionar. */
+export function useIsMobile() {
+  const query = "(max-width: 768px)";
+  const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setMobile(mql.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return mobile;
+}
+
+/**
+ * Estado sincronizado con un parámetro de la URL (?q=…): la vista se puede
+ * recargar o compartir tal cual. Al cambiar de pestaña writeAdminRoute lo limpia.
+ */
+export function readUrlParam(key) {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(key);
+}
+
+export function setUrlParam(key, value) {
+  const params = new URLSearchParams(window.location.search);
+  if (value === "" || value == null) params.delete(key);
+  else params.set(key, value);
+  const qs = params.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+}
+
+export function useUrlParam(key, fallback = "") {
+  const [value, setValue] = useState(() => readUrlParam(key) ?? fallback);
+  const update = useCallback((next) => {
+    setValue(next);
+    setUrlParam(key, next === fallback ? "" : next);
+  }, [key, fallback]);
+  return [value, update];
+}
+
+/** Enlace wa.me con el mensaje ya escrito. */
+export function whatsappUrl(phone, text) {
+  const digits = String(phone || "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+}
+
+/** Mensaje de entrega de credenciales para enviar por WhatsApp. */
+export function buildDeliveryMessage(order, account) {
+  const name = String(order?.fullName || "").trim().split(/\s+/)[0] || "";
+  const service = String(order?.service || "").toUpperCase();
+  return [
+    `¡Hola${name ? ` ${name}` : ""}! Tu pedido #${order?.orderId} de ${service}${order?.duration ? ` (${order.duration})` : ""} ya está activo.`,
+    "",
+    "Tus datos de acceso:",
+    account,
+    "",
+    "Cualquier duda, escríbenos por aquí.",
+  ].join("\n");
+}
+
 export function SecretField({ value, copyId, copiedId, onCopy, compact = false }) {
   const [revealed, setRevealed] = useState(false);
   if (!value) return <span className="text-muted">-</span>;
@@ -267,7 +393,7 @@ export function ProofLightbox({ url, onClose }) {
 export function AdminSkeleton() {
   return (
     <div className="admin-dashboard-wrapper">
-      <header className="admin-header glass-panel">
+      <header className="admin-header glass-panel admin-header-sticky">
         <div className="container admin-header-inner">
           <div className="admin-brand">
             <span className="admin-brand-dot"></span>
@@ -276,7 +402,7 @@ export function AdminSkeleton() {
         </div>
       </header>
       <div className="container admin-content-layout">
-        <section className="stats-grid">
+        <section className="stats-grid stats-grid-compact admin-kpis">
           <div className="stat-card glass-panel admin-skeleton-block" />
           <div className="stat-card glass-panel admin-skeleton-block" />
           <div className="stat-card glass-panel admin-skeleton-block" />

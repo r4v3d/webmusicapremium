@@ -107,7 +107,8 @@ export default function OrganizerTab() {
         <div>
           <h2 style={{ marginBottom: "4px" }}>Organizador y Consolidación de Miembros</h2>
           <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
-            Arrastra un miembro a un cupo libre. El tablero se actualiza al soltar.
+            <span className="organizer-hint-drag">Arrastra un miembro a un cupo libre. El tablero se actualiza al soltar.</span>
+            <span className="organizer-hint-touch">Toca «Mover» en un miembro para pasarlo a otro cupo libre.</span>
           </p>
         </div>
       </div>
@@ -116,7 +117,7 @@ export default function OrganizerTab() {
         <p className="organizer-hint text-muted">Último movimiento listo para deshacer desde el aviso superior.</p>
       )}
 
-      <div className="platform-tabs-nav" style={{ display: "flex", gap: "8px", marginBottom: "20px", borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: "10px" }}>
+      <div className="platform-tabs-nav organizer-platforms">
         {["tidal", "deezer", "qobuz"].map((plat) => (
           <button
             key={plat}
@@ -237,7 +238,7 @@ export default function OrganizerTab() {
                           {isActive ? (
                             <button
                               type="button"
-                              className="btn-mini-copy"
+                              className="btn-mini-copy organizer-move-btn"
                               onClick={() => {
                                 setTransferSourceSlot(p);
                                 setTransferSourceAccount(acc);

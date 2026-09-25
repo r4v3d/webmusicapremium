@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { useAdmin } from "../AdminContext";
 import { CopyIcon, PlusIcon, TrashIcon, getCountryFlag } from "../adminHelpers";
 import { SecretField } from "../adminUi";
@@ -49,6 +50,17 @@ export default function FamiliesTab() {
     toggleSelectAllVisible,
     toggleSelectSlot
   } = useAdmin();
+  const detailRef = useRef(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilterCount = [tablePlatformFilter, tableStatusFilter, tableExpiryFilter].filter((v) => v !== "all").length;
+
+  // En móvil el directorio es maestro-detalle: la ficha reemplaza a la lista.
+  const selectClient = (c) => {
+    setSelectedClient(c);
+    if (window.matchMedia("(max-width: 768px)").matches) {
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: "instant", block: "start" }));
+    }
+  };
 
   return (
     <section className="families-section animate-fade-in">
@@ -242,7 +254,7 @@ export default function FamiliesTab() {
             {activeSubTab === "tableList" && (
               <div className="table-list-subtab animate-fade-in">
                 {/* Advanced Filters */}
-                <div className="table-filters-bar">
+                <div className={`table-filters-bar ${showFilters ? "filters-open" : ""}`}>
                   <div className="search-input-wrap">
                     <input
                       type="text"
@@ -252,6 +264,14 @@ export default function FamiliesTab() {
                       onChange={(e) => setTableSearchQuery(e.target.value)}
                     />
                   </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary admin-btn-compact filters-toggle"
+                    aria-expanded={showFilters}
+                    onClick={() => setShowFilters((v) => !v)}
+                  >
+                    Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""} {showFilters ? "▲" : "▼"}
+                  </button>
                   
                   <select
                     className="form-input form-select-input"
@@ -297,7 +317,7 @@ export default function FamiliesTab() {
                   </div>
                 ) : (
                   <div className="bulk-table-container">
-                    <table className="bulk-table">
+                    <table className="bulk-table admin-table--stack families-table">
                       <thead>
                         <tr>
                           <th style={{ width: '40px' }}>
@@ -334,7 +354,7 @@ export default function FamiliesTab() {
 
                           return (
                             <tr key={slot.id} className={isSelected ? "selected" : ""}>
-                              <td>
+                              <td className="cell-half families-cell-check">
                                 <label className="custom-checkbox">
                                   <input
                                     type="checkbox"
@@ -344,18 +364,18 @@ export default function FamiliesTab() {
                                   <span className="checkmark"></span>
                                 </label>
                               </td>
-                              <td>
+                              <td className="cell-half families-cell-service">
                                 <span className={`badge-service badge-${slot.service}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
                                   {slot.service}
                                 </span>
                               </td>
-                              <td style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.masterEmail}>
+                              <td data-label="Maestro" className="families-cell-ellipsis" title={slot.masterEmail}>
                                 {slot.masterEmail}
                               </td>
-                              <td style={{ fontWeight: '600', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={slot.memberEmail || "Disponible"}>
+                              <td data-label="Ranura" className="families-cell-ellipsis" style={{ fontWeight: '600' }} title={slot.memberEmail || "Disponible"}>
                                 {slot.memberEmail ? slot.memberEmail : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Disponible</span>}
                               </td>
-                              <td>
+                              <td data-label="Contraseña">
                                 {slot.memberPassword ? (
                                   <SecretField
                                     value={slot.memberPassword}
@@ -368,9 +388,9 @@ export default function FamiliesTab() {
                                   <span style={{ color: 'var(--text-muted)' }}>-</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label="Cliente">
                                 {slot.clientId ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <div className="families-client" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                      <span style={{ fontWeight: '600' }}>
                                        {slot.clientId.customerCode || "CLI-XXXXXX"}{slot.clientId.nickname ? ` | ${slot.clientId.nickname}` : ""}
                                      </span>
@@ -388,10 +408,10 @@ export default function FamiliesTab() {
                                   <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Sin Cliente</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label="Precio" className="num">
                                 {slot.status !== "free" ? `S/. ${slot.pricePen}` : "-"}
                               </td>
-                              <td>
+                              <td data-label="Vencimiento">
                                 {slot.status !== "free" && slot.renewalDate ? (
                                   <span className={`expiry-tag ${expiryInfo.className}`}>
                                     {expiryInfo.label}
@@ -400,20 +420,21 @@ export default function FamiliesTab() {
                                   <span style={{ color: 'var(--text-muted)' }}>-</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label="Estado">
                                 <span className={`status-badge-mini ${slot.status}`}>
                                   {statusNames[slot.status] || slot.status}
                                 </span>
                               </td>
-                              <td>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditSlotModal(slot)}
-                                  className="btn-slot-edit"
-                                  style={{ padding: '4px 8px', fontSize: '0.7rem' }}
-                                >
-                                  Editar
-                                </button>
+                              <td className="cell-actions">
+                                <div className="cell-actions-inner">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditSlotModal(slot)}
+                                    className="btn-slot-edit"
+                                  >
+                                    Editar
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -492,7 +513,7 @@ export default function FamiliesTab() {
             )}
 
             {activeSubTab === "directory" && (
-              <div className="client-directory-panel glass-panel" style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
+              <div className={`client-directory-panel glass-panel ${selectedClient ? "has-selection" : ""}`} style={{ padding: '20px', borderRadius: 'var(--radius-lg)' }}>
                 <div className="directory-sidebar">
                   <h3>Directorio</h3>
                   <div className="search-input-wrap">
@@ -524,7 +545,7 @@ export default function FamiliesTab() {
                         return (
                           <div
                             key={cId}
-                            onClick={() => setSelectedClient(c)}
+                            onClick={() => selectClient(c)}
                             className={`client-search-card glass-panel ${isSelected ? "active" : ""}`}
                             style={{ borderRadius: 'var(--radius-sm)' }}
                           >
@@ -541,9 +562,12 @@ export default function FamiliesTab() {
                   )}
                 </div>
 
-                <div className="directory-detail-view">
+                <div className="directory-detail-view" ref={detailRef}>
                   {selectedClient ? (
                     <div className="client-detail-card glass-panel" style={{ height: '100%', borderRadius: 'var(--radius-lg)' }}>
+                      <button type="button" className="btn btn-secondary admin-btn-compact directory-back-btn" onClick={() => setSelectedClient(null)}>
+                        ← Clientes
+                      </button>
                       <div className="client-detail-header">
                         <div className="client-main-name">
                           {getCountryFlag(selectedClient.currentWhatsApp)} {selectedClient.nickname || "Cliente Sin Apodo"}

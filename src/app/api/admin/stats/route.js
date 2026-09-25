@@ -3,7 +3,24 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { checkAdminAuth } from "../../../../lib/auth";
 import { query } from "../../../../lib/pg";
-import { formatDatabaseError, getFreeSlotsStock } from "../../../../lib/db";
+import { formatDatabaseError, getFreeSlotsStock, toDateStr } from "../../../../lib/db";
+
+// Siete días terminando hoy, con cero en los días sin ventas.
+function lastSevenDays(rows) {
+  const byDay = {};
+  for (const r of rows) {
+    byDay[r.day] = byDay[r.day] || { PEN: 0, USDT: 0 };
+    byDay[r.day][r.currency] = Number(r.net) || 0;
+  }
+  const out = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = toDateStr(d);
+    out.push({ day: key, PEN: byDay[key]?.PEN || 0, USDT: byDay[key]?.USDT || 0 });
+  }
+  return out;
+}
 
 export async function GET() {
   try {
@@ -12,7 +29,7 @@ export async function GET() {
       return NextResponse.json({ message: "No autorizado." }, { status: 401 });
     }
 
-    const [activeStock, counts, revenue] = await Promise.all([
+    const [activeStock, counts, revenue, daily] = await Promise.all([
       getFreeSlotsStock(),
       query(
         `select count(*)::int as total,
@@ -27,6 +44,15 @@ export async function GET() {
           where payment_status = 'confirmed' and order_id is not null
           group by currency`
       ),
+      // Serie de 7 días para las sparklines de los KPI (mismo corte de día que /today).
+      query(
+        `select to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, currency,
+                coalesce(sum(net_amount), 0) as net
+           from payments
+          where payment_status = 'confirmed' and order_id is not null
+            and created_at >= date_trunc('day', now()) - interval '6 days'
+          group by 1, 2`
+      ),
     ]);
 
     const byCurrency = Object.fromEntries(revenue.rows.map((r) => [r.currency, r]));
@@ -39,6 +65,7 @@ export async function GET() {
       // Compatibilidad con el panel anterior.
       totalRevenueUsd: Number(byCurrency.USDT?.net || 0).toFixed(2),
       activeStock,
+      daily: lastSevenDays(daily.rows),
     }, { status: 200 });
   } catch (error) {
     console.error("Fetch Stats Error:", error);

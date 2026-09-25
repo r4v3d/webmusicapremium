@@ -1,7 +1,19 @@
 "use client";
 
+import { useEffect } from "react";
 import { useAdmin } from "../AdminContext";
-import { PROVIDER_LABELS, STATUS_LABELS, SecretField, formatDatePe, formatMoney } from "../adminUi";
+import {
+  PROVIDER_LABELS,
+  STATUS_LABELS,
+  RelativeTime,
+  SecretField,
+  buildDeliveryMessage,
+  formatDatePe,
+  formatMoney,
+  readUrlParam,
+  setUrlParam,
+  whatsappUrl,
+} from "../adminUi";
 
 // Filtros agrupados: "Abiertos" incluye los que esperan pago o están incompletos.
 const FILTERS = {
@@ -27,6 +39,23 @@ export default function OrdersTab() {
     isOrdersLoading,
   } = useAdmin();
 
+  // Búsqueda y filtro viven también en la URL (?q=&estado=) para recargar o compartir la vista.
+  useEffect(() => {
+    const q = readUrlParam("q");
+    const estado = readUrlParam("estado");
+    if (q) setOrderSearchQuery(q);
+    if (estado && (FILTERS[estado] || estado === "all")) setOrderStatusFilter(estado);
+    // Solo al montar: después manda lo que escribe el usuario.
+  }, []);
+  const changeSearch = (value) => {
+    setOrderSearchQuery(value);
+    setUrlParam("q", value);
+  };
+  const changeFilter = (value) => {
+    setOrderStatusFilter(value);
+    setUrlParam("estado", value === "pending" ? "" : value);
+  };
+
   const query = (orderSearchQuery || "").toLowerCase().trim();
   const filtered = orders.filter((o) => {
     if (orderStatusFilter !== "all" && !(FILTERS[orderStatusFilter] || [orderStatusFilter]).includes(o.status)) return false;
@@ -51,14 +80,14 @@ export default function OrdersTab() {
           className="form-input"
           placeholder="Buscar nombre, WhatsApp o MPB-"
           value={orderSearchQuery}
-          onChange={(e) => setOrderSearchQuery(e.target.value)}
+          onChange={(e) => changeSearch(e.target.value)}
         />
         <div className="stock-filter-tabs">
           {["pending", "paid", "expired", "all"].map((status) => (
             <button
               key={status}
               type="button"
-              onClick={() => setOrderStatusFilter(status)}
+              onClick={() => changeFilter(status)}
               className={`filter-btn ${orderStatusFilter === status ? "active" : ""}`}
             >
               {FILTER_LABELS[status]}
@@ -88,7 +117,7 @@ export default function OrdersTab() {
                 <div className="order-card-header">
                   <div>
                     <span className="order-id">#{o.orderId}</span>
-                    <span className="order-date">{formatDatePe(o.createdAt)}</span>
+                    <span className="order-date"><RelativeTime value={o.createdAt} /></span>
                   </div>
                   <span className={`status-badge badge-${o.status}`}>
                     {noStock ? "Pagado sin stock" : o.status === "paid" ? "Pagado, sin entregar" : STATUS_LABELS[o.status] || o.status}
@@ -124,6 +153,16 @@ export default function OrdersTab() {
                     <div className="assigned-account-box">
                       <span>Cuenta entregada:</span>
                       <SecretField value={o.assignedAccount} copyId={o.orderId} copiedId={copiedId} onCopy={handleCopyToClipboard} />
+                      {o.whatsapp && (
+                        <a
+                          href={whatsappUrl(o.whatsapp, buildDeliveryMessage(o, o.assignedAccount))}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="order-wa-delivery"
+                        >
+                          Enviar credenciales por WhatsApp
+                        </a>
+                      )}
                     </div>
                   )}
                 </div>

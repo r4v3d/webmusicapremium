@@ -229,7 +229,7 @@ export default function ProfitabilityTab() {
                   </p>
                 </div>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="profit-month-picker" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '0.85rem', color: '#fff', fontWeight: '500' }}>Mes de Análisis:</span>
                   <select
                     value={selectedReportMonth}
@@ -423,12 +423,12 @@ export default function ProfitabilityTab() {
               </div>
 
               {/* Two-column analysis layout */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '20px', marginBottom: '24px' }}>
                 {/* Column 1: Table Platform Breakdown */}
-                <div className="glass-panel" style={{ padding: '20px', margin: 0 }}>
+                <div className="glass-panel profit-breakdown" style={{ padding: '20px', margin: 0, gridColumn: '1 / -1' }}>
                   <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#fff' }}>Detalle Económico del Mes Seleccionado</h3>
                   <div className="table-responsive">
-                    <table className="admin-table">
+                    <table className="admin-table admin-table--stack profit-table">
                       <thead>
                         <tr>
                           <th>Plataforma</th>
@@ -443,57 +443,57 @@ export default function ProfitabilityTab() {
                       <tbody>
                         {/* Tidal */}
                         <tr>
-                          <td>
+                          <td className="cell-primary">
                             <span className="badge-service badge-tidal">Tidal</span>
                           </td>
-                          <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsTidal.accountsCount}</td>
-                          <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <td data-label="Titulares a vencer" className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsTidal.accountsCount}</td>
+                          <td data-label="Miembros a cobrar" className="text-center" style={{ color: 'var(--text-muted)' }}>
                             <span style={{ color: '#fff', fontWeight: '600' }}>{statsTidal.activeSlotsCount}</span>
                           </td>
-                          <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsTidal.totalRevenue.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: '#f87171' }}>S/. {statsTidal.totalCost.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: statsTidal.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Cobros proyectados" className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsTidal.totalRevenue.toFixed(2)}</td>
+                          <td data-label="Costos de renovación" className="text-right" style={{ color: '#f87171' }}>S/. {statsTidal.totalCost.toFixed(2)}</td>
+                          <td data-label="Utilidad neta" className="text-right" style={{ color: statsTidal.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
                             S/. {statsTidal.profit.toFixed(2)}
                           </td>
-                          <td className="text-right" style={{ color: statsTidal.margin >= 40 ? '#4ade80' : statsTidal.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Margen ROI" className="text-right" style={{ color: statsTidal.margin >= 40 ? '#4ade80' : statsTidal.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
                             {statsTidal.margin.toFixed(1)}%
                           </td>
                         </tr>
 
                         {/* Deezer */}
                         <tr>
-                          <td>
+                          <td className="cell-primary">
                             <span className="badge-service badge-deezer">Deezer</span>
                           </td>
-                          <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsDeezer.accountsCount}</td>
-                          <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <td data-label="Titulares a vencer" className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsDeezer.accountsCount}</td>
+                          <td data-label="Miembros a cobrar" className="text-center" style={{ color: 'var(--text-muted)' }}>
                             <span style={{ color: '#fff', fontWeight: '600' }}>{statsDeezer.activeSlotsCount}</span>
                           </td>
-                          <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsDeezer.totalRevenue.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: '#f87171' }}>S/. {statsDeezer.totalCost.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: statsDeezer.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Cobros proyectados" className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsDeezer.totalRevenue.toFixed(2)}</td>
+                          <td data-label="Costos de renovación" className="text-right" style={{ color: '#f87171' }}>S/. {statsDeezer.totalCost.toFixed(2)}</td>
+                          <td data-label="Utilidad neta" className="text-right" style={{ color: statsDeezer.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
                             S/. {statsDeezer.profit.toFixed(2)}
                           </td>
-                          <td className="text-right" style={{ color: statsDeezer.margin >= 40 ? '#4ade80' : statsDeezer.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Margen ROI" className="text-right" style={{ color: statsDeezer.margin >= 40 ? '#4ade80' : statsDeezer.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
                             {statsDeezer.margin.toFixed(1)}%
                           </td>
                         </tr>
 
                         {/* Qobuz */}
                         <tr>
-                          <td>
+                          <td className="cell-primary">
                             <span className="badge-service badge-qobuz">Qobuz</span>
                           </td>
-                          <td className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsQobuz.accountsCount}</td>
-                          <td className="text-center" style={{ color: 'var(--text-muted)' }}>
+                          <td data-label="Titulares a vencer" className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsQobuz.accountsCount}</td>
+                          <td data-label="Miembros a cobrar" className="text-center" style={{ color: 'var(--text-muted)' }}>
                             <span style={{ color: '#fff', fontWeight: '600' }}>{statsQobuz.activeSlotsCount}</span>
                           </td>
-                          <td className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsQobuz.totalRevenue.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: '#f87171' }}>S/. {statsQobuz.totalCost.toFixed(2)}</td>
-                          <td className="text-right" style={{ color: statsQobuz.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Cobros proyectados" className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsQobuz.totalRevenue.toFixed(2)}</td>
+                          <td data-label="Costos de renovación" className="text-right" style={{ color: '#f87171' }}>S/. {statsQobuz.totalCost.toFixed(2)}</td>
+                          <td data-label="Utilidad neta" className="text-right" style={{ color: statsQobuz.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
                             S/. {statsQobuz.profit.toFixed(2)}
                           </td>
-                          <td className="text-right" style={{ color: statsQobuz.margin >= 40 ? '#4ade80' : statsQobuz.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
+                          <td data-label="Margen ROI" className="text-right" style={{ color: statsQobuz.margin >= 40 ? '#4ade80' : statsQobuz.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
                             {statsQobuz.margin.toFixed(1)}%
                           </td>
                         </tr>
@@ -600,7 +600,7 @@ export default function ProfitabilityTab() {
                 {/* Simulation results comparison */}
                 <div style={{ background: 'rgba(0, 229, 255, 0.03)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(0, 229, 255, 0.15)' }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Resultados Proyectados Simulados</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '16px' }}>
                     
                     <div>
                       <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ingreso Proyectado:</span>

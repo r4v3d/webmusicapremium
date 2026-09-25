@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAdmin } from "../AdminContext";
 import { TrashIcon } from "../adminHelpers";
-import { SecretField } from "../adminUi";
+import { SecretField, readUrlParam, setUrlParam, useIsMobile, useUrlParam } from "../adminUi";
 
 const PAGE_SIZE = 50;
 
@@ -17,8 +17,25 @@ export default function StockTab() {
     setStockFilter,
     stockFilter
   } = useAdmin();
-  const [search, setSearch] = useState("");
+  const [search, setSearchParam] = useUrlParam("q");
   const [page, setPage] = useState(1);
+  const isMobile = useIsMobile();
+
+  // El filtro vive en el contexto; la URL (?filtro=) solo lo restaura al entrar.
+  useEffect(() => {
+    const saved = readUrlParam("filtro");
+    if (saved) setStockFilter(saved);
+  }, []);
+
+  const changeSearch = (value) => {
+    setSearchParam(value);
+    setPage(1);
+  };
+  const changeFilter = (id) => {
+    setStockFilter(id);
+    setUrlParam("filtro", id === "all" ? "" : id);
+    setPage(1);
+  };
   const [now, setNow] = useState(() => Date.now());
 
   // Cuenta atrás de las reservas (§15.3).
@@ -41,34 +58,40 @@ export default function StockTab() {
       .some((v) => String(v).toLowerCase().includes(q));
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, stockFilter]);
-
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // En móvil se acumulan filas con «Cargar más»; en escritorio, páginas.
+  const pageRows = isMobile
+    ? rows.slice(0, currentPage * PAGE_SIZE)
+    : rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const remaining = rows.length - pageRows.length;
+
+  const filters = [
+    ["all", "Todas"],
+    ["available", "Disponibles"],
+    ["used", "Reservadas"],
+    ["tidal", "Tidal"],
+    ["deezer", "Deezer"],
+    ["qobuz", "Qobuz"],
+  ];
 
   return (
-    <section className="stock-section animate-fade-in">
-      <div className="section-header-filters">
-        <h2>Inventario de Cuentas</h2>
-        <div className="admin-filter-row">
-          <input
-            type="search"
-            className="form-input"
-            placeholder="Buscar correo u orden"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="stock-filter-tabs">
-            <button onClick={() => setStockFilter("all")} className={`filter-btn ${stockFilter === "all" ? "active" : ""}`}>Todas</button>
-            <button onClick={() => setStockFilter("available")} className={`filter-btn ${stockFilter === "available" ? "active" : ""}`}>Disponibles</button>
-            <button onClick={() => setStockFilter("used")} className={`filter-btn ${stockFilter === "used" ? "active" : ""}`}>Reservadas</button>
-            <button onClick={() => setStockFilter("tidal")} className={`filter-btn ${stockFilter === "tidal" ? "active" : ""}`}>Tidal</button>
-            <button onClick={() => setStockFilter("deezer")} className={`filter-btn ${stockFilter === "deezer" ? "active" : ""}`}>Deezer</button>
-            <button onClick={() => setStockFilter("qobuz")} className={`filter-btn ${stockFilter === "qobuz" ? "active" : ""}`}>Qobuz</button>
-          </div>
+    <section className="admin-section animate-fade-in">
+      <h2>Inventario de Cuentas</h2>
+      <div className="admin-toolbar">
+        <input
+          type="search"
+          className="form-input"
+          placeholder="Buscar correo u orden"
+          value={search}
+          onChange={(e) => changeSearch(e.target.value)}
+        />
+        <div className="admin-pills">
+          {filters.map(([id, label]) => (
+            <button key={id} type="button" onClick={() => changeFilter(id)} className={`filter-btn ${stockFilter === id ? "active" : ""}`}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -83,7 +106,7 @@ export default function StockTab() {
       ) : (
         <>
           <div className="table-responsive glass-panel">
-            <table className="admin-table">
+            <table className="admin-table admin-table--stack stock-table">
               <thead>
                 <tr>
                   <th>Servicio</th>
@@ -95,42 +118,63 @@ export default function StockTab() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((item) => (
-                  <tr key={item.id}>
-                    <td><span className={`badge-service badge-${item.service}`}>{item.service.toUpperCase()}</span></td>
-                    <td>{item.reserved ? reservedLabel(item) : "Disponible"}</td>
-                    <td>
-                      <SecretField
-                        value={item.accountData}
-                        copyId={`stock-${item.id}`}
-                        copiedId={copiedId}
-                        onCopy={handleCopyToClipboard}
-                        compact
-                      />
-                    </td>
-                    <td>{item.familyMasterEmail || "-"}</td>
-                    <td>{item.reservedForOrder ? `#${item.reservedForOrder}` : "-"}</td>
-                    <td>
-                      <button onClick={() => handleDeleteStock(item.id)} className="btn-delete-stock" title="Eliminar cuenta">
-                        <TrashIcon />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {pageRows.map((item) => {
+                  const label = item.reserved ? reservedLabel(item) : "Disponible";
+                  return (
+                    <tr key={item.id}>
+                      <td className="cell-primary stock-cell-head">
+                        <span className={`badge-service badge-${item.service}`}>{item.service.toUpperCase()}</span>
+                        <span className={`stock-state ${label === "Disponible" ? "is-free" : "is-reserved"}`}>{label}</span>
+                      </td>
+                      <td data-label="Estado" className="nowrap hide-mobile">
+                        <span className={`stock-state ${label === "Disponible" ? "is-free" : "is-reserved"}`}>{label}</span>
+                      </td>
+                      <td data-label="Cuenta" className="nowrap">
+                        <SecretField
+                          value={item.accountData}
+                          copyId={`stock-${item.id}`}
+                          copiedId={copiedId}
+                          onCopy={handleCopyToClipboard}
+                          compact
+                        />
+                      </td>
+                      <td data-label="Familiar" className="cell-email">{item.familyMasterEmail || "-"}</td>
+                      <td data-label="Orden" className="nowrap">{item.reservedForOrder ? `#${item.reservedForOrder}` : "-"}</td>
+                      <td className="cell-actions stock-cell-delete">
+                        <div className="cell-actions-inner">
+                          <button type="button" onClick={() => handleDeleteStock(item.id)} className="btn-delete-stock btn-icon" title="Eliminar cuenta" aria-label="Eliminar cuenta">
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <div className="admin-pager">
-            <span>{rows.length} cuentas · página {currentPage} de {totalPages}</span>
-            <div className="admin-pager-actions">
-              <button type="button" className="btn btn-secondary btn-sm-mobile" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                Anterior
-              </button>
-              <button type="button" className="btn btn-secondary btn-sm-mobile" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                Siguiente
-              </button>
+          {isMobile ? (
+            <div className="admin-pager">
+              <span>{pageRows.length} de {rows.length} cuentas</span>
+              {remaining > 0 && (
+                <button type="button" className="btn btn-secondary admin-load-more" onClick={() => setPage((p) => p + 1)}>
+                  Cargar {Math.min(PAGE_SIZE, remaining)} más
+                </button>
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="admin-pager">
+              <span>{rows.length} cuentas · página {currentPage} de {totalPages}</span>
+              <div className="admin-pager-actions">
+                <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Anterior
+                </button>
+                <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </section>
