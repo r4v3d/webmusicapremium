@@ -18,7 +18,11 @@ describe("signed sessions", () => {
     const token = await signToken({ customerId: "abc", timestamp: Date.now() });
     const payload = await verifyToken(token);
     expect(isCustomerSessionPayload(payload)).toBe(true);
-    const broken = token.replace(/A/g, "B");
+    // Se cambia el contenido firmado conservando la firma original. (Antes se
+    // reemplazaban letras "A" del token, y si no había ninguna la prueba fallaba.)
+    const decoded = JSON.parse(Buffer.from(token, "base64").toString("utf8"));
+    const tampered = { ...decoded, data: decoded.data.replace('"abc"', '"otro"') };
+    const broken = Buffer.from(JSON.stringify(tampered), "utf8").toString("base64");
     expect(await verifyToken(broken)).toBeNull();
   });
 });

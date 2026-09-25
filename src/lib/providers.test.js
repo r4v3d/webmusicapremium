@@ -96,12 +96,13 @@ describe("taypi", () => {
 });
 
 describe("entrega", () => {
-  it("resuelve la credencial según email_type", () => {
-    const account = { account_email: "master@x.com", account_password: "mp" };
-    expect(resolveSlotCredentials({ email_type: "admin", member_email: "m@x.com", member_password: "p" }, account)).toEqual({ email: "master@x.com", password: "p" });
-    expect(resolveSlotCredentials({ email_type: "customer", member_email: "m@x.com", member_password: "p" }, account)).toEqual({ email: "m@x.com", password: "p" });
-    expect(resolveSlotCredentials({ email_type: "customer", member_email: "", member_password: "" }, account)).toEqual({ email: "master@x.com", password: "mp" });
-    expect(resolveSlotCredentials({ email_type: "admin" }, null)).toEqual({ email: "", password: "" });
+  it("entrega siempre la credencial del miembro, nunca la del titular", () => {
+    const account = { account_email: "titular@x.com", account_password: "clave-titular" };
+    // "admin" = correo propio del negocio ("PROPIO"); igual se entrega el del miembro.
+    expect(resolveSlotCredentials({ email_type: "admin", member_email: "m@x.com", member_password: "p" }, account)).toEqual({ email: "m@x.com", password: "p" });
+    expect(resolveSlotCredentials({ email_type: "client", member_email: " m@x.com ", member_password: "p" }, account)).toEqual({ email: "m@x.com", password: "p" });
+    // Cupo vacío: nada, jamás los datos del titular.
+    expect(resolveSlotCredentials({ email_type: "admin", member_email: "", member_password: "" }, account)).toEqual({ email: "", password: "" });
   });
 
   it("reintenta con espera creciente y se detiene tras el quinto fallo", () => {

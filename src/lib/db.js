@@ -4,6 +4,7 @@ import { query, queryOne, withTransaction } from "./pg";
 import { calculateRenewalDate } from "./renewal";
 import { insertPayment } from "./ledger";
 import { CONFIG } from "../data/config";
+import { SLOT_HAS_CREDENTIALS_SQL } from "./reserve";
 
 export function formatDatabaseError(error) {
   const message = error?.message || String(error || "Error desconocido");
@@ -457,13 +458,17 @@ export async function getMemberProfileById(id, { tx = null } = {}) {
   return formatMemberProfile(res.rows[0]);
 }
 
-/** Cupos libres por servicio. Un cupo con reserva vencida vuelve a contar como libre (§15.2). */
+/**
+ * Cupos vendibles por servicio: libres (o con reserva vencida, §15.2) y con
+ * credenciales de miembro. Un cupo vacío no es stock.
+ */
 export async function getFreeSlotsStock() {
   const { rows } = await query(
     `select pa.platform_code, count(*)::int as free
        from account_slots s
        join platform_accounts pa on pa.id = s.platform_account_id
-      where s.status = 'free' or (s.status = 'reserved' and s.reserved_until < now())
+      where (s.status = 'free' or (s.status = 'reserved' and s.reserved_until < now()))
+        and ${SLOT_HAS_CREDENTIALS_SQL}
       group by pa.platform_code`
   );
   const stock = Object.fromEntries(Object.keys(CONFIG.services).map((code) => [code, 0]));

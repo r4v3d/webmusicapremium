@@ -31,17 +31,25 @@ export function parseAssignedAccount(assignedAccount) {
 
 /**
  * Única regla de qué credencial se entrega para un cupo (§14.1).
- * email_type = "admin": el cliente entra con el correo maestro de la cuenta.
- * Cualquier otro valor: entra con el correo del miembro.
+ * SIEMPRE el correo y la clave del miembro. Los datos del titular
+ * (platform_accounts) administran la familia entera y nunca se entregan.
+ *
+ * email_type solo dice de quién es el correo del miembro: "admin" = correo
+ * propio del negocio ("PROPIO" en el panel), "client"/"customer" = del cliente.
+ * No cambia qué se entrega. El segundo argumento se ignora a propósito.
+ *
  * Consumidores: settlePayment, /api/client/dashboard, el correo, el checkout y el bot.
  */
-export function resolveSlotCredentials(slot, account) {
-  const useMaster = (slot?.email_type || "admin") === "admin";
-  const email = useMaster
-    ? (account?.account_email || slot?.member_email || "")
-    : (slot?.member_email || account?.account_email || "");
-  const password = slot?.member_password || account?.account_password || "";
-  return { email: String(email).trim(), password: String(password) };
+export function resolveSlotCredentials(slot, _account) {
+  return {
+    email: String(slot?.member_email || "").trim(),
+    password: String(slot?.member_password || ""),
+  };
+}
+
+/** Un cupo solo se puede vender si tiene credenciales propias de miembro. */
+export function slotHasCredentials(slot) {
+  return Boolean(String(slot?.member_email || "").trim() && String(slot?.member_password || ""));
 }
 
 export function escapeHtml(value) {

@@ -15,6 +15,7 @@ import { findPlan } from "./catalog";
 import { credit, debit } from "./wallet";
 import { getOrCreateClient, toDateStr } from "./db";
 import { WALLET_PROVIDERS } from "./providers";
+import { SLOT_HAS_CREDENTIALS_SQL } from "./reserve";
 
 const TOLERANCE = { PEN: 0.05, USDT: 0.01 };
 
@@ -62,6 +63,7 @@ async function claimSlot(tx, order) {
             or s.status = 'free'
             or (s.status = 'reserved' and s.reserved_until < now())
           )
+          and ${SLOT_HAS_CREDENTIALS_SQL}
         order by (s.status = 'reserved' and s.reserved_for_order = $3) desc, s.updated_at asc, s.id asc
         limit 1
         for update of s skip locked

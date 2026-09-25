@@ -68,6 +68,21 @@ describe("liquidación", () => {
     expect(await count("select count(*)::int n from account_slots where status = 'active'")).toBe(1);
   });
 
+  it("nunca vende un cupo vacío ni entrega la cuenta titular", async () => {
+    // Familia real: titular + un cupo vacío + un cupo de miembro con correo propio.
+    const acc = await createFamilyAccount({ service: "tidal", masterEmail: "titular@x.com", password: "clave-titular" });
+    await createMemberProfile({ familyAccountId: acc.id, slotNumber: 1, status: "free" });
+    await createMemberProfile({ familyAccountId: acc.id, slotNumber: 2, status: "free", emailType: "admin", memberEmail: "cliente-2176@x.com", memberPassword: "622987" });
+    const orderId = await newOrder();
+    const { intent } = await createIntent({ orderId, providerId: "manual_yape" });
+    const r = await applyPayment({ intentId: intent.id, provider: "manual_yape", providerTxnId: "OP-M", amount: 6, currency: "PEN" });
+    expect(r.credentials).toEqual({ email: "cliente-2176@x.com", password: "622987" });
+
+    // Con solo el cupo vacío restante no hay stock: no se reserva ni se cobra.
+    const second = await newOrder();
+    expect((await createIntent({ orderId: second, providerId: "manual_yape" })).status).toBe("no_stock");
+  });
+
   it("el mismo evento cinco veces liquida una sola vez", async () => {
     await seedStock(2);
     const orderId = await newOrder();

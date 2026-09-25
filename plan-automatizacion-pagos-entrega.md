@@ -23,6 +23,7 @@ Alcance: automatizar de punta a punta la confirmación del pago (USDT por Binanc
 > - Cada movimiento de dinero es una fila en `payments`. Un parcial y su complemento son dos filas, y el excedente va en una fila sin pedido.
 > - La renovación desde el panel del cliente es un pedido con `renew_subscription_id`.
 > - Las ediciones del panel ya no crean pagos. Solo «Extender» registra un asiento `admin_manual`.
+> - **Corrección a §2.3 (defecto 4) y §14.1 (24-09-2026):** se entregan siempre el correo y la clave **del miembro**, nunca los del titular. `email_type = "admin"` significa que el correo del miembro es propio del negocio ("PROPIO"), no que se entregue el correo maestro. Un cupo sin credenciales de miembro no es stock y no se vende.
 
 ---
 

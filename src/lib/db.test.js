@@ -84,9 +84,12 @@ describe("db sobre PostgreSQL", () => {
     }]);
   });
 
-  it("el stock libre cuenta cupos sin correo y reservas vencidas, por servicio", async () => {
-    const { slots } = await seedAccount("tidal", 3);
+  it("el stock cuenta solo cupos con credenciales de miembro, y las reservas vencidas", async () => {
+    const { acc, slots } = await seedAccount("tidal", 3);
     await seedAccount("deezer", 1);
+    await query("update account_slots set member_email = 'm' || id || '@x.com', member_password = 'p' || id");
+    // Un cupo vacío (como los 5 que se crean con cada cuenta nueva) no es stock.
+    await createMemberProfile({ familyAccountId: acc.id, slotNumber: 9, status: "free" });
     await query("update account_slots set status = 'reserved', reserved_until = now() - interval '1 minute' where id = $1", [slots[1].id]);
     await query("update account_slots set status = 'reserved', reserved_until = now() + interval '10 minutes' where id = $1", [slots[2].id]);
     expect(await getFreeSlotsStock()).toEqual({ tidal: 2, deezer: 1, qobuz: 0 });

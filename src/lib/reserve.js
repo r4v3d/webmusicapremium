@@ -3,6 +3,14 @@
 import { query } from "./pg";
 
 /**
+ * Condición SQL de "cupo vendible" sobre el alias `s` (account_slots): tiene
+ * correo y clave de miembro propios. Un cupo vacío jamás se vende: lo único
+ * que podría entregarse sería la cuenta titular, que administra la familia.
+ */
+export const SLOT_HAS_CREDENTIALS_SQL =
+  "(btrim(coalesce(s.member_email, '')) <> '' and coalesce(s.member_password, '') <> '')";
+
+/**
  * Reserva un cupo del servicio para el pedido. Si el pedido ya tiene uno
  * reservado, solo extiende la reserva. Devuelve el id del cupo o null si no hay stock.
  */
@@ -15,6 +23,7 @@ export async function reserveSlot(tx, service, orderId, ttlSeconds = 900) {
         and pa.platform_code = $1
         and s.status = 'reserved'
         and s.reserved_for_order = $2
+        and ${SLOT_HAS_CREDENTIALS_SQL}
       returning s.id`,
     [service, orderId, ttlSeconds]
   );
@@ -27,6 +36,7 @@ export async function reserveSlot(tx, service, orderId, ttlSeconds = 900) {
          join platform_accounts pa on pa.id = s.platform_account_id
         where pa.platform_code = $1
           and (s.status = 'free' or (s.status = 'reserved' and s.reserved_until < now()))
+          and ${SLOT_HAS_CREDENTIALS_SQL}
         order by s.updated_at asc, s.id asc
         limit 1
         for update of s skip locked

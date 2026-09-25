@@ -57,10 +57,8 @@ export async function GET() {
       if (slot && String(slot.customer_id) === String(customerId)) {
         credentials = resolveSlotCredentials(slot, account);
         profileLabel = slot.slot_label || `Perfil ${slot.slot_number || ""}`.trim();
-      } else if (!slot && account) {
-        credentials = { email: account.account_email || "", password: account.account_password || "" };
-        profileLabel = "Cuenta Completa";
       }
+      // Sin cupo propio no se muestra nada: los datos del titular nunca se entregan.
       const live = !isExpired && !["expired", "cancelled"].includes(sub.subscription_status);
 
       const formatted = {
