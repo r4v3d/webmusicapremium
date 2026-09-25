@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { CONFIG } from "../../data/config";
 import { AdminContext } from "./AdminContext";
-import { CloseIcon, LogOutIcon, PlusIcon, CopyIcon, TrashIcon, WhatsAppIcon, formatDate, getDaysAgo, getCountryFlag } from "./adminHelpers";
+import { CloseIcon, PlusIcon, CopyIcon, TrashIcon, WhatsAppIcon, formatDate, getDaysAgo, getCountryFlag } from "./adminHelpers";
 import {
   AdminSkeleton,
   ConfirmDialog,
@@ -32,6 +31,7 @@ import VerifyQueueTab from "./tabs/VerifyQueueTab";
 import ReconciliationTab from "./tabs/ReconciliationTab";
 import WalletsTab from "./tabs/WalletsTab";
 import CommandPalette from "./CommandPalette";
+import { AdminHeader, AdminKpis, AdminNav } from "./AdminShell";
 import { moveSlotInAccounts } from "../../lib/moveSlot";
 
 
@@ -1432,8 +1432,6 @@ export default function AdminDashboardPage() {
     )).length;
   const cobrosBadge = pendingPaymentCount + billingWeekCount;
   const hoyBadge = (todayQueue?.undelivered?.count || 0) + pendingPaymentCount;
-  const workspaceSubs = WORKSPACES[activeTab]?.subs || {};
-  const hasSubs = Object.keys(workspaceSubs).length > 0;
 
   return (
     <AdminContext.Provider value={adminValue}>
@@ -1471,7 +1469,7 @@ export default function AdminDashboardPage() {
               El número de operación evita que el mismo pago confirme dos pedidos.
             </p>
             <label className="form-label">Monto recibido ({confirmPaymentModal.currency === "USDT" ? "USDT" : "S/"})</label>
-            <input className="form-input" type="number" step="0.001" min="0" required value={confirmPaymentModal.amount}
+            <input className="form-input" type="number" inputMode="decimal" step="0.001" min="0" required value={confirmPaymentModal.amount}
               onChange={(e) => setConfirmPaymentModal((m) => ({ ...m, amount: e.target.value }))} />
             <label className="form-label">{confirmPaymentModal.currency === "USDT" ? "Order ID de Binance" : "Nº de operación"}</label>
             <input className="form-input" required minLength={4} value={confirmPaymentModal.reference}
@@ -1512,85 +1510,18 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       )}
-      <header className="admin-header glass-panel admin-header-sticky">
-        <div className="container admin-header-inner">
-          <div className="admin-brand">
-            <span className="admin-brand-dot"></span>
-            <h1>Panel Administrativo</h1>
-          </div>
-
-          <div className="admin-header-actions">
-            <button type="button" className="btn btn-secondary btn-sm-mobile" onClick={() => setPaletteOpen(true)}>
-              Buscar <kbd className="admin-kbd">Ctrl K</kbd>
-            </button>
-            <Link href="/" className="btn btn-secondary btn-sm-mobile">Ver Web</Link>
-            <button onClick={handleLogout} className="btn btn-logout">
-              <LogOutIcon />
-              <span>Cerrar Sesión</span>
-            </button>
-          </div>
-        </div>
-      </header>
+      <AdminHeader onSearch={() => setPaletteOpen(true)} onLogout={handleLogout} />
 
       <div className="container admin-content-layout">
+        <AdminKpis stats={stats} />
 
-        {stats && (
-          <section className="stats-grid stats-grid-compact animate-fade-in">
-            <div className="stat-card glass-panel border-purple">
-              <span className="stat-label">Ventas Yape/Plin</span>
-              <strong className="stat-value text-purple">S/. {stats.totalRevenuePen}</strong>
-            </div>
-            <div className="stat-card glass-panel border-yellow">
-              <span className="stat-label">Ventas Binance Pay</span>
-              <strong className="stat-value text-yellow">$ {stats.totalRevenueUsd}</strong>
-            </div>
-            <div className="stat-card glass-panel border-cyan">
-              <span className="stat-label">Pedidos Pendientes</span>
-              <strong className="stat-value text-cyan">{stats.pendingOrders}</strong>
-            </div>
-            <div className="stat-card glass-panel border-gold">
-              <span className="stat-label">Cuentas Disponibles</span>
-              <div className="stat-sub-grid">
-                <div><span>Tidal:</span> <strong>{stats.activeStock?.tidal ?? 0}</strong></div>
-                <div><span>Deezer:</span> <strong>{stats.activeStock?.deezer ?? 0}</strong></div>
-                <div><span>Qobuz:</span> <strong>{stats.activeStock?.qobuz ?? 0}</strong></div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        <nav className="admin-tabs-nav glass-panel admin-tabs-sticky" role="tablist" aria-label="Espacios de trabajo">
-          {Object.entries(WORKSPACES).map(([id, meta]) => {
-            const badge = id === "hoy" ? hoyBadge : id === "cobros" ? cobrosBadge : 0;
-            return (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={activeTab === id}
-                onClick={() => setWorkspace(id)}
-                className={`tab-btn ${activeTab === id ? "active" : ""}`}
-              >
-                <span>{meta.label}</span>
-                {badge > 0 && <span className="admin-tab-badge">{badge}</span>}
-              </button>
-            );
-          })}
-        </nav>
-
-        {hasSubs && (
-          <div className="admin-subnav">
-            {Object.entries(workspaceSubs).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`btn ${activeSubTab === id ? "btn-primary" : "btn-secondary"}`}
-                onClick={() => setActiveSubTab(id)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <AdminNav
+          activeTab={activeTab}
+          activeSubTab={activeSubTab}
+          badges={{ hoy: hoyBadge, cobros: cobrosBadge }}
+          onWorkspace={(id) => setWorkspace(id)}
+          onSubTab={setActiveSubTab}
+        />
 
         {activeTab === "hoy" && activeSubTab === "cola" && <HoyTab />}
         {activeTab === "hoy" && activeSubTab === "pedidos" && <OrdersTab />}

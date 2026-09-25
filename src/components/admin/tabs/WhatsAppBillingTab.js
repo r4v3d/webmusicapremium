@@ -139,18 +139,11 @@ export default function WhatsAppBillingTab() {
             <section className="whatsapp-billing-section animate-fade-in" style={{ paddingBottom: '40px' }}>
               
               {/* Header block with statistics and search */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' }}>
+              <div className="wa-header">
                 <div>
-                  <h2 style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h2 className="wa-title">
                     Gestión de Cobranzas por WhatsApp
-                    <span style={{ 
-                      background: 'var(--accent-cyan, #00e5ff)', 
-                      color: '#08080a', 
-                      padding: '4px 10px', 
-                      borderRadius: '9999px', 
-                      fontSize: '0.85rem', 
-                      fontWeight: 'bold' 
-                    }}>
+                    <span className="wa-count">
                       {totalBillingCount} Clientes
                     </span>
                   </h2>
@@ -159,7 +152,7 @@ export default function WhatsAppBillingTab() {
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', width: '100%', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <div className="admin-toolbar wa-controls">
                   <div className="stock-filter-tabs">
                     {[
                       { id: "today", label: "Hoy" },
@@ -181,7 +174,7 @@ export default function WhatsAppBillingTab() {
                     type="text"
                     className="form-input"
                     placeholder="Buscar por apodo, código o celular..."
-                    style={{ maxWidth: '280px', height: '40px', margin: 0 }}
+                    aria-label="Buscar cliente"
                     value={billingSearchQuery}
                     onChange={(e) => setBillingSearchQuery(e.target.value)}
                   />
@@ -189,8 +182,8 @@ export default function WhatsAppBillingTab() {
                   {/* Toggle templates config button */}
                   <button
                     onClick={() => setShowTemplateConfig(!showTemplateConfig)}
-                    className="btn btn-secondary"
-                    style={{ height: '40px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}
+                    className="btn btn-secondary wa-template-toggle"
+                    aria-expanded={showTemplateConfig}
                   >
                     <span>Configurar Plantillas</span>
                     <span style={{ transition: 'transform 0.2s', transform: showTemplateConfig ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
@@ -223,7 +216,7 @@ export default function WhatsAppBillingTab() {
 
               {/* Collapsed Template Configuration Area */}
               {showTemplateConfig && (
-                <div className="glass-panel" style={{ padding: '20px', marginBottom: '20px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="glass-panel wa-template-panel">
                   <h3 style={{ marginBottom: '15px', fontSize: '1.1rem', color: 'var(--accent-cyan, #00e5ff)' }}>Plantillas de Mensajes</h3>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '15px' }}>
                     Personaliza los mensajes predeterminados usando las siguientes etiquetas variables:
@@ -299,10 +292,8 @@ export default function WhatsAppBillingTab() {
                     return (
                       <div 
                         key={dateKey} 
-                        className="glass-panel" 
+                        className="glass-panel wa-date-panel" 
                         style={{ 
-                          padding: '20px', 
-                          borderRadius: '12px',
                           border: isToday ? '1px solid rgba(0, 229, 255, 0.2)' : '1px solid rgba(255,255,255,0.06)'
                         }}
                       >
@@ -436,7 +427,6 @@ export default function WhatsAppBillingTab() {
                                   background: 'rgba(255, 255, 255, 0.02)',
                                   border: '1px solid rgba(255,255,255,0.06)',
                                   borderRadius: '10px',
-                                  padding: '15px',
                                   display: 'flex',
                                   flexDirection: 'column',
                                   gap: '12px',

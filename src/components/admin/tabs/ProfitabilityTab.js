@@ -229,7 +229,7 @@ export default function ProfitabilityTab() {
                   </p>
                 </div>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="profit-month-picker" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '0.85rem', color: '#fff', fontWeight: '500' }}>Mes de Análisis:</span>
                   <select
                     value={selectedReportMonth}
@@ -423,7 +423,7 @@ export default function ProfitabilityTab() {
               </div>
 
               {/* Two-column analysis layout */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '20px', marginBottom: '24px' }}>
                 {/* Column 1: Table Platform Breakdown */}
                 <div className="glass-panel" style={{ padding: '20px', margin: 0 }}>
                   <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', color: '#fff' }}>Detalle Económico del Mes Seleccionado</h3>
@@ -600,7 +600,7 @@ export default function ProfitabilityTab() {
                 {/* Simulation results comparison */}
                 <div style={{ background: 'rgba(0, 229, 255, 0.03)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(0, 229, 255, 0.15)' }}>
                   <h4 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>Resultados Proyectados Simulados</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '16px' }}>
                     
                     <div>
                       <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ingreso Proyectado:</span>

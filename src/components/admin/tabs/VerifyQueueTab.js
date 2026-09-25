@@ -96,12 +96,17 @@ export default function VerifyQueueTab() {
   };
 
   return (
-    <section className="payments-section animate-fade-in">
-      <h2>Por verificar</h2>
-      <p className="section-instruction">
-        Pagos por Yape/Plin esperando tu confirmación. Busca el ingreso en tu app, escribe el número de operación y confirma:
-        el cliente recibe sus credenciales en segundos. El número de operación impide confirmar el mismo Yape dos veces.
-      </p>
+    <section className="admin-section animate-fade-in">
+      <div className="admin-section-head">
+        <h2>Por verificar</h2>
+        <details className="admin-help">
+          <summary>¿Cómo funciona?</summary>
+          <p>
+            Pagos por Yape/Plin esperando tu confirmación. Busca el ingreso en tu app, escribe el número de operación y confirma:
+            el cliente recibe sus credenciales en segundos. El número de operación impide confirmar el mismo Yape dos veces.
+          </p>
+        </details>
+      </div>
 
       {items.length === 0 ? (
         <div className="empty-panel glass-panel text-center">
@@ -109,12 +114,12 @@ export default function VerifyQueueTab() {
         </div>
       ) : (
         <div className="table-responsive glass-panel">
-          <table className="admin-table">
+          <table className="admin-table admin-table--stack">
             <thead>
               <tr>
-                <th>Desde</th>
                 <th>Pedido / cliente</th>
-                <th>Esperado</th>
+                <th>Desde</th>
+                <th className="num">Esperado</th>
                 <th>Dato del cliente</th>
                 <th>Monto recibido</th>
                 <th>Nº de operación</th>
@@ -124,39 +129,60 @@ export default function VerifyQueueTab() {
             <tbody>
               {items.map((item) => {
                 const form = formFor(item);
+                const busy = busyId === item.intentId;
                 return (
                   <tr key={item.intentId} className={item.status === "expired" ? "verify-row-expired" : ""}>
-                    <td>
-                      {formatDateTimePe(item.createdAt)}
-                      {item.status === "expired" && <span className="status-badge badge-expired" style={{ display: "block", marginTop: 4 }}>Vencido</span>}
-                      {item.status === "underpaid" && <span className="status-badge badge-pending" style={{ display: "block", marginTop: 4 }}>Parcial</span>}
-                    </td>
-                    <td>
+                    <td className="cell-primary">
                       <strong>{item.purpose === "wallet_topup" ? "Recarga de saldo" : `#${item.orderId}`}</strong>
-                      <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                      <span className="cell-sub">
                         {item.name}{item.customerCode ? ` · ${item.customerCode}` : ""}
                         {item.service ? ` · ${item.service.toUpperCase()} ${item.duration || ""}` : ""}
                         {item.isRenewal ? " · renovación" : ""}
                       </span>
                     </td>
-                    <td>
-                      {item.amountExpected != null ? formatMoney(item.amountExpected, "PEN") : "Monto libre"}
-                      {item.amountReceived > 0 && <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)" }}>Recibido: {formatMoney(item.amountReceived, "PEN")}</span>}
+                    <td data-label="Desde" className="nowrap">
+                      <span>
+                        {formatDateTimePe(item.createdAt)}
+                        {item.status === "expired" && <span className="status-badge badge-expired verify-status">Vencido</span>}
+                        {item.status === "underpaid" && <span className="status-badge badge-pending verify-status">Parcial</span>}
+                      </span>
                     </td>
-                    <td style={{ maxWidth: 180, fontSize: "0.8rem" }}>{item.customerReference || "—"}</td>
-                    <td>
-                      <input className="form-input" style={{ width: 90, padding: "6px 8px" }} type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setField(item, "amount", e.target.value)} />
+                    <td data-label="Esperado" className="num">
+                      <span>
+                        <strong>{item.amountExpected != null ? formatMoney(item.amountExpected, "PEN") : "Monto libre"}</strong>
+                        {item.amountReceived > 0 && <span className="cell-sub">Recibido: {formatMoney(item.amountReceived, "PEN")}</span>}
+                      </span>
                     </td>
-                    <td>
-                      <input className="form-input" style={{ width: 130, padding: "6px 8px" }} placeholder="ej. 12345678" value={form.reference} onChange={(e) => setField(item, "reference", e.target.value)} />
+                    <td data-label="Dato del cliente" className="verify-customer-ref">{item.customerReference || "—"}</td>
+                    <td data-label="Monto recibido" className="cell-block cell-half">
+                      <input
+                        className="form-input verify-input-amount"
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        min="0"
+                        aria-label="Monto recibido"
+                        value={form.amount}
+                        onChange={(e) => setField(item, "amount", e.target.value)}
+                      />
                     </td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button type="button" className="btn btn-primary" style={{ padding: "6px 12px", fontSize: "0.75rem" }} disabled={busyId === item.intentId} onClick={() => confirm(item)}>
-                          {busyId === item.intentId ? "…" : "Confirmar"}
+                    <td data-label="Nº de operación" className="cell-block cell-half">
+                      <input
+                        className="form-input verify-input-ref"
+                        autoComplete="off"
+                        placeholder="ej. 12345678"
+                        aria-label="Número de operación"
+                        value={form.reference}
+                        onChange={(e) => setField(item, "reference", e.target.value)}
+                      />
+                    </td>
+                    <td className="cell-actions">
+                      <div className="cell-actions-inner">
+                        <button type="button" className="btn btn-primary admin-btn-compact" disabled={busy} onClick={() => confirm(item)}>
+                          {busy ? "…" : "Confirmar"}
                         </button>
                         {item.amountReceived === 0 && (
-                          <button type="button" className="btn btn-secondary" style={{ padding: "6px 12px", fontSize: "0.75rem" }} disabled={busyId === item.intentId} onClick={() => dismiss(item)}>
+                          <button type="button" className="btn btn-secondary admin-btn-compact" disabled={busy} onClick={() => dismiss(item)}>
                             No llegó
                           </button>
                         )}
