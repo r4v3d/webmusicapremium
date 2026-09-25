@@ -284,7 +284,7 @@ Pulsa **Vista previa** antes de importar, para ver qué líneas se van a cargar.
    sudo systemctl restart musicapremium-web musicapremium-worker
    ```
 
-**Salió bien si** haces un pedido USDT de prueba, pagas con la nota `MPB-…` y a los pocos segundos el checkout muestra las credenciales.
+**Salió bien si** haces un pedido USDT de prueba, pagas al Pay ID sin escribir nota, pegas en el checkout el **Order ID** que te muestra Binance y pulsas **Verificar pago**: las credenciales aparecen al instante.
 
 ---
 

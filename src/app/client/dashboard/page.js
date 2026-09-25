@@ -80,6 +80,7 @@ export default function ClientDashboard() {
   const [topupAmount, setTopupAmount] = useState("");
   const [topupReference, setTopupReference] = useState("");
   const [topupIntent, setTopupIntent] = useState(null);
+  const [usdtOrderId, setUsdtOrderId] = useState("");
 
   // PIN change state
   const [newPin, setNewPin] = useState("");
@@ -167,6 +168,34 @@ export default function ClientDashboard() {
         return;
       }
       window.location.href = data.checkoutUrl;
+    } catch (err) {
+      setError("Error de red. Verifica tu conexión.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Recarga USDT: pagó al Pay ID y pega el Order ID que le muestra Binance.
+  const handleClaimUsdt = async (e) => {
+    e.preventDefault();
+    setActionLoading(true);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await fetch("/api/wallet/topup/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ binanceOrderId: usdtOrderId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSuccessMsg(data.message);
+        setUsdtOrderId("");
+        if (data.balances) setWallet((w) => (w ? { ...w, balances: data.balances } : w));
+        fetchDashboardData();
+      } else {
+        setError(data.message || data.error || "No se pudo verificar el pago.");
+      }
     } catch (err) {
       setError("Error de red. Verifica tu conexión.");
     } finally {
@@ -462,15 +491,29 @@ export default function ClientDashboard() {
 
               {topupMode === "USDT" && (
                 <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px", fontSize: "0.8rem", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <span>Envía <strong>cualquier monto</strong> en USDT por Binance Pay al Pay ID <code style={{ color: "var(--accent-cyan)" }}>{wallet.topupUsdt.payId}</code>{wallet.topupUsdt.nickname ? ` (${wallet.topupUsdt.nickname})` : ""}.</span>
-                  <span>En <strong>Note to Payee</strong> escribe exactamente:</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <code style={{ fontSize: "1.2rem", fontWeight: "800", letterSpacing: "0.08em", color: "#fff" }}>{wallet.topupUsdt.noteCode}</code>
-                    <button type="button" className="btn btn-secondary" style={{ padding: "4px 8px", border: "none" }} onClick={() => copyToClipboard(wallet.topupUsdt.noteCode, "wallet-note")}>
-                      {copiedId === "wallet-note" ? <CheckIcon /> : <CopyIcon />}
+                  <span>
+                    <strong>1.</strong> Envía <strong>cualquier monto</strong> en USDT por Binance Pay al Pay ID{" "}
+                    <code style={{ color: "var(--accent-cyan)" }}>{wallet.topupUsdt.payId}</code>{wallet.topupUsdt.nickname ? ` (${wallet.topupUsdt.nickname})` : ""}.
+                    <button type="button" className="btn btn-secondary" style={{ padding: "2px 6px", border: "none", marginLeft: "6px" }} onClick={() => copyToClipboard(wallet.topupUsdt.payId, "wallet-payid")}>
+                      {copiedId === "wallet-payid" ? <CheckIcon /> : <CopyIcon />}
                     </button>
-                  </div>
-                  <span style={{ color: "var(--text-muted)" }}>Es tu código permanente: sirve para todas tus recargas. Se acredita solo en menos de un minuto, con hasta 3 decimales.</span>
+                  </span>
+                  <span><strong>2.</strong> Pega aquí el <strong>Order ID</strong> que te muestra Binance al terminar el pago. No necesitas escribir ninguna nota.</span>
+                  <form onSubmit={handleClaimUsdt} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <input
+                      className="form-input"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="Order ID, ej. 453229155575029760"
+                      value={usdtOrderId}
+                      onChange={(e) => setUsdtOrderId(e.target.value)}
+                      style={{ flex: "1 1 220px", padding: "8px 12px", fontSize: "0.8rem" }}
+                    />
+                    <button type="submit" className="btn btn-primary" disabled={actionLoading || usdtOrderId.replace(/\D/g, "").length < 8} style={{ padding: "8px 14px", fontSize: "0.8rem" }}>
+                      {actionLoading ? "Verificando…" : "Acreditar"}
+                    </button>
+                  </form>
+                  <span style={{ color: "var(--text-muted)" }}>Se acredita lo que llegó, con hasta 3 decimales. ¿No encuentras el Order ID? En Binance ve a Pay → Historial y abre el pago.</span>
                 </div>
               )}
 

@@ -347,24 +347,26 @@ function Checkout() {
         <div className="payment-type-block">
           <h2>Pago con USDT · Binance Pay</h2>
           <p className="payment-description">
-            Envía <strong>{money(toPay, "USDT")}</strong> al Pay ID de abajo y escribe en <strong>«Note to Payee»</strong> exactamente el código del pedido. Se confirma solo en menos de un minuto.
+            <strong>1.</strong> Envía <strong>{money(toPay, "USDT")}</strong> por Binance Pay al Pay ID de abajo. No necesitas escribir ninguna nota.
           </p>
           <QrBox src={ins.qrImage} alt="Binance Pay" />
           <div className="payment-fields-list">
             <CopyField label="Binance Pay ID:" value={ins.payId} id="payid" copied={copied} onCopy={copy} />
             {ins.nickname && <div className="payment-field-item"><span className="field-label">Titular:</span><div className="field-value-wrap"><strong className="field-text">{ins.nickname}</strong></div></div>}
             <CopyField label="Monto exacto:" value={money(toPay, "USDT")} copyValue={Number(toPay).toFixed(2)} id="amount" copied={copied} onCopy={copy} />
-            <CopyField label="Note to Payee (obligatorio):" value={intent.noteCode} id="note" copied={copied} onCopy={copy} big />
           </div>
-          <p className="credentials-info-hint">
-            Se acreditan hasta 3 decimales. Si el monto llega por debajo, el pedido queda pendiente y te mostramos cuánto falta. ¿Olvidaste la nota? Pega abajo el Order ID o escríbenos.
+          <p className="payment-description">
+            <strong>2.</strong> Al terminar, Binance te muestra el <strong>Order ID</strong> (un número largo). Cópialo, pégalo aquí y pulsa <strong>Verificar pago</strong>. Tus credenciales aparecen al instante.
           </p>
           <form className="checkout-inline-form" onSubmit={claimBinance}>
-            <input className="form-input" inputMode="numeric" placeholder="Order ID de Binance (opcional)" value={binanceOrderId} onChange={(e) => setBinanceOrderId(e.target.value)} />
+            <input className="form-input" inputMode="numeric" autoComplete="off" placeholder="Order ID de Binance, ej. 453229155575029760" value={binanceOrderId} onChange={(e) => setBinanceOrderId(e.target.value)} />
             <button type="submit" className="btn btn-primary" disabled={!!busy || binanceOrderId.replace(/\D/g, "").length < 8}>
-              {busy === "claim" ? "Verificando…" : "Verificar al instante"}
+              {busy === "claim" ? "Verificando…" : "Verificar pago"}
             </button>
           </form>
+          <p className="credentials-info-hint">
+            ¿No encuentras el Order ID? En Binance ve a <strong>Pay → Historial</strong> y abre el pago. Se acreditan hasta 3 decimales; si el monto llega por debajo, te mostramos cuánto falta.
+          </p>
         </div>
       );
     }

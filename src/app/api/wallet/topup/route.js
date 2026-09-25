@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { getCustomerSession } from "../../../../lib/libClientAuth";
-import { createTopupIntent, intentUi } from "../../../../lib/paymentIntents";
+import { createTopupIntent, getOrCreateBinanceTopupIntent, intentUi } from "../../../../lib/paymentIntents";
 import { defaultProvider, walletEnabled } from "../../../../lib/providers";
-import { ensureWalletNoteCode } from "../../../../lib/wallet";
+import { CONFIG } from "../../../../data/config";
 import { rateLimitDb } from "../../../../lib/rateLimitDb";
 import { rateLimitedJson } from "../../../../lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
 // Recarga de monto libre (§13.1). Soles: intento que entra a la cola "Por
-// verificar" (o TAYPI cuando se active). USDT: no hace falta intento, basta el
-// código permanente en la nota de Binance.
+// verificar" (o TAYPI cuando se active). USDT: se abre un intento y el cliente
+// confirma su pago pegando el Order ID de Binance (/api/wallet/topup/claim).
 export async function POST(req) {
   try {
     const customerId = await getCustomerSession();
@@ -22,8 +22,17 @@ export async function POST(req) {
 
     const { currency, amount, reference } = await req.json();
 
+    // USDT: monto libre. El cliente paga al Pay ID y luego pega el Order ID
+    // (POST /api/wallet/topup/claim). No hace falta escribir ninguna nota.
     if (currency === "USDT") {
-      return NextResponse.json({ currency: "USDT", noteCode: await ensureWalletNoteCode(customerId) });
+      const intent = await getOrCreateBinanceTopupIntent({ customerId, salesChannel: "web" });
+      return NextResponse.json({
+        currency: "USDT",
+        intentId: intent.id,
+        payId: process.env.BINANCE_PAY_ID || CONFIG.payments.binancePay.payId,
+        nickname: process.env.BINANCE_PAY_NICKNAME || CONFIG.payments.binancePay.nickname,
+        qrImage: CONFIG.payments.binancePay.qrImage,
+      });
     }
     if (currency !== "PEN") return NextResponse.json({ error: "Moneda no válida." }, { status: 400 });
 

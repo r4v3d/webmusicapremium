@@ -2,9 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb } from "../test/pgliteDb";
 import { createFamilyAccount, createMemberProfile, createOrder, getOrCreateClient } from "./db";
 import { adminApplyEvent, adminConfirmPayment, adminDismissIntent, listManualQueue } from "./adminPayments";
-import { createIntent } from "./paymentIntents";
+import { createIntent, getOrCreateBinanceTopupIntent } from "./paymentIntents";
 import { completePaidOrder, refundOrderToWallet } from "./settle";
-import { processBinanceTransactions } from "./providerSync";
+import { claimBinanceByOrderId, processBinanceTransactions } from "./providerSync";
 import { ensureWalletNoteCode, findWalletMismatches, getBalances } from "./wallet";
 import { query } from "./pg";
 
@@ -126,5 +126,70 @@ describe("sin stock, reembolso y conciliación", () => {
     expect(r).toMatchObject({ action: "topup", status: "credited", amount: 3.4 });
     expect(await getBalances(client.id)).toEqual({ PEN: 0, USDT: 3.4 });
     expect(await findWalletMismatches()).toEqual([]);
+  });
+});
+
+describe("Binance por Order ID (sin nota)", () => {
+  const fakeHistory = (txs) => async () => txs;
+  const H = 60 * 60 * 1000;
+
+  it("un pedido se paga pegando solo el Order ID; el mismo Order ID no sirve dos veces", async () => {
+    await seedStock(2);
+    const orderId = await newOrder({ payCurrency: "USDT" });
+    const { intent } = await createIntent({ orderId, providerId: "binance_account" });
+    const tx = { transactionId: "480000000000000001", currency: "USDT", amount: "1.79", note: "", transactionTime: at(1) };
+
+    const r = await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: " 4800 0000 0000 0000 01 ", fetchTransactions: fakeHistory([tx]) });
+    expect(r.status).toBe("settled");
+    expect(r.credentials.email).toMatch(/@x\.com$/);
+
+    // Otro cliente intenta usar el mismo Order ID para su pedido.
+    const other = await newOrder({ payCurrency: "USDT" });
+    const second = await createIntent({ orderId: other, providerId: "binance_account" });
+    const again = await claimBinanceByOrderId({ intentId: second.intent.id, binanceOrderId: tx.transactionId, fetchTransactions: fakeHistory([tx]) });
+    expect(again.status).toBe("duplicate");
+    expect((await query("select status from orders where order_id = $1", [other])).rows[0].status).toBe("awaiting_payment");
+    expect(await n("select count(*)::int n from payments where provider = 'binance_account'")).toBe(1);
+  });
+
+  it("rechaza pagos anteriores al pedido y pagos con la nota de otro pedido", async () => {
+    await seedStock(1);
+    const orderId = await newOrder({ payCurrency: "USDT" });
+    const { intent } = await createIntent({ orderId, providerId: "binance_account" });
+
+    const old = { transactionId: "480000000000000002", currency: "USDT", amount: "1.79", transactionTime: at(-60) };
+    expect(await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: old.transactionId, fetchTransactions: fakeHistory([old]) }))
+      .toMatchObject({ status: "rejected", reason: "before_order" });
+
+    const foreign = { transactionId: "480000000000000003", currency: "USDT", amount: "1.79", note: "MPB-999999", transactionTime: at(1) };
+    expect(await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: foreign.transactionId, fetchTransactions: fakeHistory([foreign]) }))
+      .toMatchObject({ status: "rejected", reason: "note_other_order" });
+
+    // Poner la nota del PROPIO pedido no molesta.
+    const own = { transactionId: "480000000000000004", currency: "USDT", amount: "1.79", note: orderId, transactionTime: at(1) };
+    expect((await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: own.transactionId, fetchTransactions: fakeHistory([own]) })).status).toBe("settled");
+  });
+
+  it("recarga de saldo por Order ID: monto libre, pagos de hasta 24 h antes", async () => {
+    const client = await getOrCreateClient("51999000555", "Eva", null);
+    const intent = await getOrCreateBinanceTopupIntent({ customerId: client.id });
+    const recent = { transactionId: "480000000000000005", currency: "USDT", amount: "2.50079", transactionTime: Date.now() - 20 * H };
+    const r = await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: recent.transactionId, fetchTransactions: fakeHistory([recent]) });
+    expect(r).toMatchObject({ status: "credited", amount: 2.5 });
+    expect(await getBalances(client.id)).toEqual({ PEN: 0, USDT: 2.5 });
+
+    const next = await getOrCreateBinanceTopupIntent({ customerId: client.id });
+    expect(next.id).not.toBe(intent.id); // la recarga pagada se cierra; la siguiente abre otra
+    const tooOld = { transactionId: "480000000000000006", currency: "USDT", amount: "5", transactionTime: Date.now() - 25 * H };
+    expect(await claimBinanceByOrderId({ intentId: next.id, binanceOrderId: tooOld.transactionId, fetchTransactions: fakeHistory([tooOld]) }))
+      .toMatchObject({ status: "rejected", reason: "before_order" });
+    expect(await findWalletMismatches()).toEqual([]);
+  });
+
+  it("si Binance todavía no muestra el Order ID, no hace nada", async () => {
+    const client = await getOrCreateClient("51999000666", "Fer", null);
+    const intent = await getOrCreateBinanceTopupIntent({ customerId: client.id });
+    expect((await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: "480000000000000099", fetchTransactions: fakeHistory([]) })).status).toBe("not_found");
+    expect((await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: "12", fetchTransactions: fakeHistory([]) })).status).toBe("invalid_order_id");
   });
 });

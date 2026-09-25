@@ -24,6 +24,7 @@ Alcance: automatizar de punta a punta la confirmación del pago (USDT por Binanc
 > - La renovación desde el panel del cliente es un pedido con `renew_subscription_id`.
 > - Las ediciones del panel ya no crean pagos. Solo «Extender» registra un asiento `admin_manual`.
 > - **Corrección a §2.3 (defecto 4) y §14.1 (24-09-2026):** se entregan siempre el correo y la clave **del miembro**, nunca los del titular. `email_type = "admin"` significa que el correo del miembro es propio del negocio ("PROPIO"), no que se entregue el correo maestro. Un cupo sin credenciales de miembro no es stock y no se vende.
+> - **Cambio a §12 (24-09-2026): USDT por Order ID.** La nota ya no es obligatoria, ni en pedidos ni en recargas: el cliente paga al Pay ID y pega el Order ID de Binance. Sustituyen a la nota el uso único del Order ID, un pago posterior al pedido (en recargas se aceptan las últimas 24 h), la validación del monto y el rechazo si la nota trae el código de otro pedido. Si alguien pone la nota igual, el worker sigue acreditando solo.
 
 ---
 

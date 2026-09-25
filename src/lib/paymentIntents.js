@@ -263,3 +263,25 @@ export async function expireStaleIntents() {
     return { intents: expired.rows, orders: expiredOrders };
   });
 }
+
+/**
+ * Recarga USDT de monto libre por Order ID: abre (o reutiliza) un intento del
+ * cliente. Su hora de creación es el límite: solo valen pagos hechos después.
+ */
+export async function getOrCreateBinanceTopupIntent({ customerId, salesChannel = "web" }) {
+  const open = await query(
+    `select * from payment_intents
+      where customer_id = $1 and purpose = 'wallet_topup' and provider = 'binance_account'
+        and status in ('created','awaiting') and expires_at > now()
+      order by id desc limit 1`,
+    [customerId]
+  );
+  if (open.rows[0]) return open.rows[0];
+  const res = await query(
+    `insert into payment_intents(customer_id, purpose, provider, sales_channel, currency, status, idempotency_key, expires_at)
+     values ($1,'wallet_topup','binance_account',$2,'USDT','awaiting',$3, now() + interval '24 hours')
+     returning *`,
+    [customerId, salesChannel, idempotencyKey()]
+  );
+  return res.rows[0];
+}

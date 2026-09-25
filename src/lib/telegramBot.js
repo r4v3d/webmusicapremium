@@ -7,12 +7,13 @@ import { createClient, createOrder, getClientById, getFreeSlotsStock, getOrderBy
 import { findPlan, formatPen, formatUsdt } from "./catalog";
 import { payWithWallet } from "./settle";
 import { deliverOrder, telegramDeliveryText } from "./delivery";
-import { createTopupIntent } from "./paymentIntents";
-import { ensureWalletNoteCode, getBalances } from "./wallet";
+import { createTopupIntent, getOrCreateBinanceTopupIntent } from "./paymentIntents";
+import { getBalances } from "./wallet";
 import { newAccessToken } from "./orderAccess";
 import { defaultProvider, walletEnabled } from "./providers";
-import { binanceConfigured, getPayTransactions } from "./binanceAccount";
-import { processBinanceTransactions } from "./providerSync";
+import { binanceConfigured } from "./binanceAccount";
+import { claimBinanceByOrderId } from "./providerSync";
+import { claimMessage } from "./binanceClaimMessages";
 import { rateLimitDb } from "./rateLimitDb";
 import { hashOtp, otpCodesMatch } from "./pinOtp";
 import { sendOTPEmail } from "./email";
@@ -201,19 +202,18 @@ async function buy(chat, customerId, planId, currency) {
 }
 
 async function topupUsdt(chat, customerId) {
-  const code = await ensureWalletNoteCode(customerId);
   const payId = process.env.BINANCE_PAY_ID || CONFIG.payments.binancePay.payId;
   const nick = process.env.BINANCE_PAY_NICKNAME || CONFIG.payments.binancePay.nickname || "";
+  await getOrCreateBinanceTopupIntent({ customerId, salesChannel: "telegram" });
   await setState(chat.chat_id, { await: "binance_order_id" });
   return {
     text: [
       "💰 <b>Recargar USDT</b> (monto libre)",
       "",
-      `1. Envía <b>cualquier monto</b> en USDT por Binance Pay al Pay ID <code>${e(payId)}</code>${nick ? ` (${e(nick)})` : ""}.`,
-      `2. En <b>Note to Payee</b> escribe exactamente: <code>${e(code)}</code>`,
-      "3. Se acredita solo en menos de un minuto. Para acreditarlo al instante, pega aquí el <b>Order ID</b> que te muestra Binance.",
+      `1. Envía <b>cualquier monto</b> en USDT por Binance Pay al Pay ID <code>${e(payId)}</code>${nick ? ` (${e(nick)})` : ""}. No hace falta escribir nota.`,
+      "2. Pega aquí el <b>Order ID</b> que te muestra Binance al terminar el pago.",
       "",
-      "Se acreditan hasta 3 decimales. Ese código es tuyo y sirve para todas tus recargas.",
+      "Se acredita lo que llegó, con hasta 3 decimales.",
     ].join("\n"),
     keyboard: [[{ text: "⬅️ Menú", callback_data: "menu" }]],
   };
@@ -252,21 +252,20 @@ async function topupPenReference(chat, state, text) {
   return { text: "¡Gracias! Lo verificamos y te avisamos por aquí cuando se acredite.", keyboard: [[{ text: "⬅️ Menú", callback_data: "menu" }]] };
 }
 
-async function claimBinance(chat, text) {
+async function claimBinance(chat, customerId, text) {
   const txnId = String(text).replace(/\D/g, "");
   if (txnId.length < 8) return { text: "Pega el Order ID completo que te muestra Binance (solo números)." };
   const limited = await rateLimitDb(`tg-claim:${chat.chat_id}`, { limit: 5, windowMs: 10 * 60 * 1000 });
-  if (!limited.ok) return { text: "Demasiados intentos. Espera unos minutos: la recarga se acredita sola igual." };
-  if (!binanceConfigured()) return { text: "La verificación automática no está disponible ahora. Tu recarga se revisará a mano." };
-  const txs = await getPayTransactions({ startTime: Date.now() - 24 * 60 * 60 * 1000 });
-  const tx = txs.find((t) => String(t.transactionId) === txnId || String(t.orderId || "") === txnId);
-  if (!tx) return { text: "Todavía no vemos ese Order ID. Si recién pagaste, espera un minuto y vuelve a pegarlo." };
-  const [r] = await processBinanceTransactions([tx]);
-  await setState(chat.chat_id, {});
-  const b = await getBalances(chat.customer_id);
-  if (r?.status === "credited") return { text: `✅ ¡Recarga exitosa! Se añadieron <b>${r.amount.toFixed(3)} USDT</b>.\n${balanceLine(b)}`, keyboard: [[{ text: "🛒 Tienda", callback_data: "shop" }]] };
-  if (r?.status === "duplicate" || r?.action === "seen") return { text: `Ese pago ya fue acreditado.\n${balanceLine(b)}` };
-  return { text: "Encontramos el pago, pero la nota no tiene tu código de recarga. Lo revisaremos a mano y te avisamos." };
+  if (!limited.ok) return { text: "Demasiados intentos. Espera unos minutos y vuelve a pegar el Order ID." };
+  if (!binanceConfigured()) return { text: "La verificación automática no está disponible ahora. Escríbenos por soporte." };
+  // Siempre sobre un intento del propio cliente: el Order ID se acredita a quien lo reclama primero.
+  const intent = await getOrCreateBinanceTopupIntent({ customerId, salesChannel: "telegram" });
+  const r = await claimBinanceByOrderId({ intentId: intent.id, binanceOrderId: txnId });
+  const { key, message } = claimMessage(r, { topup: true });
+  if (key !== "not_found" && key !== "invalid_order_id") await setState(chat.chat_id, {});
+  const b = await getBalances(customerId);
+  if (key === "credited") return { text: `✅ ${e(message)}\n${balanceLine(b)}`, keyboard: [[{ text: "🛒 Tienda", callback_data: "shop" }]] };
+  return { text: e(message), keyboard: [[{ text: "⬅️ Menú", callback_data: "menu" }]] };
 }
 
 // Vincular con la cuenta web: número de WhatsApp + OTP al correo registrado (pinOtp.js).
@@ -404,12 +403,12 @@ export async function handleTelegramUpdate(update) {
   if (text === "/cuentas") return reply(chatId, null, await accountsScreen(customerId));
 
   let screen = null;
-  if (state.await === "binance_order_id") screen = await claimBinance(chat, text);
+  if (state.await === "binance_order_id") screen = await claimBinance(chat, customerId, text);
   else if (state.await === "topup_pen_amount") screen = await topupPenCreate(chat, customerId, text);
   else if (state.await === "topup_pen_ref") screen = await topupPenReference(chat, state, text);
   else if (state.await === "link_phone") screen = await linkPhone(chat, text);
   else if (state.await === "link_otp") screen = await linkOtp(chat, state, text);
-  else if (/^\d{15,22}$/.test(text)) screen = await claimBinance(chat, text);
+  else if (/^\d{15,22}$/.test(text)) screen = await claimBinance(chat, customerId, text);
   else screen = { text: await menuText(customerId), keyboard: mainKeyboard() };
   return reply(chatId, null, screen);
 }

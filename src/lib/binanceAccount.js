@@ -94,3 +94,51 @@ export function matchTransaction(tx, { intentsByNote, customersByNote, alreadyCo
   }
   return { action: "topup", customer, amount, payerId };
 }
+
+const ORDER_CODE_RE = /MPB\d{6}/g;
+const WALLET_CODE_RE = /SALDO[A-Z0-9]{5}/g;
+
+/** Códigos de pedido o de saldo dentro de una nota: "pago mpb-123456!" → ["MPB123456"]. */
+export function extractNoteCodes(note) {
+  const normalized = normalizeNote(note);
+  return [...new Set([...(normalized.match(ORDER_CODE_RE) || []), ...(normalized.match(WALLET_CODE_RE) || [])])];
+}
+
+// Un pago reclamado por Order ID debe ser posterior al pedido (5 min de margen
+// por relojes) y no más de 24 h después de que venció. En recargas de saldo el
+// cliente puede pagar antes de abrir la recarga: ahí se aceptan las últimas 24 h.
+export const TOPUP_EARLY_MS = 24 * 60 * 60 * 1000;
+const CLAIM_LATE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Reclamo por Order ID (sin nota obligatoria). El cliente pega el Order ID que
+ * le muestra Binance y se valida contra SU intento. Es pura: no toca la base.
+ *
+ * Controles, en lugar de la nota:
+ *  - la transacción no se consumió antes (primero que la reclama, se la lleva)
+ *  - es USDT y entrante
+ *  - ocurrió después de crear el intento: un pago viejo ajeno no sirve
+ *  - si la nota trae el código de OTRO pedido o de otro saldo, era para otro
+ * El monto lo clasifica applyPayment (de menos no entrega; de más va al saldo).
+ *
+ * @param ownCodes códigos normalizados que sí pertenecen a este intento
+ * @returns {{ ok: boolean, reason?: string, amount?: number, payerId?: string|null }}
+ */
+export function decideOrderIdClaim(tx, intent, { alreadyConsumed = false, ownCodes = [], earlyMs = EARLY_MS } = {}) {
+  if (alreadyConsumed) return { ok: false, reason: "consumed" };
+  if (String(tx.currency || "").toUpperCase() !== "USDT") return { ok: false, reason: "currency" };
+  const amount = truncate3(tx.amount);
+  if (!(amount > 0)) return { ok: false, reason: "outgoing" };
+
+  const when = Number(tx.transactionTime) || 0;
+  const from = new Date(intent.created_at).getTime() - earlyMs;
+  const until = new Date(intent.expires_at).getTime() + CLAIM_LATE_MS;
+  if (when && when < from) return { ok: false, reason: "before_order", amount };
+  if (when && when > until) return { ok: false, reason: "too_late", amount };
+
+  const foreign = extractNoteCodes(tx.note).filter((code) => !ownCodes.includes(code));
+  if (foreign.length > 0) return { ok: false, reason: "note_other_order", amount, foreign };
+
+  const payerId = tx.payerInfo?.binanceId != null ? String(tx.payerInfo.binanceId) : null;
+  return { ok: true, amount, payerId };
+}

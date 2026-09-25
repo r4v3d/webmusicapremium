@@ -51,7 +51,7 @@ export async function POST(req, { params }) {
       for (const r of results) {
         if (r.status === "settled" && r.orderId) after(() => deliverOrder(r.orderId).catch(() => {}));
       }
-      message = "Consultamos Binance. Si pusiste la nota correcta, tu pago se acredita en segundos.";
+      message = "Para verificar tu pago al instante, pega el Order ID que te muestra Binance y pulsa «Verificar pago».";
     } else if (intent.provider === "taypi" && intent.provider_ref) {
       const payment = await taypiGetPayment(intent.provider_ref);
       const status = String(payment.status || "").toLowerCase();

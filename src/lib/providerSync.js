@@ -4,18 +4,11 @@
 import { query } from "./pg";
 import { recordEvent, markEvent } from "./idempotency";
 import { applyPayment } from "./settle";
-import { getPayTransactions, matchTransaction, normalizeNote, truncate3 } from "./binanceAccount";
+import { TOPUP_EARLY_MS, decideOrderIdClaim, extractNoteCodes, getPayTransactions, matchTransaction, normalizeNote, truncate3 } from "./binanceAccount";
 import { getPayment as taypiGetPayment } from "./taypi";
 import { alertAdmin, notifyCustomer } from "./notify";
 
-const ORDER_CODE_RE = /MPB\d{6}/g;
-const WALLET_CODE_RE = /SALDO[A-Z0-9]{5}/g;
-
-/** Códigos candidatos dentro de una nota: "pago mpb-123456!" → ["MPB123456"]. */
-export function extractNoteCodes(note) {
-  const normalized = normalizeNote(note);
-  return [...new Set([...(normalized.match(ORDER_CODE_RE) || []), ...(normalized.match(WALLET_CODE_RE) || [])])];
-}
+export { extractNoteCodes };
 
 async function loadCandidates(codes) {
   const intentsByNote = new Map();
@@ -202,4 +195,69 @@ export async function pollTaypi() {
     }
   }
   return results;
+}
+
+async function ownCodesFor(intent) {
+  const codes = [];
+  if (intent.order_id) codes.push(normalizeNote(intent.order_id));
+  if (intent.customer_id) {
+    const res = await query("select wallet_note_code from customers where id = $1", [intent.customer_id]);
+    if (res.rows[0]?.wallet_note_code) codes.push(normalizeNote(res.rows[0].wallet_note_code));
+  }
+  return codes;
+}
+
+/**
+ * Reclamo por Order ID (lo único obligatorio para el cliente). Busca la
+ * transacción en el historial de Binance Pay y la aplica al intento del propio
+ * cliente: un pedido o una recarga de saldo. La nota ya no es necesaria.
+ *
+ * Resultados (status): settled | underpaid | credited | duplicate | needs_manual |
+ *   not_found (Binance aún no la muestra) | rejected (con `reason`)
+ */
+export async function claimBinanceByOrderId({ intentId, binanceOrderId, fetchTransactions = getPayTransactions }) {
+  const txnId = String(binanceOrderId || "").replace(/\D/g, "");
+  if (txnId.length < 8) return { ok: false, status: "invalid_order_id" };
+
+  const intentRes = await query("select * from payment_intents where id = $1", [intentId]);
+  const intent = intentRes.rows[0];
+  if (!intent || intent.provider !== "binance_account" || intent.currency !== "USDT") return { ok: false, status: "intent_not_found" };
+
+  const earlyMs = intent.purpose === "wallet_topup" ? TOPUP_EARLY_MS : 5 * 60 * 1000;
+  const since = new Date(intent.created_at).getTime() - earlyMs;
+  const txs = await fetchTransactions({ startTime: since, limit: 100 });
+  const tx = txs.find((t) => String(t.transactionId) === txnId || String(t.orderId || "") === txnId);
+  if (!tx) return { ok: false, status: "not_found" };
+
+  // El id canónico es transactionId: el mismo que usan el worker y la conciliación.
+  const canonicalId = String(tx.transactionId || tx.orderId);
+  const ev = await recordEvent({ provider: "binance_account", eventId: canonicalId, eventType: "order_id_claim", payload: tx, signatureValid: true });
+  const consumed = await query("select 1 from consumed_provider_txns where provider = 'binance_account' and txn_id = $1", [canonicalId]);
+
+  const decision = decideOrderIdClaim(tx, intent, { alreadyConsumed: consumed.rowCount > 0, ownCodes: await ownCodesFor(intent), earlyMs });
+  if (!decision.ok) {
+    if (decision.reason === "consumed") return { ok: true, status: "duplicate", duplicate: true };
+    await markEvent(ev.eventRowId, "mismatch", { detail: `reclamo por Order ID: ${decision.reason}`, intentId: intent.id });
+    if (decision.reason === "note_other_order") {
+      await alertAdmin("Reclamo USDT con nota de otro pedido", [
+        `Order ID ${canonicalId} (${decision.amount} USDT) reclamado desde el intento ${intent.id}`,
+        `La nota menciona: ${decision.foreign.join(", ")}. Revísalo en Conciliación.`,
+      ], { level: "warn" });
+    }
+    return { ok: false, status: "rejected", reason: decision.reason };
+  }
+
+  if (decision.payerId && intent.customer_id) {
+    await query("update customers set binance_payer_id = $2 where id = $1 and binance_payer_id is null", [intent.customer_id, decision.payerId]);
+  }
+  const r = await applyPayment({
+    intentId: intent.id, provider: "binance_account", providerTxnId: canonicalId,
+    amount: decision.amount, currency: "USDT",
+    note: intent.purpose === "wallet_topup" ? "Recarga USDT por Order ID" : null,
+  });
+  await markEvent(ev.eventRowId, r.status, { intentId: intent.id });
+  if (r.status === "credited" && intent.purpose === "wallet_topup") {
+    await notifyCustomer(r.customerId, `✅ Recarga acreditada: <b>${Number(r.amount).toFixed(3)} USDT</b>.`);
+  }
+  return { ...r, intentId: intent.id };
 }
