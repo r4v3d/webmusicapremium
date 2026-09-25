@@ -17,6 +17,7 @@ export default function FamiliesTab() {
     familyAccounts,
     filteredSlots,
     formatDisplayDate,
+    getClientMemberships,
     getExpiryTag,
     handleBulkAction,
     handleCopyToClipboard,

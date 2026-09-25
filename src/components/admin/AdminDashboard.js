@@ -1288,6 +1288,7 @@ export default function AdminDashboardPage() {
     filteredSlots,
     filteredStock,
     formatDisplayDate,
+    getClientMemberships,
     getCostInPen,
     getExpiryTag,
     getMessageForSlot,
