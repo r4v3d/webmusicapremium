@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdmin } from "../AdminContext";
-import { formatDateTimePe, formatMoney } from "../adminUi";
+import { RelativeTime, formatDateTimePe, formatMoney, useUrlParam } from "../adminUi";
 
 const REASONS = { topup: "Recarga", purchase: "Compra", refund: "Reembolso", overpay: "Excedente", adjustment: "Ajuste" };
 
@@ -10,7 +10,7 @@ const REASONS = { topup: "Recarga", purchase: "Compra", refund: "Reembolso", ove
 export default function WalletsTab() {
   const { showToast, askConfirm } = useAdmin();
   const [data, setData] = useState(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlParam("q");
   const [selected, setSelected] = useState(null);
   const [ledger, setLedger] = useState([]);
   const detailRef = useRef(null);
@@ -21,7 +21,11 @@ export default function WalletsTab() {
     .then((json) => { if (json) setData(json); })
     .catch(() => {}), []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    window.addEventListener("admin:refresh", load);
+    return () => window.removeEventListener("admin:refresh", load);
+  }, [load]);
 
   const open = async (w) => {
     setSelected(w);
@@ -96,7 +100,7 @@ export default function WalletsTab() {
                 <td data-label="Código recarga" className="cell-mono">{w.walletNoteCode || "—"}</td>
                 <td data-label="Soles" className="num">{formatMoney(w.pen, "PEN")}</td>
                 <td data-label="USDT" className="num">{formatMoney(w.usdt, "USDT")}</td>
-                <td data-label="Último movimiento" className="nowrap">{formatDateTimePe(w.updatedAt)}</td>
+                <td data-label="Último movimiento" className="nowrap"><RelativeTime value={w.updatedAt} /></td>
                 <td className="cell-actions">
                   <div className="cell-actions-inner">
                     <button type="button" className="btn btn-secondary admin-btn-compact" onClick={() => open(w)}>Ver movimientos</button>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAdmin } from "../AdminContext";
-import { formatDateTimePe, formatMoney } from "../adminUi";
+import { RelativeTime, formatMoney } from "../adminUi";
 
 // Cola "Por verificar" (§11.1, §15.3). Abres tu app de Yape, ves el ingreso y
 // confirmas: la asignación, el asiento y la entrega los hace el sistema.
@@ -27,7 +27,11 @@ export default function VerifyQueueTab() {
     const id = setInterval(() => {
       if (!document.hidden) load();
     }, 10000);
-    return () => clearInterval(id);
+    window.addEventListener("admin:refresh", load);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("admin:refresh", load);
+    };
   }, [load]);
 
   const formFor = (item) => forms[item.intentId] || {
@@ -142,7 +146,7 @@ export default function VerifyQueueTab() {
                     </td>
                     <td data-label="Desde" className="nowrap">
                       <span>
-                        {formatDateTimePe(item.createdAt)}
+                        <RelativeTime value={item.createdAt} />
                         {item.status === "expired" && <span className="status-badge badge-expired verify-status">Vencido</span>}
                         {item.status === "underpaid" && <span className="status-badge badge-pending verify-status">Parcial</span>}
                       </span>

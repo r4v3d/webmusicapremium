@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAdmin } from "../AdminContext";
 import { TrashIcon } from "../adminHelpers";
-import { SecretField } from "../adminUi";
+import { SecretField, readUrlParam, setUrlParam, useIsMobile, useUrlParam } from "../adminUi";
 
 const PAGE_SIZE = 50;
 
@@ -17,8 +17,25 @@ export default function StockTab() {
     setStockFilter,
     stockFilter
   } = useAdmin();
-  const [search, setSearch] = useState("");
+  const [search, setSearchParam] = useUrlParam("q");
   const [page, setPage] = useState(1);
+  const isMobile = useIsMobile();
+
+  // El filtro vive en el contexto; la URL (?filtro=) solo lo restaura al entrar.
+  useEffect(() => {
+    const saved = readUrlParam("filtro");
+    if (saved) setStockFilter(saved);
+  }, []);
+
+  const changeSearch = (value) => {
+    setSearchParam(value);
+    setPage(1);
+  };
+  const changeFilter = (id) => {
+    setStockFilter(id);
+    setUrlParam("filtro", id === "all" ? "" : id);
+    setPage(1);
+  };
   const [now, setNow] = useState(() => Date.now());
 
   // Cuenta atrás de las reservas (§15.3).
@@ -41,13 +58,13 @@ export default function StockTab() {
       .some((v) => String(v).toLowerCase().includes(q));
   });
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, stockFilter]);
-
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // En móvil se acumulan filas con «Cargar más»; en escritorio, páginas.
+  const pageRows = isMobile
+    ? rows.slice(0, currentPage * PAGE_SIZE)
+    : rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const remaining = rows.length - pageRows.length;
 
   const filters = [
     ["all", "Todas"],
@@ -67,11 +84,11 @@ export default function StockTab() {
           className="form-input"
           placeholder="Buscar correo u orden"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => changeSearch(e.target.value)}
         />
         <div className="admin-pills">
           {filters.map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setStockFilter(id)} className={`filter-btn ${stockFilter === id ? "active" : ""}`}>
+            <button key={id} type="button" onClick={() => changeFilter(id)} className={`filter-btn ${stockFilter === id ? "active" : ""}`}>
               {label}
             </button>
           ))}
@@ -136,17 +153,28 @@ export default function StockTab() {
               </tbody>
             </table>
           </div>
-          <div className="admin-pager">
-            <span>{rows.length} cuentas · página {currentPage} de {totalPages}</span>
-            <div className="admin-pager-actions">
-              <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                Anterior
-              </button>
-              <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                Siguiente
-              </button>
+          {isMobile ? (
+            <div className="admin-pager">
+              <span>{pageRows.length} de {rows.length} cuentas</span>
+              {remaining > 0 && (
+                <button type="button" className="btn btn-secondary admin-load-more" onClick={() => setPage((p) => p + 1)}>
+                  Cargar {Math.min(PAGE_SIZE, remaining)} más
+                </button>
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="admin-pager">
+              <span>{rows.length} cuentas · página {currentPage} de {totalPages}</span>
+              <div className="admin-pager-actions">
+                <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                  Anterior
+                </button>
+                <button type="button" className="btn btn-secondary admin-btn-compact" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </section>

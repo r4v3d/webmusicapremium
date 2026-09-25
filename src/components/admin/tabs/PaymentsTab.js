@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAdmin } from "../AdminContext";
-import { PROVIDER_LABELS, STATUS_LABELS, ProofLightbox, formatDateTimePe, formatMoney } from "../adminUi";
+import { PROVIDER_LABELS, STATUS_LABELS, ProofLightbox, RelativeTime, formatMoney } from "../adminUi";
 
 export default function PaymentsTab() {
   const {
@@ -96,7 +96,7 @@ export default function PaymentsTab() {
                       </span>
                     </td>
                     <td data-label="Notas" className="cell-small payments-notes">{p.notes || "-"}</td>
-                    <td data-label="Fecha" className="cell-small nowrap text-muted">{formatDateTimePe(p.createdAt)}</td>
+                    <td data-label="Fecha" className="cell-small nowrap text-muted"><RelativeTime value={p.createdAt} /></td>
                     <td data-label="Estado"><span className={`payment-status ${status.cls}`}>{status.text}</span></td>
                     {isPending ? (
                       <td className="cell-actions">

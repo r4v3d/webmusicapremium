@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAdmin } from "../AdminContext";
-import { PROVIDER_LABELS, STATUS_LABELS, formatDateTimePe, formatMoney } from "../adminUi";
+import { PROVIDER_LABELS, STATUS_LABELS, RelativeTime, formatDateTimePe, formatMoney } from "../adminUi";
 
 // Conciliación (§15.3): el tablero que sustituye la revisión de comprobantes.
 export default function ReconciliationTab() {
@@ -19,7 +19,11 @@ export default function ReconciliationTab() {
   useEffect(() => {
     load();
     const id = setInterval(() => { if (!document.hidden) load(); }, 20000);
-    return () => clearInterval(id);
+    window.addEventListener("admin:refresh", load);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("admin:refresh", load);
+    };
   }, [load]);
 
   const apply = async (ev) => {
@@ -115,7 +119,7 @@ export default function ReconciliationTab() {
               <tbody>
                 {data.review.map((ev) => (
                   <tr key={ev.id}>
-                    <td data-label="Recibido" className="nowrap">{formatDateTimePe(ev.received_at)}</td>
+                    <td data-label="Recibido" className="nowrap"><RelativeTime value={ev.received_at} /></td>
                     <td data-label="Transacción" className="cell-mono cell-small cell-email">{ev.event_id}</td>
                     <td data-label="Monto" className="num">{ev.amount ? formatMoney(ev.amount, "USDT") : "—"}</td>
                     <td data-label="Nota / pagador" className="cell-small">{ev.note || "(sin nota)"}{ev.payer_name ? ` · ${ev.payer_name}` : ""}</td>

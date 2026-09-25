@@ -8,6 +8,7 @@ import { CloseIcon, PlusIcon, CopyIcon, TrashIcon, WhatsAppIcon, formatDate, get
 import {
   AdminSkeleton,
   ConfirmDialog,
+  RefreshStatus,
   SecretField,
   ToastHost,
   WORKSPACES,
@@ -15,6 +16,8 @@ import {
   isBillingInWindow,
   parseAdminRoute,
   todayIso,
+  buildDeliveryMessage,
+  whatsappUrl,
   writeAdminRoute,
 } from "./adminUi";
 import HoyTab from "./tabs/HoyTab";
@@ -34,6 +37,9 @@ import CommandPalette from "./CommandPalette";
 import { AdminHeader, AdminKpis, AdminNav } from "./AdminShell";
 import { moveSlotInAccounts } from "../../lib/moveSlot";
 
+
+// Marca de tiempo de la última carga (fuera del componente: no es parte del render).
+const nowMs = () => Date.now();
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -122,6 +128,7 @@ export default function AdminDashboardPage() {
   const [importError, setImportError] = useState("");
   const [importPreview, setImportPreview] = useState(null);
   const [todayQueue, setTodayQueue] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [isOrdersLoading, setIsOrdersLoading] = useState(false);
   const [isStockLoading, setIsStockLoading] = useState(false);
@@ -434,6 +441,7 @@ export default function AdminDashboardPage() {
       }
       setStats(await statsRes.json());
       setAuthorized(true);
+      setLastUpdated(nowMs());
       if (todayRes.ok) {
         setTodayQueue(await todayRes.json());
       } else {
@@ -916,15 +924,44 @@ export default function AdminDashboardPage() {
   }, [authorized, activeTab, activeSubTab]);
 
   useEffect(() => {
+    // Atajos: Ctrl K (paleta), "/" (buscar en la vista), "g" + letra (ir a un espacio).
+    const GO = { h: ["hoy"], l: ["clientes"], i: ["inventario"], c: ["cobros"], v: ["cobros", "verificar"], n: ["numeros"] };
+    let pendingG = 0;
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((open) => !open);
+        return;
       }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName))) return;
+      if (document.querySelector(".admin-modal-overlay")) return;
+      if (e.key === "/") {
+        const search = document.querySelector('.admin-content-layout input[type="search"], .admin-content-layout input[type="text"]');
+        if (search) {
+          e.preventDefault();
+          search.focus();
+        }
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (pendingG && Date.now() - pendingG < 1200 && GO[key]) {
+        e.preventDefault();
+        pendingG = 0;
+        setWorkspace(...GO[key]);
+        return;
+      }
+      pendingG = key === "g" ? Date.now() : 0;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // La paleta busca pedidos: cargarlos al abrirla si esta vista aún no los pidió.
+  useEffect(() => {
+    if (paletteOpen && authorized && !loadedRef.current.orders) fetchOrders();
+  }, [paletteOpen, authorized]);
 
   useEffect(() => {
     if (!authorized) return undefined;
@@ -1448,9 +1485,38 @@ export default function AdminDashboardPage() {
         </div>
       )}
       <CommandPalette
+        key={paletteOpen ? "open" : "closed"}
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         onGo={setWorkspace}
+        onConfirmOrder={(orderId) => handleUpdateOrderStatus(orderId, "paid")}
+        onSearchOrder={(orderId) => {
+          setOrderSearchQuery(orderId);
+          setOrderStatusFilter("all");
+          setWorkspace("hoy", "pedidos");
+        }}
+        actions={[
+          { id: "act-verify", title: "Verificar pagos Yape/Plin", keywords: "por verificar yape plin cobros", run: () => setWorkspace("cobros", "verificar") },
+          { id: "act-import", title: "Cargar stock", keywords: "importar cuentas inventario", run: () => setWorkspace("inventario", "import") },
+          {
+            id: "act-family",
+            title: "Añadir cuenta familiar",
+            keywords: "nueva titular familia",
+            run: () => {
+              setWorkspace("clientes", "familyAccounts");
+              setShowAddFamilyModal(true);
+            },
+          },
+          {
+            id: "act-refresh",
+            title: "Actualizar datos",
+            keywords: "recargar refrescar",
+            run: () => {
+              loadData();
+              window.dispatchEvent(new Event("admin:refresh"));
+            },
+          },
+        ]}
         orders={orders}
         familyAccounts={familyAccounts}
       />
@@ -1507,6 +1573,17 @@ export default function AdminDashboardPage() {
               </div>
             )}
             <div className="modal-footer-actions">
+              {(() => {
+                const order = orders.find((o) => o.orderId === deliveryModal.orderId);
+                const waLink = !deliveryModal.missingStock && order?.whatsapp
+                  ? whatsappUrl(order.whatsapp, buildDeliveryMessage(order, deliveryModal.assignedAccount))
+                  : "";
+                return waLink ? (
+                  <a href={waLink} target="_blank" rel="noopener noreferrer" className="btn btn-whatsapp-delivery">
+                    Enviar por WhatsApp
+                  </a>
+                ) : null;
+              })()}
               <button type="button" className="btn btn-primary" onClick={() => setDeliveryModal(null)}>Listo</button>
             </div>
           </div>
@@ -1515,7 +1592,7 @@ export default function AdminDashboardPage() {
       <AdminHeader onSearch={() => setPaletteOpen(true)} onLogout={handleLogout} />
 
       <div className="container admin-content-layout">
-        <AdminKpis stats={stats} />
+        <AdminKpis stats={stats} onGoImport={() => setWorkspace("inventario", "import")} />
 
         <AdminNav
           activeTab={activeTab}
@@ -1524,6 +1601,16 @@ export default function AdminDashboardPage() {
           onWorkspace={(id) => setWorkspace(id)}
           onSubTab={setActiveSubTab}
         />
+
+        {(activeTab === "hoy" || activeTab === "cobros") && (
+          <RefreshStatus
+            lastUpdated={lastUpdated}
+            onRefresh={async () => {
+              await loadData();
+              window.dispatchEvent(new Event("admin:refresh"));
+            }}
+          />
+        )}
 
         {activeTab === "hoy" && activeSubTab === "cola" && <HoyTab />}
         {activeTab === "hoy" && activeSubTab === "pedidos" && <OrdersTab />}

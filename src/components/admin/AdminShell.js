@@ -106,31 +106,89 @@ export function AdminHeader({ onSearch, onLogout }) {
   );
 }
 
-export function AdminKpis({ stats }) {
+const LOW_STOCK = 2;
+const DAY_FMT = new Intl.DateTimeFormat("es-PE", { weekday: "short", day: "numeric" });
+
+// Sparkline de 7 días: línea atenuada, el día de hoy resaltado con el color de la tarjeta.
+function Sparkline({ series, currency, color }) {
+  if (!series?.length) return null;
+  const values = series.map((d) => d[currency] || 0);
+  const max = Math.max(...values);
+  const W = 84;
+  const H = 26;
+  const pad = 3;
+  const x = (i) => pad + (i * (W - pad * 2)) / (values.length - 1);
+  const y = (v) => (max > 0 ? H - pad - (v / max) * (H - pad * 2) : H - pad);
+  const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const fmt = (v) => (currency === "USDT" ? `${v.toFixed(2)} USDT` : `S/ ${v.toFixed(2)}`);
+  const label = (d) => DAY_FMT.format(new Date(`${d.day}T12:00:00`));
+  const total = values.reduce((acc, v) => acc + v, 0);
+  const last = values.length - 1;
+  return (
+    <svg
+      className="kpi-sparkline"
+      width={W}
+      height={H}
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label={`Últimos 7 días: ${fmt(total)} en total, hoy ${fmt(values[last])}`}
+    >
+      <polyline points={points} fill="none" stroke="rgba(255,255,255,0.32)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(last)} cy={y(values[last])} r="3.5" fill={color} stroke="var(--bg-primary)" strokeWidth="1.5" />
+      {series.map((d, i) => (
+        <rect key={d.day} x={x(i) - (W - pad * 2) / 12} y="0" width={(W - pad * 2) / 6} height={H} fill="transparent">
+          <title>{`${label(d)}: ${fmt(values[i])}`}</title>
+        </rect>
+      ))}
+    </svg>
+  );
+}
+
+export function AdminKpis({ stats, onGoImport }) {
   if (!stats) return null;
   const stock = stats.activeStock || {};
+  const services = ["tidal", "deezer", "qobuz"];
+  const lowStock = services.some((service) => (stock[service] ?? 0) <= LOW_STOCK);
   return (
     <section className="stats-grid stats-grid-compact admin-kpis animate-fade-in" aria-label="Resumen">
       <div className="stat-card glass-panel border-purple">
         <span className="stat-label">Ventas Yape/Plin</span>
-        <strong className="stat-value text-purple">S/. {stats.totalRevenuePen}</strong>
+        <div className="kpi-value-row">
+          <strong className="stat-value text-purple">S/. {stats.totalRevenuePen}</strong>
+          <Sparkline series={stats.daily} currency="PEN" color="#9b59b6" />
+        </div>
       </div>
       <div className="stat-card glass-panel border-yellow">
         <span className="stat-label">Ventas Binance Pay</span>
-        <strong className="stat-value text-yellow">$ {stats.totalRevenueUsd}</strong>
+        <div className="kpi-value-row">
+          <strong className="stat-value text-yellow">$ {stats.totalRevenueUsd}</strong>
+          <Sparkline series={stats.daily} currency="USDT" color="#f1c40f" />
+        </div>
       </div>
       <div className="stat-card glass-panel border-cyan">
         <span className="stat-label">Pedidos Pendientes</span>
         <strong className="stat-value text-cyan">{stats.pendingOrders}</strong>
       </div>
-      <div className="stat-card glass-panel border-gold admin-kpi-stock">
-        <span className="stat-label">Cuentas Disponibles</span>
+      <div className={`stat-card glass-panel border-gold admin-kpi-stock ${lowStock ? "has-low" : ""}`}>
+        <div className="kpi-stock-head">
+          <span className="stat-label">Cuentas Disponibles</span>
+          {lowStock && onGoImport && (
+            <button type="button" className="kpi-stock-cta" onClick={onGoImport}>
+              Cargar
+            </button>
+          )}
+        </div>
         <div className="stat-sub-grid">
-          {["tidal", "deezer", "qobuz"].map((service) => {
+          {services.map((service) => {
             const count = stock[service] ?? 0;
+            const level = count === 0 ? "is-empty" : count <= LOW_STOCK ? "is-low" : "";
             return (
-              <div key={service} className={count === 0 ? "is-empty" : ""}>
-                <span>{service.charAt(0).toUpperCase() + service.slice(1)}:</span> <strong>{count}</strong>
+              <div key={service} className={level}>
+                <span>{service.charAt(0).toUpperCase() + service.slice(1)}:</span>
+                <strong>
+                  {count}
+                  {level && <span className="sr-only">{count === 0 ? " (sin stock)" : " (stock bajo)"}</span>}
+                </strong>
               </div>
             );
           })}

@@ -1,0 +1,21 @@
+{
+  "name": "Panel Administrativo · Música Premium",
+  "short_name": "Panel MP",
+  "description": "Cola de cobros, entregas e inventario de Música Premium Barato.",
+  "id": "/admin",
+  "start_url": "/admin?tab=hoy",
+  "scope": "/admin",
+  "display": "standalone",
+  "background_color": "#08080a",
+  "theme_color": "#08080a",
+  "lang": "es",
+  "icons": [
+    { "src": "/admin-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/admin-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Por verificar", "url": "/admin?tab=cobros&sub=verificar", "icons": [{ "src": "/admin-icon-192.png", "sizes": "192x192" }] },
+    { "name": "Pedidos", "url": "/admin?tab=hoy&sub=pedidos", "icons": [{ "src": "/admin-icon-192.png", "sizes": "192x192" }] }
+  ]
+}
