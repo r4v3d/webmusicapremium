@@ -65,6 +65,11 @@ if [[ -z "$(env_get SESSION_SECRET || true)" ]]; then
   record_secret "SESSION_SECRET=${SS}"
   ok "SESSION_SECRET generado"
 fi
+# Clave compartida con el script de Google Sheets (integrations/google-sheets).
+if [[ -z "$(env_get GOOGLE_SHEETS_SECRET || true)" ]]; then
+  env_set GOOGLE_SHEETS_SECRET "$(gen_secret)"
+  ok "GOOGLE_SHEETS_SECRET generado"
+fi
 # Banderas de §19. env_default: si ya las cambiaste, repetir este paso no las pisa.
 env_default MANUAL_YAPE_ENABLED "true"
 env_default TAYPI_ENABLED       "false"
@@ -78,7 +83,8 @@ env_default PGPOOL_MAX          "10"
 for key in ADMIN_PASSWORD ADMIN_ALERT_EMAIL EMAIL_USER EMAIL_PASS \
            BINANCE_API_KEY BINANCE_API_SECRET BINANCE_PAY_ID BINANCE_PAY_NICKNAME \
            TAYPI_BASE_URL TAYPI_PUBLIC_KEY TAYPI_SECRET_KEY TAYPI_AUTH_KEY TAYPI_WEBHOOK_SECRET \
-           TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME TELEGRAM_WEBHOOK_SECRET TELEGRAM_CHANNEL_ID TELEGRAM_ADMIN_CHAT_ID; do
+           TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME TELEGRAM_WEBHOOK_SECRET TELEGRAM_CHANNEL_ID TELEGRAM_ADMIN_CHAT_ID \
+           GOOGLE_SHEETS_WEBAPP_URL; do
   env_default "$key" ""
 done
 chown root:"$APP_USER" "$ENV_FILE"; chmod 0640 "$ENV_FILE"

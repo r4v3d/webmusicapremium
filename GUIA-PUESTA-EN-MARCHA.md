@@ -329,9 +329,15 @@ Puedes saltarla y hacerla otro día: la web funciona igual sin el bot.
 3. En **Caching → Cache Rules**, crea una regla: *Si "URI Path" empieza con `/api/`* → **Bypass cache**.
 4. Haz las pruebas reales con montos mínimos:
    - Un pedido de S/ 6 por Yape: lo confirmas en *Cobros → Por verificar* con el número de operación de tu app.
-   - Un pago USDT con la nota del pedido.
+   - Un pago USDT sin nota, verificado pegando el Order ID en el checkout.
 5. Cambia en tus redes y en tu WhatsApp el enlace de la tienda a `https://cheapmusic.best`.
 6. Deja la tienda de Vercel como está una o dos semanas y después pausa el proyecto. Deja Supabase en pausa, sin borrarlo, como red de seguridad.
+
+---
+
+## Etapa 10 · Google Sheets conectado al panel (opcional)
+
+Una hoja de Google para cargar cuentas en masa y ver o editar todo el inventario, sincronizada con el panel en ambos sentidos. Los pasos detallados están en [integrations/google-sheets/README.md](integrations/google-sheets/README.md).
 
 ---
 

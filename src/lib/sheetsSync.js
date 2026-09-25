@@ -1,0 +1,450 @@
+// Sincronización con Google Sheets: arma las filas de la hoja «Inventario»,
+// aplica lo que se edita en ella y procesa la hoja «Cargar» (alta masiva).
+//
+// Una fila = un cupo. Los datos del titular se repiten en cada cupo de su
+// cuenta; editarlos en cualquier fila cambia la cuenta y, por los triggers de
+// 005_sheets_sync.sql, todas sus filas.
+import crypto from "node:crypto";
+import { query, withTransaction } from "./pg";
+import { createFamilyAccount, getOrCreateClient, toDateStr, updateFamilyAccount, updateMemberProfile } from "./db";
+import { parseDateInput } from "./importParse";
+import { CONFIG } from "../data/config";
+
+export class SheetError extends Error {}
+
+const STATUS_LABELS = {
+  free: "Libre",
+  active: "Activo",
+  pending_payment: "Falta pago",
+  expired: "Vencido",
+  reserved: "Reservado",
+};
+const STATUS_FROM_LABEL = {
+  libre: "free", disponible: "free", free: "free",
+  activo: "active", active: "active",
+  "falta pago": "pending_payment", pending_payment: "pending_payment",
+  vencido: "expired", expired: "expired",
+};
+const CURRENCIES = ["PEN", "USD", "ARS"];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Las columnas de la hoja, en orden. El script de Apps Script usa las mismas claves. */
+export const INVENTORY_KEYS = [
+  "id", "plataforma", "correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular",
+  "cupo", "estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence",
+  "notasTitular", "actualizado",
+];
+const ACCOUNT_KEYS = ["correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular", "notasTitular"];
+const SLOT_KEYS = ["estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence"];
+
+export function sheetServices() {
+  return Object.entries(CONFIG.services).map(([code, s]) => ({ code, name: s.name }));
+}
+
+function serviceName(code) {
+  return CONFIG.services[code]?.name || code;
+}
+
+function resolveService(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (!v) return null;
+  return Object.entries(CONFIG.services).find(([code, s]) => code === v || s.name.toLowerCase() === v)?.[0] || null;
+}
+
+const text = (v) => (v == null ? "" : String(v).trim());
+const digits = (v) => text(v).replace(/\D/g, "");
+const money = (v) => (v == null || v === "" ? "" : Math.round(Number(v) * 100) / 100);
+
+function rowVersion(row) {
+  const values = INVENTORY_KEYS.map((k) => row[k]);
+  return crypto.createHash("sha1").update(JSON.stringify(values)).digest("hex").slice(0, 16);
+}
+
+/**
+ * Filas del inventario, ordenadas por plataforma, titular y cupo.
+ * Sin slotIds, todo el inventario (la recarga completa de la hoja).
+ */
+export async function buildInventoryRows(slotIds = null) {
+  if (slotIds && slotIds.length === 0) return [];
+  const { rows } = await query(
+    `select s.id::text as id, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
+            pa.renewal_cost, pa.renewal_currency, pa.notes, s.slot_number, s.status,
+            (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
+            s.member_email, s.member_password, s.email_type, c.display_name,
+            (select cc.contact_value from customer_contacts cc
+              where cc.customer_id = s.customer_id and cc.contact_type = 'whatsapp'
+              order by cc.is_primary desc, cc.id limit 1) as whatsapp,
+            sub.plan_price, sub.renewal_date,
+            to_char(greatest(s.updated_at, pa.updated_at, coalesce(sub.updated_at, s.updated_at))
+                    at time zone 'America/Lima', 'YYYY-MM-DD HH24:MI') as actualizado
+       from account_slots s
+       join platform_accounts pa on pa.id = s.platform_account_id
+       left join customers c on c.id = s.customer_id
+       left join lateral (
+         select plan_price, renewal_date, updated_at from subscriptions sb
+          where sb.account_slot_id = s.id and sb.subscription_status in ('active','pending_payment')
+          order by sb.id desc limit 1
+       ) sub on true
+      where ($1::text[] is null or s.id::text = any($1::text[]))
+      order by pa.platform_code, lower(pa.account_email), s.slot_number nulls last, s.id`,
+    [slotIds ? slotIds.map(String) : null]
+  );
+  return rows.map(toSheetRow);
+}
+
+function toSheetRow(r) {
+  // Una reserva vencida no retiene el cupo: para la hoja está libre.
+  const status = r.status === "reserved" && !r.reserved_live ? "free" : r.status;
+  const occupied = status !== "free" && status !== "reserved";
+  const row = {
+    id: r.id,
+    plataforma: serviceName(r.platform_code),
+    correoTitular: r.account_email || "",
+    claveTitular: r.account_password || "",
+    renuevaTitular: toDateStr(r.owner_renewal_date) || "",
+    costoTitular: money(r.renewal_cost),
+    monedaTitular: r.renewal_currency || "PEN",
+    cupo: r.slot_number ?? "",
+    estado: STATUS_LABELS[status] || status,
+    correoMiembro: r.member_email || "",
+    claveMiembro: r.member_password || "",
+    tipoCorreo: (r.email_type || "admin") === "admin" ? "Propio" : "Cliente",
+    cliente: occupied ? r.display_name || "" : "",
+    whatsapp: occupied ? r.whatsapp || "" : "",
+    precio: occupied && r.plan_price != null ? money(r.plan_price) : "",
+    vence: occupied ? toDateStr(r.renewal_date) || "" : "",
+    notasTitular: r.notes || "",
+    actualizado: r.actualizado || "",
+  };
+  row.version = rowVersion(row);
+  return row;
+}
+
+// --- Edición desde la hoja «Inventario» ---
+
+function parseDateField(value, label) {
+  const v = text(value);
+  if (!v) return null;
+  const date = parseDateInput(v);
+  if (!date || Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())) {
+    throw new SheetError(`${label}: fecha no válida («${v}»). Usa el formato día/mes/año.`);
+  }
+  return date;
+}
+
+function parseMoneyField(value, label) {
+  const v = text(value).replace(",", ".");
+  if (!v) return 0;
+  const n = Number(v.replace(/^s\/\.?\s*/i, ""));
+  if (!Number.isFinite(n) || n < 0) throw new SheetError(`${label}: debe ser un número mayor o igual a 0.`);
+  return Math.round(n * 100) / 100;
+}
+
+function parseEmailField(value, label, { required = false } = {}) {
+  const v = text(value);
+  if (!v) {
+    if (required) throw new SheetError(`${label} no puede quedar vacío.`);
+    return "";
+  }
+  if (!EMAIL_RE.test(v)) throw new SheetError(`${label}: «${v}» no parece un correo.`);
+  return v;
+}
+
+async function assertTitularFree(tx, email, exceptAccountId) {
+  const res = await tx.query(
+    `select platform_code from platform_accounts
+      where lower(account_email) = lower($1) and ($2::text is null or id::text <> $2::text) limit 1`,
+    [email, exceptAccountId == null ? null : String(exceptAccountId)]
+  );
+  if (res.rows[0]) throw new SheetError(`El titular ${email} ya existe en ${serviceName(res.rows[0].platform_code)}.`);
+}
+
+async function assertMemberFree(tx, email, platformCode, exceptSlotId) {
+  const res = await tx.query(
+    `select pa.account_email from account_slots s
+       join platform_accounts pa on pa.id = s.platform_account_id
+      where pa.platform_code = $1 and lower(s.member_email) = lower($2)
+        and ($3::text is null or s.id::text <> $3::text)
+      limit 1`,
+    [platformCode, email, exceptSlotId == null ? null : String(exceptSlotId)]
+  );
+  if (res.rows[0]) throw new SheetError(`El correo miembro ${email} ya está en la cuenta de ${res.rows[0].account_email}.`);
+}
+
+async function applyOneEdit(tx, slotId, changes) {
+  const cur = (await tx.query(
+    `select s.*, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
+            pa.renewal_cost, pa.renewal_currency, pa.notes as account_notes,
+            (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
+            c.display_name,
+            (select cc.contact_value from customer_contacts cc
+              where cc.customer_id = s.customer_id and cc.contact_type = 'whatsapp'
+              order by cc.is_primary desc, cc.id limit 1) as whatsapp
+       from account_slots s
+       join platform_accounts pa on pa.id = s.platform_account_id
+       left join customers c on c.id = s.customer_id
+      where s.id::text = $1
+      for update of s`,
+    [String(slotId)]
+  )).rows[0];
+  if (!cur) throw new SheetError("Este cupo ya no existe en el panel. Recarga el inventario.");
+
+  const has = (k) => Object.prototype.hasOwnProperty.call(changes, k);
+  let accountChanged = false;
+
+  // Datos del titular: valen para toda la cuenta.
+  const acc = {};
+  if (has("correoTitular")) {
+    const email = parseEmailField(changes.correoTitular, "Correo titular", { required: true });
+    if (email !== cur.account_email) {
+      await assertTitularFree(tx, email, cur.platform_account_id);
+      acc.masterEmail = email;
+    }
+  }
+  if (has("claveTitular")) {
+    const password = text(changes.claveTitular);
+    if (!password) throw new SheetError("La clave del titular no puede quedar vacía.");
+    if (password !== cur.account_password) acc.password = password;
+  }
+  if (has("renuevaTitular")) {
+    const date = parseDateField(changes.renuevaTitular, "Renueva titular");
+    if (date !== (toDateStr(cur.owner_renewal_date) || null)) acc.ownerRenewalDate = date;
+  }
+  if (has("costoTitular")) {
+    const cost = parseMoneyField(changes.costoTitular, "Costo titular");
+    if (cost !== (Number(cur.renewal_cost) || 0)) acc.renewalCost = cost;
+  }
+  if (has("monedaTitular")) {
+    const currency = text(changes.monedaTitular).toUpperCase() || "PEN";
+    if (!CURRENCIES.includes(currency)) throw new SheetError(`Moneda: usa ${CURRENCIES.join(", ")}.`);
+    if (currency !== (cur.renewal_currency || "PEN")) acc.renewalCurrency = currency;
+  }
+  if (has("notasTitular")) {
+    const notes = text(changes.notasTitular);
+    if (notes !== (cur.account_notes || "")) acc.notes = notes;
+  }
+  if (Object.keys(acc).length) {
+    await updateFamilyAccount(cur.platform_account_id, acc, { tx });
+    accountChanged = true;
+  }
+
+  // Datos del cupo.
+  if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged };
+  if (cur.reserved_live) {
+    throw new SheetError("Este cupo está apartado por una compra en curso. Espera unos minutos y vuelve a editarlo.");
+  }
+
+  const upd = {};
+  const memberEmail = has("correoMiembro") ? parseEmailField(changes.correoMiembro, "Correo miembro") : cur.member_email || "";
+  if (has("correoMiembro") && memberEmail !== (cur.member_email || "")) {
+    if (memberEmail) await assertMemberFree(tx, memberEmail, cur.platform_code, cur.id);
+    upd.memberEmail = memberEmail;
+  }
+  if (has("claveMiembro")) {
+    const password = text(changes.claveMiembro);
+    if (password !== (cur.member_password || "")) upd.memberPassword = password;
+  }
+  if (has("tipoCorreo")) {
+    const v = text(changes.tipoCorreo).toLowerCase();
+    const type = v === "propio" || v === "admin" ? "admin" : v === "cliente" || v === "client" ? "client" : null;
+    if (!type) throw new SheetError("Tipo de correo: usa Propio o Cliente.");
+    const curType = (cur.email_type || "admin") === "admin" ? "admin" : "client";
+    if (type !== curType) upd.emailType = type;
+  }
+
+  const curStatus = cur.status === "reserved" ? "free" : cur.status;
+  let nextStatus = curStatus;
+  if (has("estado")) {
+    const label = text(changes.estado).toLowerCase();
+    if (label === "reservado") throw new SheetError("«Reservado» lo pone el sistema durante una compra; no se puede elegir.");
+    nextStatus = STATUS_FROM_LABEL[label];
+    if (!nextStatus) throw new SheetError("Estado: usa Libre, Activo, Falta pago o Vencido.");
+  }
+  const statusChanged = has("estado") && nextStatus !== cur.status;
+
+  if (nextStatus === "free") {
+    const filled = ["cliente", "whatsapp", "precio", "vence"].filter((k) => has(k) && text(changes[k]));
+    if (filled.length && !has("estado")) {
+      throw new SheetError("Un cupo libre no tiene cliente, precio ni vencimiento. Cambia primero el Estado.");
+    }
+    if (statusChanged) Object.assign(upd, { status: "free", clientId: null, pricePen: 0, renewalDate: null });
+  } else {
+    const clientTouched = statusChanged || has("cliente") || has("whatsapp");
+    if (clientTouched) {
+      const whatsapp = has("whatsapp") ? text(changes.whatsapp) : cur.whatsapp || "";
+      const nickname = has("cliente") ? text(changes.cliente) : cur.display_name || "";
+      if (digits(whatsapp).length < 6) {
+        throw new SheetError("Para un cupo ocupado hace falta el WhatsApp del cliente.");
+      }
+      const sameClient = cur.customer_id && digits(whatsapp) === digits(cur.whatsapp) && nickname === (cur.display_name || "");
+      if (!sameClient) {
+        const client = await getOrCreateClient(whatsapp, nickname, memberEmail, { tx });
+        upd.clientId = client.id;
+      }
+    }
+    if (statusChanged) upd.status = nextStatus;
+    if (has("precio")) upd.pricePen = parseMoneyField(changes.precio, "Precio");
+    if (has("vence")) upd.renewalDate = parseDateField(changes.vence, "Vence");
+  }
+
+  if (Object.keys(upd).length) await updateMemberProfile(cur.id, upd, { tx });
+  return { accountId: cur.platform_account_id, accountChanged };
+}
+
+/**
+ * Aplica ediciones de la hoja. Cada una en su propia transacción: una fila con
+ * error no impide las demás. Devuelve el resultado por cupo y las filas frescas
+ * de todo lo afectado (y del cupo con error, para que la hoja deshaga el cambio).
+ */
+export async function applySheetEdits(edits) {
+  const results = [];
+  const touchedSlots = new Set();
+  const touchedAccounts = new Set();
+
+  for (const edit of edits || []) {
+    const id = text(edit?.id);
+    const changes = edit?.changes && typeof edit.changes === "object" ? edit.changes : {};
+    if (!id) continue;
+    touchedSlots.add(id);
+    try {
+      const known = Object.keys(changes).filter((k) => ACCOUNT_KEYS.includes(k) || SLOT_KEYS.includes(k));
+      if (!known.length) {
+        results.push({ id, ok: false, error: "Esa columna no se edita desde la hoja." });
+        continue;
+      }
+      const picked = Object.fromEntries(known.map((k) => [k, changes[k]]));
+      const r = await withTransaction((tx) => applyOneEdit(tx, id, picked));
+      if (r.accountChanged) touchedAccounts.add(String(r.accountId));
+      results.push({ id, ok: true });
+    } catch (error) {
+      if (!(error instanceof SheetError)) console.error("[sheets] edición fallida", id, error);
+      results.push({ id, ok: false, error: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
+    }
+  }
+
+  if (touchedAccounts.size) {
+    const res = await query(
+      "select id::text as id from account_slots where platform_account_id::text = any($1::text[])",
+      [[...touchedAccounts]]
+    );
+    for (const r of res.rows) touchedSlots.add(r.id);
+  }
+  const rows = await buildInventoryRows([...touchedSlots]);
+  const existing = new Set(rows.map((r) => r.id));
+  const deleted = [...touchedSlots].filter((id) => !existing.has(id));
+  return { results, rows, deleted };
+}
+
+// --- Alta masiva desde la hoja «Cargar» ---
+
+const plus30 = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return toDateStr(d);
+};
+
+async function loadOneRow(tx, row) {
+  const service = resolveService(row.plataforma);
+  if (!service) {
+    throw new SheetError(`Plataforma desconocida («${text(row.plataforma)}»). Usa ${sheetServices().map((s) => s.name).join(", ")}.`);
+  }
+  const masterEmail = parseEmailField(row.correoTitular, "Correo titular", { required: true });
+  const masterPassword = text(row.claveTitular);
+  const renewal = parseDateField(row.renuevaTitular, "Renueva titular");
+  const cost = text(row.costoTitular) ? parseMoneyField(row.costoTitular, "Costo titular") : null;
+  const memberEmail = parseEmailField(row.correoMiembro, "Correo miembro");
+  const memberPassword = text(row.claveMiembro);
+  if (memberEmail && !memberPassword) throw new SheetError("Falta la clave del miembro.");
+  if (!memberEmail && memberPassword) throw new SheetError("Falta el correo del miembro.");
+
+  const found = (await tx.query(
+    `select id, platform_code, account_password, owner_renewal_date, renewal_cost from platform_accounts
+      where lower(account_email) = lower($1) order by id limit 1 for update`,
+    [masterEmail]
+  )).rows[0];
+
+  const parts = [];
+  let accountId;
+  if (found) {
+    if (found.platform_code !== service) {
+      throw new SheetError(`Ese titular ya está registrado en ${serviceName(found.platform_code)}.`);
+    }
+    accountId = found.id;
+    const acc = {};
+    if (masterPassword && masterPassword !== found.account_password) acc.password = masterPassword;
+    if (renewal && renewal !== toDateStr(found.owner_renewal_date)) acc.ownerRenewalDate = renewal;
+    if (cost != null && cost !== (Number(found.renewal_cost) || 0)) acc.renewalCost = cost;
+    if (Object.keys(acc).length) {
+      await updateFamilyAccount(accountId, acc, { tx });
+      parts.push("titular actualizado");
+    }
+  } else {
+    if (!masterPassword) throw new SheetError("Falta la clave del titular (es una cuenta nueva).");
+    const created = await createFamilyAccount({
+      service, masterEmail, password: masterPassword, ownerRenewalDate: renewal || plus30(), renewalCost: cost || 0,
+      notes: "Cargada desde Google Sheets.",
+    }, { tx });
+    accountId = created.id;
+    await tx.query(
+      `insert into account_slots(platform_account_id, slot_number, status, email_type, member_email, member_password)
+       select $1, n, 'free', 'admin', '', '' from generate_series(1, 5) as n`,
+      [accountId]
+    );
+    parts.push("cuenta nueva con 5 cupos");
+  }
+
+  let sellable = 0;
+  if (memberEmail) {
+    const same = (await tx.query(
+      `select s.id, s.slot_number, s.member_password, s.platform_account_id, pa.account_email
+         from account_slots s join platform_accounts pa on pa.id = s.platform_account_id
+        where pa.platform_code = $1 and lower(s.member_email) = lower($2)
+        order by s.id limit 1 for update of s`,
+      [service, memberEmail]
+    )).rows[0];
+
+    if (same && String(same.platform_account_id) !== String(accountId)) {
+      throw new SheetError(`El correo miembro ya está en la cuenta de ${same.account_email}.`);
+    }
+    if (same) {
+      if (same.member_password !== memberPassword) {
+        await updateMemberProfile(same.id, { memberPassword }, { tx });
+        parts.push(`clave del cupo ${same.slot_number} actualizada`);
+      } else {
+        parts.push(`el miembro ya estaba en el cupo ${same.slot_number}`);
+      }
+    } else {
+      const empty = (await tx.query(
+        `select id, slot_number from account_slots
+          where platform_account_id = $1 and status = 'free'
+            and btrim(coalesce(member_email, '')) = '' and customer_id is null
+          order by slot_number nulls last, id limit 1 for update`,
+        [accountId]
+      )).rows[0];
+      if (!empty) throw new SheetError("Esa cuenta ya no tiene cupos vacíos.");
+      await updateMemberProfile(empty.id, { memberEmail, memberPassword, emailType: "admin" }, { tx });
+      parts.push(`cupo ${empty.slot_number} listo para vender`);
+      sellable = 1;
+    }
+  }
+
+  return { service, sellable, message: parts.length ? parts.join(" · ") : "sin cambios" };
+}
+
+/** Procesa filas de «Cargar». Cada fila en su transacción; devuelve el resultado por fila. */
+export async function loadSheetRows(rows) {
+  const results = [];
+  const sellableByService = {};
+  for (const row of rows || []) {
+    const fila = row?.fila ?? null;
+    try {
+      const r = await withTransaction((tx) => loadOneRow(tx, row || {}));
+      if (r.sellable) sellableByService[r.service] = (sellableByService[r.service] || 0) + r.sellable;
+      results.push({ fila, ok: true, mensaje: r.message });
+    } catch (error) {
+      if (!(error instanceof SheetError)) console.error("[sheets] carga fallida", fila, error);
+      results.push({ fila, ok: false, mensaje: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
+    }
+  }
+  return { results, sellableByService };
+}

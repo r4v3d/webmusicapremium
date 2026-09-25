@@ -397,7 +397,7 @@ export async function createFamilyAccount(accountData, { tx = null } = {}) {
   return tx ? run(tx) : withTransaction(run);
 }
 
-export async function updateFamilyAccount(id, updatedFields) {
+export async function updateFamilyAccount(id, updatedFields, { tx: outerTx = null } = {}) {
   const map = {
     service: "platform_code",
     masterEmail: "account_email",
@@ -407,7 +407,7 @@ export async function updateFamilyAccount(id, updatedFields) {
     renewalCost: "renewal_cost",
     renewalCurrency: "renewal_currency",
   };
-  return withTransaction(async (tx) => {
+  const run = async (tx) => {
     const old = await tx.query("select * from platform_accounts where id = $1 for update", [id]);
     if (!old.rows[0]) return null;
     const sets = ["updated_at = now()"];
@@ -421,7 +421,8 @@ export async function updateFamilyAccount(id, updatedFields) {
     const result = formatFamilyAccount(res.rows[0]);
     await logEvent("family_account", id, "update", formatFamilyAccount(old.rows[0]), result, "Family account updated", { tx });
     return result;
-  });
+  };
+  return outerTx ? run(outerTx) : withTransaction(run);
 }
 
 export async function deleteFamilyAccount(id) {
