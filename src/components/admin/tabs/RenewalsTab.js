@@ -352,7 +352,7 @@ export default function RenewalsTab() {
                   )}
                 </div>
                 
-                <div className="timeline-container" style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '12px', WebkitOverflowScrolling: 'touch' }}>
+                <div className="timeline-container" style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '12px', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity' }}>
                   {timelineDays.map((day) => {
                     const isSelected = selectedRenewalDay === day.dateStr;
                     const maxCount = Math.max(...timelineDays.map(d => d.count), 1);
@@ -383,7 +383,8 @@ export default function RenewalsTab() {
                           flexDirection: 'column',
                           justifyContent: 'space-between',
                           alignItems: 'center',
-                          minHeight: '160px'
+                          minHeight: '160px',
+                          scrollSnapAlign: 'start'
                         }}
                         className="timeline-day-card"
                       >
@@ -458,7 +459,7 @@ export default function RenewalsTab() {
 
                 {/* Table */}
                 <div className="bulk-table-container">
-                  <table className="bulk-table">
+                  <table className="bulk-table admin-table--stack renewals-table">
                     <thead>
                       <tr>
                         <th>Plataforma</th>
@@ -470,7 +471,7 @@ export default function RenewalsTab() {
                     </thead>
                     <tbody>
                       {paginatedRenewals.length === 0 ? (
-                        <tr>
+                        <tr className="admin-table-empty">
                           <td colSpan={5} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                             No se encontraron cuentas titulares que coincidan con los filtros.
                           </td>
@@ -478,26 +479,28 @@ export default function RenewalsTab() {
                       ) : (
                         paginatedRenewals.map((acc) => (
                           <tr key={acc.id}>
-                            <td>
+                            <td className="cell-primary">
                               <span className={`badge-service badge-${acc.service} family-service-tag`}>
                                 {acc.service}
                               </span>
                             </td>
-                            <td style={{ fontWeight: '500', fontSize: '0.85rem' }}>
+                            <td data-label="Titular" className="cell-email renewals-email">
                               {acc.masterEmail}
                             </td>
-                            <td>
+                            <td data-label="Vencimiento dueño" className="cell-block cell-half">
                               <input
                                 type="date"
+                                aria-label="Vencimiento del dueño"
                                 className="form-input"
                                 style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
                                 value={acc.ownerRenewalDate || ""}
                                 onChange={(e) => handleFamilyAccountChange(acc.id, "ownerRenewalDate", e.target.value)}
                               />
                             </td>
-                            <td>
+                            <td data-label="Notas" className="cell-block cell-half">
                               <input
                                 type="text"
+                                aria-label="Notas"
                                 className="form-input"
                                 style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
                                 placeholder="Notas..."
@@ -505,7 +508,8 @@ export default function RenewalsTab() {
                                 onChange={(e) => handleFamilyAccountChange(acc.id, "notes", e.target.value)}
                               />
                             </td>
-                            <td style={{ textAlign: 'center' }}>
+                            <td className="cell-actions" style={{ textAlign: 'center' }}>
+                              <div className="cell-actions-inner">
                               <button
                                 type="button"
                                 onClick={() => handleSaveRenewalInfo(acc.id)}
@@ -515,6 +519,7 @@ export default function RenewalsTab() {
                               >
                                 {savingAccountId === acc.id ? "..." : "Guardar"}
                               </button>
+                              </div>
                             </td>
                           </tr>
                         )))

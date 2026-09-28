@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAdmin } from "../AdminContext";
-import { PROVIDER_LABELS, STATUS_LABELS, ProofLightbox, formatDateTimePe, formatMoney } from "../adminUi";
+import { PROVIDER_LABELS, STATUS_LABELS, ProofLightbox, RelativeTime, formatMoney } from "../adminUi";
 
 export default function PaymentsTab() {
   const {
@@ -22,171 +22,148 @@ export default function PaymentsTab() {
     return 0;
   });
 
+  const statusMeta = (p) => {
+    if (p.status === "confirmed") return { cls: "is-confirmed", text: "Confirmado" };
+    if (p.status === "rejected") return { cls: "is-rejected", text: "Rechazado" };
+    if (p.status === "refunded") return { cls: "is-refunded", text: "Reembolsado" };
+    return { cls: "is-pending", text: STATUS_LABELS[p.status] || p.status };
+  };
+  const closeReject = () => setRejectNotesModal({ show: false, paymentId: "" });
+
   return (
-            <section className="payments-section animate-fade-in" style={{ paddingBottom: '30px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                  <h2 style={{ marginBottom: '4px' }}>Libro de pagos</h2>
-                  <p className="section-instruction">
-                    Cada cobro llega confirmado por su proveedor o por tu verificación en «Por verificar». Los botones de aprobar solo aparecen en reportes con comprobante del sistema anterior.
-                  </p>
-                </div>
-              </div>
+    <section className="admin-section animate-fade-in">
+      <div className="admin-section-head">
+        <h2>Libro de pagos</h2>
+        <p className="section-instruction">
+          Cada cobro llega confirmado por su proveedor o por tu verificación en «Por verificar». Los botones de aprobar solo aparecen en reportes con comprobante del sistema anterior.
+        </p>
+      </div>
 
-              {payments.length === 0 ? (
-                <div className="empty-panel glass-panel text-center" style={{ padding: '40px' }}>
-                  <p style={{ color: 'var(--text-muted)' }}>{isPaymentsLoading ? "Cargando pagos…" : "Todavía no hay pagos registrados."}</p>
-                </div>
-              ) : (
-                <div className="payments-list-wrapper glass-panel" style={{ overflow: 'hidden', padding: '15px' }}>
-                  <div className="table-responsive" style={{ overflowX: 'auto' }}>
-                    <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)', textAlign: 'left' }}>
-                          <th style={{ padding: '12px 10px' }}>Cliente</th>
-                          <th style={{ padding: '12px 10px' }}>Servicio</th>
-                          <th style={{ padding: '12px 10px' }}>Bruto</th>
-                          <th style={{ padding: '12px 10px' }}>Comisión</th>
-                          <th style={{ padding: '12px 10px' }}>Neto</th>
-                          <th style={{ padding: '12px 10px' }}>Proveedor</th>
-                          <th style={{ padding: '12px 10px' }}>Transacción / pedido</th>
-                          <th style={{ padding: '12px 10px' }}>Notas</th>
-                          <th style={{ padding: '12px 10px' }}>Fecha</th>
-                          <th style={{ padding: '12px 10px' }}>Estado</th>
-                          <th style={{ padding: '12px 10px', textAlign: 'center' }}>Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                {pendingFirst.map((p) => {
-                          const isPending = p.status === "pending" && p.isLegacy;
-                          const isConfirmed = p.status === "confirmed";
-                          const isRejected = p.status === "rejected";
+      {payments.length === 0 ? (
+        <div className="empty-panel glass-panel text-center">
+          <p>{isPaymentsLoading ? "Cargando pagos…" : "Todavía no hay pagos registrados."}</p>
+        </div>
+      ) : (
+        <div className="table-responsive glass-panel">
+          <table className="admin-table admin-table--stack payments-table">
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Servicio</th>
+                <th className="num">Bruto</th>
+                <th className="num">Comisión</th>
+                <th className="num">Neto</th>
+                <th>Proveedor</th>
+                <th>Transacción / pedido</th>
+                <th>Notas</th>
+                <th>Fecha</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingFirst.map((p) => {
+                const isPending = p.status === "pending" && p.isLegacy;
+                const status = statusMeta(p);
+                const busy = actionPaymentId === p.id;
+                return (
+                  <tr key={p.id}>
+                    <td className="cell-primary">
+                      <strong>{p.clientName}</strong>
+                      <span className="cell-sub">{p.clientCode}</span>
+                    </td>
+                    <td data-label="Servicio">
+                      {p.service ? <span className={`badge-service badge-${p.service}`}>{p.service.toUpperCase()}</span> : "—"}
+                    </td>
+                    <td data-label="Bruto" className="num"><strong>{formatMoney(p.amount, p.currency)}</strong></td>
+                    <td data-label="Comisión" className="num text-muted">{p.fee ? formatMoney(p.fee, p.currency) : "—"}</td>
+                    <td data-label="Neto" className="num">{formatMoney(p.net, p.currency)}</td>
+                    <td data-label="Proveedor" className="cell-small">
+                      <span>
+                        {PROVIDER_LABELS[p.provider] || p.paymentMethod || "—"}
+                        {p.confirmedBy && p.confirmedBy !== "system" && <span className="cell-sub">por {p.confirmedBy}</span>}
+                      </span>
+                    </td>
+                    <td data-label="Transacción" className="cell-small cell-mono payments-txn">
+                      <span>
+                        {p.providerTxnId || "—"}
+                        {p.orderId && <span className="cell-sub payments-order">#{p.orderId}</span>}
+                        {p.legacyProofUrl && (
+                          <button type="button" className="proof-thumb-btn payments-proof" onClick={() => setProofUrl(p.legacyProofUrl)}>
+                            Ver comprobante antiguo
+                          </button>
+                        )}
+                      </span>
+                    </td>
+                    <td data-label="Notas" className="cell-small payments-notes">{p.notes || "-"}</td>
+                    <td data-label="Fecha" className="cell-small nowrap text-muted"><RelativeTime value={p.createdAt} /></td>
+                    <td data-label="Estado"><span className={`payment-status ${status.cls}`}>{status.text}</span></td>
+                    {isPending ? (
+                      <td className="cell-actions">
+                        <div className="cell-actions-inner">
+                          <button
+                            type="button"
+                            onClick={() => handleProcessPayment(p.id, "confirm")}
+                            className="btn btn-approve admin-btn-compact"
+                            disabled={busy}
+                          >
+                            {busy ? "..." : "Aprobar"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRejectNotesModal({ show: true, paymentId: p.id })}
+                            className="btn btn-secondary btn-reject admin-btn-compact"
+                            disabled={busy}
+                          >
+                            Rechazar
+                          </button>
+                        </div>
+                      </td>
+                    ) : (
+                      <td data-label="Acciones" className="cell-small text-muted">{p.status === "confirmed" ? "Asentado" : "—"}</td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-                          let statusStyle = { color: '#eab308', background: 'rgba(234, 179, 8, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
-                          let statusText = STATUS_LABELS[p.status] || p.status;
-
-                          if (isConfirmed) {
-                            statusStyle = { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
-                            statusText = "Confirmado";
-                          } else if (isRejected) {
-                            statusStyle = { color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
-                            statusText = "Rechazado";
-                          } else if (p.status === "refunded") {
-                            statusStyle = { color: '#60a5fa', background: 'rgba(96, 165, 250, 0.1)', padding: '3px 8px', borderRadius: '4px', fontWeight: 'bold' };
-                            statusText = "Reembolsado";
-                          }
-
-                          return (
-                            <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
-                              <td style={{ padding: '12px 10px' }}>
-                                <strong style={{ color: '#fff', display: 'block' }}>{p.clientName}</strong>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{p.clientCode}</span>
-                              </td>
-                              <td style={{ padding: '12px 10px', textTransform: 'capitalize' }}>
-                                <span className={`platform-badge ${p.service}`} style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-                                  {p.service}
-                                </span>
-                              </td>
-                              <td style={{ padding: '12px 10px', fontWeight: 'bold', color: '#fff' }}>
-                                {formatMoney(p.amount, p.currency)}
-                              </td>
-                              <td style={{ padding: '12px 10px', color: 'var(--text-muted)' }}>
-                                {p.fee ? formatMoney(p.fee, p.currency) : "—"}
-                              </td>
-                              <td style={{ padding: '12px 10px', color: '#fff' }}>
-                                {formatMoney(p.net, p.currency)}
-                              </td>
-                              <td style={{ padding: '12px 10px', fontSize: '0.75rem' }}>
-                                {PROVIDER_LABELS[p.provider] || p.paymentMethod || "—"}
-                                {p.confirmedBy && p.confirmedBy !== "system" && (
-                                  <span style={{ display: 'block', color: 'var(--text-muted)' }}>por {p.confirmedBy}</span>
-                                )}
-                              </td>
-                              <td style={{ padding: '12px 10px', fontSize: '0.75rem', fontFamily: 'monospace', wordBreak: 'break-all', maxWidth: '160px' }}>
-                                {p.providerTxnId || "—"}
-                                {p.orderId && <span style={{ display: 'block', color: 'var(--accent-cyan)' }}>#{p.orderId}</span>}
-                                {p.legacyProofUrl && (
-                                  <button type="button" className="proof-thumb-btn" onClick={() => setProofUrl(p.legacyProofUrl)}>
-                                    <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Ver comprobante antiguo</span>
-                                  </button>
-                                )}
-                              </td>
-                              <td style={{ padding: '12px 10px', fontSize: '0.75rem', color: '#ccc', maxWidth: '180px', wordBreak: 'break-word' }}>
-                                {p.notes || "-"}
-                              </td>
-                              <td style={{ padding: '12px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {formatDateTimePe(p.createdAt)}
-                              </td>
-                              <td style={{ padding: '12px 10px' }}>
-                                <span style={statusStyle}>{statusText}</span>
-                              </td>
-                              <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                                {isPending ? (
-                                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
-                                    <button
-                                      onClick={() => handleProcessPayment(p.id, "confirm")}
-                                      className="btn btn-primary"
-                                      style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '4px', background: 'var(--green-theme, #10b981)', border: 'none' }}
-                                      disabled={actionPaymentId === p.id}
-                                    >
-                                      {actionPaymentId === p.id ? "..." : "Aprobar"}
-                                    </button>
-                                    <button
-                                      onClick={() => setRejectNotesModal({ show: true, paymentId: p.id })}
-                                      className="btn btn-secondary"
-                                      style={{ padding: '4px 10px', fontSize: '0.75rem', borderRadius: '4px', borderColor: '#ef4444', color: '#ef4444' }}
-                                      disabled={actionPaymentId === p.id}
-                                    >
-                                      Rechazar
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{p.status === "confirmed" ? "Asentado" : "—"}</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Reject Notes Modal */}
-              {rejectNotesModal.show && (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                  <div className="glass-panel p-6" style={{ maxWidth: '400px', width: '100%', margin: '0 15px', background: '#0f0f13', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px' }}>
-                    <h3 style={{ marginBottom: '8px', color: '#fff' }}>Rechazar Pago</h3>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '15px', lineHeight: '1.4' }}>
-                      Ingresa el motivo del rechazo. El cliente podrá verlo en su panel para volver a reportarlo con los datos correctos.
-                    </p>
-                    <textarea
-                      style={{ width: '100%', height: '100px', background: 'rgba(0,0,0,0.4)', color: '#fff', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '10px', fontSize: '0.8rem', marginBottom: '15px', resize: 'none' }}
-                      placeholder="ej. El monto no coincide con la transferencia / Operación no encontrada en la cuenta."
-                      value={rejectNotesInput}
-                      onChange={(e) => setRejectNotesInput(e.target.value)}
-                    />
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '6px 14px', fontSize: '0.8rem' }}
-                        onClick={() => setRejectNotesModal({ show: false, paymentId: "" })}
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        style={{ padding: '6px 14px', fontSize: '0.8rem', background: '#ef4444', border: 'none' }}
-                        onClick={() => handleProcessPayment(rejectNotesModal.paymentId, "reject", rejectNotesInput)}
-                      >
-                        Confirmar Rechazo
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <ProofLightbox url={proofUrl} onClose={() => setProofUrl("")} />
-            </section>
-          );
+      {rejectNotesModal.show && (
+        <div className="admin-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reject-payment-title">
+          <div className="admin-modal-container glass-panel admin-confirm-dialog">
+            <div className="modal-header-bar">
+              <h3 id="reject-payment-title">Rechazar pago</h3>
+            </div>
+            <div className="modal-body-form">
+              <p className="section-instruction">
+                Ingresa el motivo del rechazo. El cliente podrá verlo en su panel para volver a reportarlo con los datos correctos.
+              </p>
+              <textarea
+                className="form-input form-textarea"
+                rows={4}
+                placeholder="ej. El monto no coincide con la transferencia / Operación no encontrada en la cuenta."
+                value={rejectNotesInput}
+                onChange={(e) => setRejectNotesInput(e.target.value)}
+              />
+            </div>
+            <div className="modal-footer-actions">
+              <button type="button" className="btn btn-secondary" onClick={closeReject}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger-solid"
+                onClick={() => handleProcessPayment(rejectNotesModal.paymentId, "reject", rejectNotesInput)}
+              >
+                Confirmar rechazo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <ProofLightbox url={proofUrl} onClose={() => setProofUrl("")} />
+    </section>
+  );
 }
