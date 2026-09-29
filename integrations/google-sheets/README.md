@@ -114,19 +114,18 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 
 | Columna | Qué es |
 |---|---|
-| CORREO TITULAR | Cambiarlo en cualquier fila cambia el titular de sus 5 cupos. La clave del titular no se muestra: es la de `DEFAULT_TITULAR_PASSWORD`. |
+| CORREO TITULAR | Para **renombrar** un titular, cambia el correo en sus 5 filas a la vez. Cambiarlo en una sola fila no hace nada (sale ✗ y vuelve): para pasar un cliente a otro titular usa *Transferir* en el panel. La clave del titular no se muestra: es la de `DEFAULT_TITULAR_PASSWORD`. |
 | NOMBRE | WhatsApp (número) o usuario (`@…`) del cliente. **Escribirlo ocupa el cupo** (queda Activo). **Borrarlo lo libera**: se borran PAGÓ y RENOVACIÓN; el correo y la contraseña se quedan para volver a venderlo. En verde = cupo libre. |
 | CORREO CLIENTE / CONTRASEÑA | El acceso del cupo. |
 | PAGÓ | Lo que paga el cliente, en soles. Necesita NOMBRE. |
 | RENOVACIÓN | Día/mes/año (`08/11/26`). En rojo si ya venció, en naranja si vence en 3 días o menos. Necesita NOMBRE. |
 | Sync | La pone el sistema: `✓ Guardado` ya está en el panel · `↻ Panel` cambió desde el panel · `✗` no se guardó, con el motivo (la celda vuelve sola al valor del panel). |
 
-- **Pegar muchas filas de golpe** (por ejemplo, copiadas de tus hojas antiguas): pégalas **debajo de la última fila**, en las columnas A–F. Cada fila con CORREO TITULAR, CORREO CLIENTE y CONTRASEÑA se carga sola:
+- **Pegar muchas filas de golpe** (por ejemplo, copiadas de tus hojas antiguas): pégalas **debajo de la última fila**, en las columnas A–F, nunca encima de filas que ya existen. Puedes pegar todo junto o columna por columna: mientras pegas, nada se mueve y *Sync* dice «Fila nueva». Cuando termines, usa **MusicaPremium → Cargar filas nuevas**:
   - Si el titular no existe, se crea con 5 cupos y la clave de siempre. Un texto después del correo, como `correo@gmail.com - IO`, queda como nota del titular.
   - La fila ocupa el primer cupo libre de su titular, con su NOMBRE, PAGÓ y RENOVACIÓN.
   - Si el correo cliente ya estaba en ese titular, se actualiza ese cupo: pegar dos veces no duplica.
   - Las filas que entran reaparecen ordenadas y con su ID. Las que no, se quedan al final con el motivo en *Sync* (por ejemplo, un titular con más de 5 clientes).
-  - Si no se cargaron solas (pegado muy grande, o filas que completaste después), usa **MusicaPremium → Cargar filas nuevas**.
 - **Fechas:** la hoja debe estar en formato día/mes. En **File → Settings → Locale** elige **Peru** *antes* de pegar. Con el formato de EE.UU., `03/10/26` se leería como 10 de marzo; por eso, si detecta ese formato, la hoja no carga nada y te avisa.
 - **Agregar un titular vacío:** menú **MusicaPremium → Agregar titular…** (o **+ Titular** en el panel). Aparecen sus 5 filas libres.
 - **Borrar** (selecciona las celdas de A a F y pulsa Supr):

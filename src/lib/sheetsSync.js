@@ -234,12 +234,13 @@ async function applyOneEdit(tx, slotId, changes) {
 
   // Datos del titular: valen para toda la cuenta.
   const acc = {};
+  // Otro titular en la fila no renombra la cuenta aquí: applySheetEdits solo
+  // la renombra si cambiaron TODAS sus filas al mismo correo (pegar una columna
+  // desalineada no debe renombrar cuentas en cadena).
+  let renameTo = null;
   if (has("correoTitular")) {
     const email = parseEmailField(changes.correoTitular, "Correo titular", { required: true });
-    if (email !== cur.account_email) {
-      await assertTitularFree(tx, email, cur.platform_account_id);
-      acc.masterEmail = email;
-    }
+    if (email !== cur.account_email) renameTo = email;
   }
   if (has("claveTitular")) {
     const password = text(changes.claveTitular);
@@ -270,7 +271,7 @@ async function applyOneEdit(tx, slotId, changes) {
 
   // Datos del cupo.
   if (has("nombre")) changes = nombreToChanges(changes, cur);
-  if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged, clearTitular };
+  if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged, clearTitular, renameTo };
   if (cur.reserved_live) {
     throw new SheetError("Este cupo está apartado por una compra en curso. Espera unos minutos y vuelve a editarlo.");
   }
@@ -329,7 +330,7 @@ async function applyOneEdit(tx, slotId, changes) {
   }
 
   if (Object.keys(upd).length) await updateMemberProfile(cur.id, upd, { tx });
-  return { accountId: cur.platform_account_id, accountChanged, clearTitular };
+  return { accountId: cur.platform_account_id, accountChanged, clearTitular, renameTo };
 }
 
 /**
@@ -342,6 +343,7 @@ export async function applySheetEdits(edits) {
   const touchedSlots = new Set();
   const touchedAccounts = new Set();
   const clearedByAccount = new Map(); // cuenta → cupos donde se vació el titular
+  const renameByAccount = new Map(); // cuenta → { cupos, correos nuevos pedidos }
 
   for (const edit of edits || []) {
     const id = text(edit?.id);
@@ -361,6 +363,12 @@ export async function applySheetEdits(edits) {
         const key = String(r.accountId);
         if (!clearedByAccount.has(key)) clearedByAccount.set(key, new Set());
         clearedByAccount.get(key).add(id);
+      }
+      if (r.renameTo) {
+        const key = String(r.accountId);
+        if (!renameByAccount.has(key)) renameByAccount.set(key, { ids: new Set(), targets: new Set() });
+        renameByAccount.get(key).ids.add(id);
+        renameByAccount.get(key).targets.add(r.renameTo);
       }
       results.push({ id, ok: true });
     } catch (error) {
@@ -393,6 +401,39 @@ export async function applySheetEdits(edits) {
         : "el titular no se borró: para borrarlo, limpia sus 5 filas completas a la vez";
     }
     for (const r of results) if (r.ok && clearedIds.has(r.id)) r.nota = nota;
+  }
+
+  // Renombrar un titular: solo si TODAS sus filas llegaron con el mismo correo nuevo.
+  for (const [accountId, { ids, targets }] of renameByAccount) {
+    const slotIds = (await query(
+      "select id::text as id from account_slots where platform_account_id::text = $1",
+      [accountId]
+    )).rows.map((s) => s.id);
+    let error = null;
+    if (targets.size === 1 && slotIds.length > 0 && slotIds.every((s) => ids.has(s))) {
+      const [target] = targets;
+      try {
+        await withTransaction(async (tx) => {
+          await assertTitularFree(tx, target, accountId);
+          await updateFamilyAccount(accountId, { masterEmail: target }, { tx });
+        });
+        touchedAccounts.add(accountId);
+      } catch (e) {
+        if (!(e instanceof SheetError)) console.error("[sheets] renombrar titular", accountId, e);
+        error = `El titular no cambió: ${e instanceof SheetError ? e.message : "error interno"} El resto de la fila sí se guardó.`;
+      }
+    } else {
+      error = "El titular no cambió: para renombrarlo, cambia el correo en sus 5 filas a la vez. " +
+        "Para pasar un cliente a otro titular usa Transferir en el panel. El resto de la fila sí se guardó.";
+    }
+    if (!error) continue;
+    for (const r of results) {
+      if (r.ok && ids.has(r.id)) {
+        r.ok = false;
+        r.error = error;
+        delete r.nota;
+      }
+    }
   }
 
   if (touchedAccounts.size) {

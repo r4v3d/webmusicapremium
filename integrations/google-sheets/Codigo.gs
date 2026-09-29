@@ -8,14 +8,14 @@
  *   CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN
  * Un cupo por fila. Lo que edites aquí se guarda en el panel en segundos, y lo
  * que cambie en el panel (ventas, renovaciones, ediciones) aparece aquí solo.
- * Las filas que pegues abajo sin ID se cargan al panel (titular nuevo = 5 cupos).
+ * Las filas que pegues abajo sin ID se cargan al panel con el menú «Cargar filas nuevas».
  *
  * La clave secreta vive en las propiedades del script, nunca en este código.
  */
 
 var HOJA = 'Clientes';
 var ETIQUETA = 'MusicaPremium';
-var MSG_FALTAN = 'Fila nueva: se carga cuando tenga CORREO TITULAR, CORREO CLIENTE y CONTRASEÑA (o usa el menú ' + ETIQUETA + ' → Cargar filas nuevas).';
+var MSG_PENDIENTE = 'Fila nueva: cuando termines de pegar, usa el menú ' + ETIQUETA + ' → Cargar filas nuevas.';
 var LOTE = 50; // filas nuevas por llamada al servidor
 
 // Columnas. fija = la pone el sistema; local = solo existe en la hoja; oculta = no se ve.
@@ -214,7 +214,7 @@ function mensaje_(err) {
 
 // ---------------------------------------------------------------- Pestaña «Clientes»
 
-/** Activador instalable de edición: manda al panel lo que cambiaste o pegaste. */
+/** Activador instalable de edición: manda al panel lo que cambiaste en filas que ya existen. */
 function alEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
@@ -236,15 +236,17 @@ function alEditar(e) {
     var valores = sh.getRange(r0, 1, n, COLS.length).getValues();
     var edits = [];
     var enviados = {};
-    var nuevas = [];
-    var avisos = [];
+    // Filas nuevas (sin ID): no se cargan solas. Si se cargaran al completarse,
+    // la hoja se reordenaría mientras pegas columna por columna y lo siguiente
+    // caería en otras filas. Se cargan todas juntas con el menú.
+    var syncCol = sh.getRange(r0, COL_SYNC + 1, n, 1);
+    var syncVals = syncCol.getValues();
+    var hayNuevas = false;
     for (var i = 0; i < n; i++) {
       var fila = valores[i];
       var id = idDe_(fila);
       if (!id) {
-        if (!tieneDatos_(fila)) continue;
-        if (lista_(fila)) nuevas.push(filaParaCargar_(fila, r0 + i));
-        else avisos.push(r0 + i);
+        if (tieneDatos_(fila)) { syncVals[i][0] = MSG_PENDIENTE; hayNuevas = true; }
         continue;
       }
       var changes = {};
@@ -252,32 +254,22 @@ function alEditar(e) {
       edits.push({ id: id, changes: changes });
       enviados[id] = fila;
     }
-    avisos.forEach(function (row) { sh.getRange(row, COL_SYNC + 1).setValue(MSG_FALTAN); });
+    if (hayNuevas) syncCol.setValues(syncVals);
+    if (!edits.length) return;
 
-    var resp = null;
-    if (edits.length) {
-      try {
-        resp = llamar_({ action: 'edit', edits: edits });
-      } catch (err) {
-        marcarFilas_(sh, Object.keys(enviados), '✗ No se guardó: ' + mensaje_(err));
-      }
+    var resp;
+    try {
+      resp = llamar_({ action: 'edit', edits: edits });
+    } catch (err) {
+      marcarFilas_(sh, Object.keys(enviados), '✗ No se guardó: ' + mensaje_(err));
+      return;
     }
-    if (nuevas.length) {
-      var fechas = avisoFechas_(nuevas);
-      if (!fechas) {
-        cargarNuevas_(sh, nuevas); // termina con una recarga completa, que ya incluye las ediciones de arriba
-        return;
-      }
-      nuevas.forEach(function (f) { sh.getRange(f.fila, COL_SYNC + 1).setValue('✗ ' + fechas); });
-    }
-    if (resp) {
-      var hora = hora_();
-      var marcas = {};
-      (resp.results || []).forEach(function (r) {
-        marcas[r.id] = r.ok ? '✓ Guardado ' + hora + (r.nota ? ' · ' + r.nota : '') : '✗ ' + r.error;
-      });
-      aplicarFilas_(sh, resp.rows || [], resp.deleted || [], { enviados: enviados, marcas: marcas });
-    }
+    var hora = hora_();
+    var marcas = {};
+    (resp.results || []).forEach(function (r) {
+      marcas[r.id] = r.ok ? '✓ Guardado ' + hora + (r.nota ? ' · ' + r.nota : '') : '✗ ' + r.error;
+    });
+    aplicarFilas_(sh, resp.rows || [], resp.deleted || [], { enviados: enviados, marcas: marcas });
   } finally {
     lock.releaseLock();
   }
@@ -355,13 +347,6 @@ function idDe_(fila) {
 
 function tieneDatos_(fila) {
   return fila.slice(0, N_VISIBLES).some(function (v) { return v !== ''; });
-}
-
-/** Lista para cargarse sola al pegarla: titular, correo cliente y contraseña. */
-function lista_(fila) {
-  return ['correoTitular', 'correoMiembro', 'claveMiembro'].every(function (k) {
-    return String(fila[indice_(k)]).trim() !== '';
-  });
 }
 
 function filaParaCargar_(fila, num) {
@@ -493,7 +478,7 @@ function recargarSinLock_(sh) {
     return f;
   });
   sinId.forEach(function (r) {
-    if (String(r[COL_SYNC]).indexOf('✗') !== 0) r[COL_SYNC] = MSG_FALTAN;
+    if (String(r[COL_SYNC]).indexOf('✗') !== 0) r[COL_SYNC] = MSG_PENDIENTE;
     salida.push(r);
   });
 
