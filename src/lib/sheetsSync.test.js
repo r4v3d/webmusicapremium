@@ -414,3 +414,39 @@ describe("borrar desde la hoja (celdas vacías)", () => {
     expect(filas.find((f) => f.id === String(slots[0].id)).nombre).toBe("51999000111");
   });
 });
+
+describe("cambiar el CORREO TITULAR en filas existentes", () => {
+  it("en una sola fila no renombra la cuenta, pero guarda el resto de la fila", async () => {
+    const { acc, slots } = await seedAccount({ members: 2 });
+    const id = String(slots[0].id);
+    const r = await applySheetEdits([{ id, changes: { correoTitular: "otro@x.com", claveMiembro: "nueva" } }]);
+    expect(r.results[0]).toMatchObject({ id, ok: false, error: expect.stringMatching(/5 filas.*Transferir.*sí se guardó/) });
+    const fila = r.rows.find((x) => x.id === id);
+    expect(fila).toMatchObject({ correoTitular: acc.masterEmail, claveMiembro: "nueva" });
+  });
+
+  it("en sus 5 filas con el mismo correo, renombra el titular", async () => {
+    const { slots } = await seedAccount({ members: 2 });
+    const r = await applySheetEdits(slots.map((s) => ({ id: String(s.id), changes: { correoTitular: "renombrado@x.com" } })));
+    expect(r.results.every((x) => x.ok)).toBe(true);
+    expect(r.rows.filter((x) => x.correoTitular === "renombrado@x.com")).toHaveLength(5);
+  });
+
+  it("pegar una columna de titulares desalineada no renombra ninguna cuenta", async () => {
+    const a = await seedAccount({ members: 2 });
+    const b = await seedAccount({ members: 2 });
+    // Las 5 filas de A reciben titulares distintos (como una columna pegada fuera de orden).
+    const edits = a.slots.map((s, i) => ({ id: String(s.id), changes: { correoTitular: i < 3 ? b.acc.masterEmail : "x@x.com" } }));
+    const r = await applySheetEdits(edits);
+    expect(r.results.every((x) => !x.ok)).toBe(true);
+    const cuentas = (await query("select account_email from platform_accounts order by id")).rows.map((x) => x.account_email);
+    expect(cuentas).toEqual([a.acc.masterEmail, b.acc.masterEmail]);
+  });
+
+  it("renombrar a un titular que ya existe se rechaza con el motivo", async () => {
+    const a = await seedAccount({ members: 1 });
+    const b = await seedAccount({ members: 1 });
+    const r = await applySheetEdits(a.slots.map((s) => ({ id: String(s.id), changes: { correoTitular: b.acc.masterEmail } })));
+    expect(r.results.every((x) => !x.ok && /ya existe/.test(x.error))).toBe(true);
+  });
+});
