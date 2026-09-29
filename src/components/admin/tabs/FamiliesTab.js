@@ -4,11 +4,11 @@ import { useRef, useState } from "react";
 import { useAdmin } from "../AdminContext";
 import { CopyIcon, PlusIcon, TrashIcon, getCountryFlag } from "../adminHelpers";
 import { SecretField } from "../adminUi";
+import SlotsGrid from "./SlotsGrid";
 
 export default function FamiliesTab() {
   const {
     activeSubTab,
-    allVisibleSelected,
     bulkAction,
     bulkDateValue,
     bulkPriceValue,
@@ -16,10 +16,8 @@ export default function FamiliesTab() {
     clients,
     copiedId,
     familyAccounts,
-    filteredSlots,
     formatDisplayDate,
     getClientMemberships,
-    getExpiryTag,
     handleBulkAction,
     handleCopyToClipboard,
     handleDeleteFamily,
@@ -46,9 +44,7 @@ export default function FamiliesTab() {
     tableExpiryFilter,
     tablePlatformFilter,
     tableSearchQuery,
-    tableStatusFilter,
-    toggleSelectAllVisible,
-    toggleSelectSlot
+    tableStatusFilter
   } = useAdmin();
   const detailRef = useRef(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -310,139 +306,7 @@ export default function FamiliesTab() {
                   </select>
                 </div>
 
-                {/* Table list of slots */}
-                {filteredSlots.length === 0 ? (
-                  <div className="empty-panel glass-panel text-center">
-                    <p>No se encontraron cupos/ranuras con los filtros seleccionados.</p>
-                  </div>
-                ) : (
-                  <div className="bulk-table-container">
-                    <table className="bulk-table admin-table--stack families-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '40px' }}>
-                            <label className="custom-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={allVisibleSelected}
-                                onChange={toggleSelectAllVisible}
-                              />
-                              <span className="checkmark"></span>
-                            </label>
-                          </th>
-                          <th>Plataforma</th>
-                          <th>Correo Maestro</th>
-                          <th>Correo Ranura</th>
-                          <th>Contraseña</th>
-                          <th>Cliente / WhatsApp</th>
-                          <th>Precio</th>
-                          <th>Vencimiento</th>
-                          <th>Estado</th>
-                          <th>Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredSlots.map(slot => {
-                          const isSelected = selectedSlotIds.includes(slot.id);
-                          const expiryInfo = getExpiryTag(slot.renewalDate);
-                          const statusNames = {
-                            active: "Activo",
-                            expired: "Vencido",
-                            pending_payment: "Falta Pago",
-                            free: "Disponible"
-                          };
-
-                          return (
-                            <tr key={slot.id} className={isSelected ? "selected" : ""}>
-                              <td className="cell-half families-cell-check">
-                                <label className="custom-checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleSelectSlot(slot.id)}
-                                  />
-                                  <span className="checkmark"></span>
-                                </label>
-                              </td>
-                              <td className="cell-half families-cell-service">
-                                <span className={`badge-service badge-${slot.service}`} style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                                  {slot.service}
-                                </span>
-                              </td>
-                              <td data-label="Maestro" className="families-cell-ellipsis" title={slot.masterEmail}>
-                                {slot.masterEmail}
-                              </td>
-                              <td data-label="Ranura" className="families-cell-ellipsis" style={{ fontWeight: '600' }} title={slot.memberEmail || "Disponible"}>
-                                {slot.memberEmail ? slot.memberEmail : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Disponible</span>}
-                              </td>
-                              <td data-label="Contraseña">
-                                {slot.memberPassword ? (
-                                  <SecretField
-                                    value={slot.memberPassword}
-                                    copyId={`tbl-pass-${slot.id}`}
-                                    copiedId={copiedId}
-                                    onCopy={handleCopyToClipboard}
-                                    compact
-                                  />
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)' }}>-</span>
-                                )}
-                              </td>
-                              <td data-label="Cliente">
-                                {slot.clientId ? (
-                                  <div className="families-client" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                     <span style={{ fontWeight: '600' }}>
-                                       {slot.clientId.customerCode || "CLI-XXXXXX"}{slot.clientId.nickname ? ` | ${slot.clientId.nickname}` : ""}
-                                     </span>
-                                    <a
-                                      href={`https://wa.me/${slot.clientId.currentWhatsApp.replace(/[^0-9]/g, "")}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="client-phone-link"
-                                      style={{ fontSize: '0.75rem' }}
-                                    >
-                                      {getCountryFlag(slot.clientId.currentWhatsApp)} {slot.clientId.currentWhatsApp}
-                                    </a>
-                                  </div>
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Sin Cliente</span>
-                                )}
-                              </td>
-                              <td data-label="Precio" className="num">
-                                {slot.status !== "free" ? `S/. ${slot.pricePen}` : "-"}
-                              </td>
-                              <td data-label="Vencimiento">
-                                {slot.status !== "free" && slot.renewalDate ? (
-                                  <span className={`expiry-tag ${expiryInfo.className}`}>
-                                    {expiryInfo.label}
-                                  </span>
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)' }}>-</span>
-                                )}
-                              </td>
-                              <td data-label="Estado">
-                                <span className={`status-badge-mini ${slot.status}`}>
-                                  {statusNames[slot.status] || slot.status}
-                                </span>
-                              </td>
-                              <td className="cell-actions">
-                                <div className="cell-actions-inner">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenEditSlotModal(slot)}
-                                    className="btn-slot-edit"
-                                  >
-                                    Editar
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <SlotsGrid />
 
                 {/* Floating Actions Bar */}
                 <div className={`floating-bulk-bar ${selectedSlotIds.length > 0 ? "visible" : ""}`}>

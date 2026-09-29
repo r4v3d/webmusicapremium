@@ -4,11 +4,42 @@
 // ejecuta musicapremium-worker.service.
 import { runReconciliation, createWorkerState } from "./src/lib/reconcile.js";
 import { closePool, withLeaderLock } from "./src/lib/workerLock.js";
+import { flushSheetOutbox, listenSheetOutbox } from "./src/lib/sheetsPush.js";
+import { sheetsPushConfigured } from "./src/lib/sheetsAuth.js";
 
 const INTERVAL_MS = Number(process.env.WORKER_INTERVAL_MS || 20_000);
 const state = createWorkerState();
 let running = false;
 let stopping = false;
+
+// Google Sheets: los cambios del inventario salen hacia la hoja en segundos.
+// El aviso (NOTIFY) se agrupa 1 s para mandar una ráfaga de cambios de una vez.
+let sheetsBusy = false;
+let sheetsAgain = false;
+let sheetsTimer = null;
+let stopSheetsListen = null;
+
+async function pushSheets() {
+  if (sheetsBusy) { sheetsAgain = true; return; }
+  sheetsBusy = true;
+  try {
+    do {
+      sheetsAgain = false;
+      const r = await flushSheetOutbox();
+      if (r.pushed || r.deleted) console.log("[worker] hoja actualizada", JSON.stringify(r));
+      if (r.more) sheetsAgain = true;
+    } while (sheetsAgain && !stopping);
+  } catch (error) {
+    console.error("[worker] Google Sheets:", error.message);
+  } finally {
+    sheetsBusy = false;
+  }
+}
+
+function kickSheets() {
+  if (stopping || sheetsTimer) return;
+  sheetsTimer = setTimeout(() => { sheetsTimer = null; pushSheets(); }, 1_000);
+}
 
 async function tick() {
   if (running || stopping) return;          // nunca dos ciclos solapados
@@ -24,6 +55,8 @@ async function tick() {
   } finally {
     running = false;
   }
+  // Respaldo del aviso instantáneo: cada ciclo revisa la cola de la hoja.
+  await pushSheets();
 }
 
 // `node worker.cjs --once`: un solo ciclo con su resumen, para diagnosticar a mano.
@@ -44,6 +77,10 @@ let timer = null;
 function startLoop() {
   timer = setInterval(tick, INTERVAL_MS);
   tick();
+  if (sheetsPushConfigured()) {
+    stopSheetsListen = listenSheetOutbox(kickSheets);
+    console.log("[worker] Google Sheets activo: los cambios del panel se envían a la hoja");
+  }
   console.log(`[worker] iniciado, ciclo cada ${INTERVAL_MS} ms`);
 }
 
@@ -52,8 +89,10 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     console.log("[worker] apagando");
     stopping = true;
     clearInterval(timer);
+    clearTimeout(sheetsTimer);
+    await stopSheetsListen?.();
     const deadline = Date.now() + 20_000;
-    while (running && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+    while ((running || sheetsBusy) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
     await closePool().catch(() => {});
     process.exit(0);
   });
