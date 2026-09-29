@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../test/pgliteDb";
 import { createFamilyAccount, createMemberProfile, getOrCreateClient, updateMemberProfile } from "./db";
-import { applySheetEdits, buildInventoryRows, createTitular, loadSheetRows } from "./sheetsSync";
+import { applySheetEdits, buildInventoryRows, createTitular, importSheetRows, loadSheetRows } from "./sheetsSync";
 import { signSheets, verifySheetsRequest } from "./sheetsAuth";
 import { __resetSheetsPushState, flushSheetOutbox } from "./sheetsPush";
 import { query } from "./pg";
@@ -315,5 +315,61 @@ describe("marca de cambios de la tabla del panel", () => {
     await query("update account_slots set member_password = 'x' where id = $1", [slots[0].id]);
     await clearOutbox();
     expect(Number(await stamp())).toBeGreaterThan(Number(a));
+  });
+});
+
+describe("importSheetRows (filas pegadas sin ID en «Clientes»)", () => {
+  beforeEach(() => { vi.stubEnv("DEFAULT_TITULAR_PASSWORD", "clave-de-siempre"); });
+
+  const fila = (n, extra) => ({ fila: n, correoTitular: "g.etmush.room7572@gmail.com - IO", ...extra });
+
+  it("crea el titular, llena sus cupos en orden y no duplica al pegar dos veces", async () => {
+    const rows = [
+      fila(2, { nombre: "950015479", correoMiembro: "a@x.com", claveMiembro: "278945", precio: "25", vence: "01/02/27" }),
+      fila(3, { nombre: "@AlexanderV", correoMiembro: "b@x.com", claveMiembro: "123456", precio: "", vence: "22/11/26" }),
+      fila(4, { nombre: "", correoMiembro: "libre@x.com", claveMiembro: "999" }),
+    ];
+    let r = await importSheetRows(rows);
+    expect(r.results.map((x) => x.ok)).toEqual([true, true, true]);
+    expect(r.sellableByService).toEqual({ tidal: 1 });
+    expect(r.rows).toHaveLength(5);
+    const byEmail = Object.fromEntries(r.rows.map((x) => [x.correoMiembro, x]));
+    expect(r.rows[0]).toMatchObject({ correoTitular: "g.etmush.room7572@gmail.com", claveTitular: "clave-de-siempre", notasTitular: "IO" });
+    expect(byEmail["a@x.com"]).toMatchObject({ cupo: 1, nombre: "950015479", precio: 25, vence: "2027-02-01", estado: "Activo" });
+    expect(byEmail["b@x.com"]).toMatchObject({ cupo: 2, nombre: "@AlexanderV", vence: "2026-11-22", estado: "Activo" });
+    expect(byEmail["libre@x.com"]).toMatchObject({ cupo: 3, nombre: "", estado: "Libre" });
+
+    // Pegar otra vez las mismas filas: actualiza, no ocupa más cupos.
+    r = await importSheetRows([fila(2, { nombre: "950015479", correoMiembro: "a@x.com", claveMiembro: "nueva", precio: "30", vence: "01/02/27" })]);
+    expect(r.results[0].ok).toBe(true);
+    expect(r.sellableByService).toEqual({});
+    const a = r.rows.find((x) => x.correoMiembro === "a@x.com");
+    expect(a).toMatchObject({ cupo: 1, claveMiembro: "nueva", precio: 30 });
+    expect(r.rows.filter((x) => x.correoMiembro).length).toBe(3);
+  });
+
+  it("no cambia la clave de un titular que ya existe", async () => {
+    const { acc } = await seedAccount({ members: 0 });
+    const r = await importSheetRows([{ fila: 2, correoTitular: acc.masterEmail, nombre: "912345678", correoMiembro: "c@x.com", claveMiembro: "1" }]);
+    expect(r.results[0].ok).toBe(true);
+    expect(r.rows[0].claveTitular).toBe("tpass");
+  });
+
+  it("una fila con error no frena las demás y dice el motivo", async () => {
+    const r = await importSheetRows([
+      fila(2, { nombre: "912345678", correoMiembro: "", claveMiembro: "" }),
+      fila(3, { nombre: "912345679", correoMiembro: "d@x.com", claveMiembro: "" }),
+      fila(4, { nombre: "912345670", correoMiembro: "e@x.com", claveMiembro: "5" }),
+    ]);
+    expect(r.results[0]).toMatchObject({ ok: false, mensaje: expect.stringMatching(/CORREO CLIENTE/) });
+    expect(r.results[1]).toMatchObject({ ok: false, mensaje: expect.stringMatching(/clave/) });
+    expect(r.results[2].ok).toBe(true);
+  });
+
+  it("un sexto miembro para el mismo titular se rechaza", async () => {
+    const rows = [1, 2, 3, 4, 5, 6].map((i) => fila(i, { correoMiembro: `m${i}@x.com`, claveMiembro: "p" }));
+    const r = await importSheetRows(rows);
+    expect(r.results.slice(0, 5).every((x) => x.ok)).toBe(true);
+    expect(r.results[5]).toMatchObject({ ok: false, mensaje: expect.stringMatching(/cupos vacíos/) });
   });
 });

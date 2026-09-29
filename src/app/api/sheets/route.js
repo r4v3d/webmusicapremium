@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { verifySheetsRequest, sheetsPushConfigured, sheetsSecret } from "../../../lib/sheetsAuth";
-import { SheetError, applySheetEdits, buildInventoryRows, createTitular, loadSheetRows, sheetServices } from "../../../lib/sheetsSync";
+import { SheetError, applySheetEdits, buildInventoryRows, createTitular, importSheetRows, loadSheetRows, sheetServices } from "../../../lib/sheetsSync";
 import { getFreeSlotsStock } from "../../../lib/db";
 import { announceStock } from "../../../lib/telegramBot";
 
@@ -11,6 +11,17 @@ const REJECTED = {
   bad_signature: "Firma inválida: la clave secreta del script no coincide con GOOGLE_SHEETS_SECRET del servidor.",
   replay: "Mensaje repetido: se ignoró.",
 };
+
+// Mismo anuncio de stock al canal de Telegram que la importación del panel.
+function announceLater(sellableByService) {
+  if (!Object.keys(sellableByService).length) return;
+  after(async () => {
+    const stock = await getFreeSlotsStock().catch(() => null);
+    for (const [service, added] of Object.entries(sellableByService)) {
+      await announceStock(service, added, stock?.[service] ?? null).catch((e) => console.error("announceStock:", e));
+    }
+  });
+}
 
 // Puerta única de la hoja de Google (Apps Script). Toda petición va firmada con
 // GOOGLE_SHEETS_SECRET; sin firma válida no se lee ni se escribe nada.
@@ -59,18 +70,17 @@ export async function POST(req) {
         }
       }
 
+      case "import": {
+        const rows = Array.isArray(msg.rows) ? msg.rows.slice(0, 200) : [];
+        const { results, rows: slotRows, sellableByService } = await importSheetRows(rows);
+        announceLater(sellableByService);
+        return NextResponse.json({ ok: true, results, rows: slotRows });
+      }
+
       case "load": {
         const rows = Array.isArray(msg.rows) ? msg.rows.slice(0, 500) : [];
         const { results, sellableByService } = await loadSheetRows(rows);
-        // Mismo anuncio de stock al canal de Telegram que la importación del panel.
-        if (Object.keys(sellableByService).length) {
-          after(async () => {
-            const stock = await getFreeSlotsStock().catch(() => null);
-            for (const [service, added] of Object.entries(sellableByService)) {
-              await announceStock(service, added, stock?.[service] ?? null).catch((e) => console.error("announceStock:", e));
-            }
-          });
-        }
+        announceLater(sellableByService);
         return NextResponse.json({ ok: true, results });
       }
 
