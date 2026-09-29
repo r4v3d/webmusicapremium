@@ -8,13 +8,15 @@
  *   CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN
  * Un cupo por fila. Lo que edites aquí se guarda en el panel en segundos, y lo
  * que cambie en el panel (ventas, renovaciones, ediciones) aparece aquí solo.
+ * Las filas que pegues abajo sin ID se cargan al panel (titular nuevo = 5 cupos).
  *
  * La clave secreta vive en las propiedades del script, nunca en este código.
  */
 
 var HOJA = 'Clientes';
 var ETIQUETA = 'MusicaPremium';
-var MSG_SIN_ID = '✗ Fila sin ID: para agregar un titular usa el menú ' + ETIQUETA + ' → Agregar titular';
+var MSG_FALTAN = 'Fila nueva: se carga cuando tenga CORREO TITULAR, CORREO CLIENTE y CONTRASEÑA (o usa el menú ' + ETIQUETA + ' → Cargar filas nuevas).';
+var LOTE = 50; // filas nuevas por llamada al servidor
 
 // Columnas. fija = la pone el sistema; local = solo existe en la hoja; oculta = no se ve.
 var COLS = [
@@ -45,6 +47,7 @@ function indice_(key) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu(ETIQUETA)
+    .addItem('Cargar filas nuevas', 'cargarFilasNuevas')
     .addItem('Agregar titular…', 'agregarTitular')
     .addItem('Recargar todo desde el panel', 'recargarInventarioManual')
     .addSeparator()
@@ -211,7 +214,7 @@ function mensaje_(err) {
 
 // ---------------------------------------------------------------- Pestaña «Clientes»
 
-/** Activador instalable de edición: manda al panel lo que cambiaste. */
+/** Activador instalable de edición: manda al panel lo que cambiaste o pegaste. */
 function alEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
@@ -233,12 +236,15 @@ function alEditar(e) {
     var valores = sh.getRange(r0, 1, n, COLS.length).getValues();
     var edits = [];
     var enviados = {};
-    var sinId = [];
+    var nuevas = [];
+    var avisos = [];
     for (var i = 0; i < n; i++) {
       var fila = valores[i];
-      var id = String(fila[COL_ID] || '').trim();
+      var id = idDe_(fila);
       if (!id) {
-        if (fila.slice(0, N_VISIBLES).some(function (v) { return v !== ''; })) sinId.push(r0 + i);
+        if (!tieneDatos_(fila)) continue;
+        if (lista_(fila)) nuevas.push(filaParaCargar_(fila, r0 + i));
+        else avisos.push(r0 + i);
         continue;
       }
       var changes = {};
@@ -246,23 +252,134 @@ function alEditar(e) {
       edits.push({ id: id, changes: changes });
       enviados[id] = fila;
     }
-    sinId.forEach(function (row) { sh.getRange(row, COL_SYNC + 1).setValue(MSG_SIN_ID); });
-    if (!edits.length) return;
+    avisos.forEach(function (row) { sh.getRange(row, COL_SYNC + 1).setValue(MSG_FALTAN); });
 
-    var resp;
-    try {
-      resp = llamar_({ action: 'edit', edits: edits });
-    } catch (err) {
-      marcarFilas_(sh, Object.keys(enviados), '✗ No se guardó: ' + mensaje_(err));
-      return;
+    var resp = null;
+    if (edits.length) {
+      try {
+        resp = llamar_({ action: 'edit', edits: edits });
+      } catch (err) {
+        marcarFilas_(sh, Object.keys(enviados), '✗ No se guardó: ' + mensaje_(err));
+      }
     }
-    var hora = hora_();
-    var marcas = {};
-    (resp.results || []).forEach(function (r) { marcas[r.id] = r.ok ? '✓ Guardado ' + hora : '✗ ' + r.error; });
-    aplicarFilas_(sh, resp.rows || [], resp.deleted || [], { enviados: enviados, marcas: marcas });
+    if (nuevas.length) {
+      var fechas = avisoFechas_(nuevas);
+      if (!fechas) {
+        cargarNuevas_(sh, nuevas); // termina con una recarga completa, que ya incluye las ediciones de arriba
+        return;
+      }
+      nuevas.forEach(function (f) { sh.getRange(f.fila, COL_SYNC + 1).setValue('✗ ' + fechas); });
+    }
+    if (resp) {
+      var hora = hora_();
+      var marcas = {};
+      (resp.results || []).forEach(function (r) { marcas[r.id] = r.ok ? '✓ Guardado ' + hora : '✗ ' + r.error; });
+      aplicarFilas_(sh, resp.rows || [], resp.deleted || [], { enviados: enviados, marcas: marcas });
+    }
   } finally {
     lock.releaseLock();
   }
+}
+
+/** Menú: carga al panel todas las filas sin ID que tengan CORREO TITULAR. */
+function cargarFilasNuevas() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(HOJA);
+  if (!sh) { SpreadsheetApp.getUi().alert('Primero usa ' + ETIQUETA + ' → Configurar conexión.'); return; }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(120000);
+  try {
+    var last = sh.getLastRow();
+    var data = last >= 2 ? sh.getRange(2, 1, last - 1, COLS.length).getValues() : [];
+    var nuevas = [];
+    data.forEach(function (fila, i) {
+      if (!idDe_(fila) && String(fila[indice_('correoTitular')]).trim() !== '') nuevas.push(filaParaCargar_(fila, i + 2));
+    });
+    if (!nuevas.length) { ss.toast('No hay filas nuevas: todas tienen ID.', ETIQUETA, 6); return; }
+    var fechas = avisoFechas_(nuevas);
+    if (fechas) {
+      var ui = SpreadsheetApp.getUi();
+      ui.alert('No se cargó nada', fechas, ui.ButtonSet.OK);
+      return;
+    }
+    ss.toast('Cargando ' + nuevas.length + ' filas al panel…', ETIQUETA, 120);
+    var r = cargarNuevas_(sh, nuevas);
+    ss.toast('Cargadas: ' + r.ok + (r.mal ? ' · Con error: ' + r.mal + ' (mira la columna Sync)' : ''), ETIQUETA, 10);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Manda las filas nuevas en lotes. Las que entraron se borran de su lugar y
+ * vuelven, con su ID y ordenadas, en la recarga completa del final. Las que no
+ * se quedan con el motivo en Sync para que las corrijas.
+ */
+function cargarNuevas_(sh, nuevas) {
+  var resultados = {};
+  var ok = 0, mal = 0;
+  for (var i = 0; i < nuevas.length; i += LOTE) {
+    var lote = nuevas.slice(i, i + LOTE);
+    try {
+      var resp = llamar_({ action: 'import', rows: lote });
+      (resp.results || []).forEach(function (r) {
+        resultados[r.fila] = r;
+        if (r.ok) ok++; else mal++;
+      });
+    } catch (err) {
+      lote.forEach(function (f) { resultados[f.fila] = { ok: false, mensaje: 'No se cargó: ' + mensaje_(err) }; mal++; });
+    }
+  }
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var rango = sh.getRange(2, 1, last - 1, COLS.length);
+    var data = rango.getValues();
+    data.forEach(function (fila, k) {
+      var r = resultados[k + 2];
+      if (!r) return;
+      if (r.ok) data[k] = COLS.map(function () { return ''; });
+      else fila[COL_SYNC] = '✗ ' + r.mensaje;
+    });
+    rango.setValues(data);
+  }
+  recargarSinLock_(sh);
+  return { ok: ok, mal: mal };
+}
+
+function idDe_(fila) {
+  var id = String(fila[COL_ID] || '').trim();
+  return /^\d+$/.test(id) ? id : '';
+}
+
+function tieneDatos_(fila) {
+  return fila.slice(0, N_VISIBLES).some(function (v) { return v !== ''; });
+}
+
+/** Lista para cargarse sola al pegarla: titular, correo cliente y contraseña. */
+function lista_(fila) {
+  return ['correoTitular', 'correoMiembro', 'claveMiembro'].every(function (k) {
+    return String(fila[indice_(k)]).trim() !== '';
+  });
+}
+
+function filaParaCargar_(fila, num) {
+  var row = { fila: num };
+  ['correoTitular', 'nombre', 'correoMiembro', 'claveMiembro', 'precio', 'vence'].forEach(function (k) {
+    row[k] = paraEnviar_(fila[indice_(k)]);
+  });
+  return row;
+}
+
+/**
+ * Con la hoja en formato de EE.UU., «03/10/26» se lee como 10 de marzo. Si hay
+ * fechas y el formato no es día/mes, no se carga nada y se explica cómo cambiarlo.
+ */
+function avisoFechas_(nuevas) {
+  var locale = SpreadsheetApp.getActive().getSpreadsheetLocale() || '';
+  if (!/^en/i.test(locale)) return '';
+  if (!nuevas.some(function (f) { return f.vence !== ''; })) return '';
+  return 'La hoja lee las fechas como mes/día (configuración regional ' + locale + '). ' +
+    'Cámbiala en File → Settings → Locale → Peru, guarda y vuelve a pegar las filas.';
 }
 
 /**
@@ -274,7 +391,7 @@ function aplicarFilas_(sh, rows, deleted, opts) {
   var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, COLS.length).getValues() : [];
   var indice = {};
-  data.forEach(function (r, i) { if (r[COL_ID] !== '') indice[String(r[COL_ID])] = i + 2; });
+  data.forEach(function (r, i) { var id = idDe_(r); if (id) indice[id] = i + 2; });
 
   var hora = hora_();
   var agregadas = [];
@@ -336,40 +453,7 @@ function recargarInventario(lanzarErrores) {
     var ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SS_ID') || SpreadsheetApp.getActive().getId());
     var sh = ss.getSheetByName(HOJA);
     if (!sh) return -1;
-    var resp = llamar_({ action: 'snapshot' });
-    var rows = resp.rows || [];
-
-    var last = sh.getLastRow();
-    var data = last >= 2 ? sh.getRange(2, 1, last - 1, COLS.length).getValues() : [];
-    var actuales = {};
-    var sinId = [];
-    data.forEach(function (r) {
-      if (r[COL_ID] === '') { if (r.slice(0, N_VISIBLES).some(function (v) { return v !== ''; })) sinId.push(r); }
-      else actuales[String(r[COL_ID])] = r;
-    });
-
-    var alDia = Object.keys(actuales).length === rows.length && data.length === rows.length + sinId.length &&
-      rows.every(function (row) { return actuales[row.id] && actuales[row.id][COL_VERSION] === row.version; });
-    if (alDia) return 0;
-
-    var hora = hora_();
-    var salida = rows.map(function (row) {
-      var previa = actuales[row.id];
-      var f = filaDesdeServidor_(row);
-      f[COL_SYNC] = previa && previa[COL_VERSION] === row.version ? previa[COL_SYNC] : '↻ Panel ' + hora;
-      return f;
-    });
-    sinId.forEach(function (r) {
-      r[COL_SYNC] = MSG_SIN_ID;
-      salida.push(r);
-    });
-
-    if (last >= 2) sh.getRange(2, 1, last - 1, COLS.length).clearContent();
-    if (salida.length) {
-      asegurarFilas_(sh, salida.length + 1);
-      sh.getRange(2, 1, salida.length, COLS.length).setValues(salida);
-    }
-    return salida.length;
+    return recargarSinLock_(sh);
   } catch (err) {
     // El activador de 15 min pasa un objeto de evento: solo el menú (true) muestra el error.
     if (lanzarErrores === true) throw err;
@@ -378,6 +462,45 @@ function recargarInventario(lanzarErrores) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/** Reescribe la pestaña con el panel. Las filas nuevas que no se cargaron quedan al final, con su motivo. */
+function recargarSinLock_(sh) {
+  var resp = llamar_({ action: 'snapshot' });
+  var rows = resp.rows || [];
+
+  var last = sh.getLastRow();
+  var data = last >= 2 ? sh.getRange(2, 1, last - 1, COLS.length).getValues() : [];
+  var actuales = {};
+  var sinId = [];
+  data.forEach(function (r) {
+    var id = idDe_(r);
+    if (id) actuales[id] = r;
+    else if (tieneDatos_(r)) sinId.push(r);
+  });
+
+  var alDia = Object.keys(actuales).length === rows.length && data.length === rows.length + sinId.length &&
+    rows.every(function (row) { return actuales[row.id] && actuales[row.id][COL_VERSION] === row.version; });
+  if (alDia) return 0;
+
+  var hora = hora_();
+  var salida = rows.map(function (row) {
+    var previa = actuales[row.id];
+    var f = filaDesdeServidor_(row);
+    f[COL_SYNC] = previa && previa[COL_VERSION] === row.version ? previa[COL_SYNC] : '↻ Panel ' + hora;
+    return f;
+  });
+  sinId.forEach(function (r) {
+    if (String(r[COL_SYNC]).indexOf('✗') !== 0) r[COL_SYNC] = MSG_FALTAN;
+    salida.push(r);
+  });
+
+  if (last >= 2) sh.getRange(2, 1, last - 1, COLS.length).clearContent();
+  if (salida.length) {
+    asegurarFilas_(sh, salida.length + 1);
+    sh.getRange(2, 1, salida.length, COLS.length).setValues(salida);
+  }
+  return salida.length;
 }
 
 function filaDesdeServidor_(row) {

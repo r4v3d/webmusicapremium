@@ -408,7 +408,7 @@ const plus30 = () => {
   return toDateStr(d);
 };
 
-async function loadOneRow(tx, row) {
+async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desde Google Sheets." } = {}) {
   const service = resolveService(row.plataforma);
   if (!service) {
     throw new SheetError(`Plataforma desconocida («${text(row.plataforma)}»). Usa ${sheetServices().map((s) => s.name).join(", ")}.`);
@@ -444,10 +444,10 @@ async function loadOneRow(tx, row) {
       parts.push("titular actualizado");
     }
   } else {
-    if (!masterPassword) throw new SheetError("Falta la clave del titular (es una cuenta nueva).");
+    const password = masterPassword || defaultPassword;
+    if (!password) throw new SheetError("Falta la clave del titular (es una cuenta nueva).");
     const created = await createFamilyAccount({
-      service, masterEmail, password: masterPassword, ownerRenewalDate: renewal || plus30(), renewalCost: cost || 0,
-      notes: "Cargada desde Google Sheets.",
+      service, masterEmail, password, ownerRenewalDate: renewal || plus30(), renewalCost: cost || 0, notes,
     }, { tx });
     accountId = created.id;
     await tx.query(
@@ -459,6 +459,7 @@ async function loadOneRow(tx, row) {
   }
 
   let sellable = 0;
+  let slotId = null;
   if (memberEmail) {
     const same = (await tx.query(
       `select s.id, s.slot_number, s.member_password, s.platform_account_id, pa.account_email
@@ -472,6 +473,7 @@ async function loadOneRow(tx, row) {
       throw new SheetError(`El correo miembro ya está en la cuenta de ${same.account_email}.`);
     }
     if (same) {
+      slotId = same.id;
       if (same.member_password !== memberPassword) {
         await updateMemberProfile(same.id, { memberPassword }, { tx });
         parts.push(`clave del cupo ${same.slot_number} actualizada`);
@@ -487,13 +489,81 @@ async function loadOneRow(tx, row) {
         [accountId]
       )).rows[0];
       if (!empty) throw new SheetError("Esa cuenta ya no tiene cupos vacíos.");
+      slotId = empty.id;
       await updateMemberProfile(empty.id, { memberEmail, memberPassword, emailType: "admin" }, { tx });
       parts.push(`cupo ${empty.slot_number} listo para vender`);
       sellable = 1;
     }
   }
 
-  return { service, sellable, message: parts.length ? parts.join(" · ") : "sin cambios" };
+  return { service, sellable, slotId, accountId, message: parts.length ? parts.join(" · ") : "sin cambios" };
+}
+
+// --- Filas nuevas de la pestaña «Clientes» (sin ID) ---
+
+/** «g.etmushroom7572@gmail.com - IO» → correo y etiqueta («IO»), que queda como nota del titular. */
+function splitTitular(value) {
+  const raw = text(value);
+  const email = /[^\s@]+@[^\s@]+\.[^\s@]+/.exec(raw)?.[0] || raw;
+  const label = raw.replace(email, "").replace(/^[\s\-–—:|]+|[\s\-–—:|]+$/g, "").trim();
+  return { email: email.replace(/[.,;]+$/, ""), label };
+}
+
+async function importOneRow(tx, row) {
+  const { email, label } = splitTitular(row.correoTitular);
+  if (!email) throw new SheetError("Falta el CORREO TITULAR.");
+  const nombre = text(row.nombre);
+  const hasSlotData = nombre || text(row.precio) || text(row.vence);
+  if (hasSlotData && !text(row.correoMiembro)) {
+    throw new SheetError("Falta el CORREO CLIENTE: sin él no hay cupo donde poner esta fila.");
+  }
+  const loaded = await loadOneRow(tx, {
+    plataforma: row.plataforma || "tidal",
+    correoTitular: email,
+    correoMiembro: row.correoMiembro,
+    claveMiembro: row.claveMiembro,
+  }, { defaultPassword: text(process.env.DEFAULT_TITULAR_PASSWORD), notes: label });
+
+  if (loaded.slotId && hasSlotData) {
+    const changes = { nombre };
+    if (text(row.precio)) changes.precio = row.precio;
+    if (text(row.vence)) changes.vence = row.vence;
+    await applyOneEdit(tx, loaded.slotId, changes);
+  }
+  return { ...loaded, sellable: loaded.sellable && !nombre ? 1 : 0 };
+}
+
+/**
+ * Filas pegadas en «Clientes» sin ID: crea el titular si no existe (5 cupos,
+ * clave DEFAULT_TITULAR_PASSWORD) y pone la fila en su primer cupo libre.
+ * Si el correo cliente ya estaba en ese titular, actualiza ese cupo (pegar dos
+ * veces no duplica). Cada fila en su transacción.
+ */
+export async function importSheetRows(rows) {
+  const results = [];
+  const sellableByService = {};
+  const accounts = new Set();
+  for (const row of rows || []) {
+    const fila = row?.fila ?? null;
+    try {
+      const r = await withTransaction((tx) => importOneRow(tx, row || {}));
+      accounts.add(String(r.accountId));
+      if (r.sellable) sellableByService[r.service] = (sellableByService[r.service] || 0) + 1;
+      results.push({ fila, ok: true, mensaje: r.message });
+    } catch (error) {
+      if (!(error instanceof SheetError)) console.error("[sheets] fila nueva fallida", fila, error);
+      results.push({ fila, ok: false, mensaje: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
+    }
+  }
+  let slotRows = [];
+  if (accounts.size) {
+    const ids = await query(
+      "select id::text as id from account_slots where platform_account_id::text = any($1::text[])",
+      [[...accounts]]
+    );
+    slotRows = await buildInventoryRows(ids.rows.map((r) => r.id));
+  }
+  return { results, rows: slotRows, sellableByService };
 }
 
 /** Procesa filas de «Cargar». Cada fila en su transacción; devuelve el resultado por fila. */
