@@ -373,3 +373,44 @@ describe("importSheetRows (filas pegadas sin ID en «Clientes»)", () => {
     expect(r.results[5]).toMatchObject({ ok: false, mensaje: expect.stringMatching(/cupos vacíos/) });
   });
 });
+
+describe("borrar desde la hoja (celdas vacías)", () => {
+  const vacia = { correoTitular: "", nombre: "", correoMiembro: "", claveMiembro: "", precio: "", vence: "" };
+  const ocupar = async (slot) => {
+    const c = await getOrCreateClient("51999000111", "Ana", "");
+    await updateMemberProfile(slot.id, { clientId: c.id, status: "active", pricePen: 9, renewalDate: "2026-10-24" });
+  };
+
+  it("limpiar una fila entera libera el cupo y deja el titular (con nota)", async () => {
+    const { acc, slots } = await seedAccount({ members: 2 });
+    await ocupar(slots[0]);
+    const id = String(slots[0].id);
+    const r = await applySheetEdits([{ id, changes: vacia }]);
+    expect(r.results[0]).toMatchObject({ id, ok: true, nota: expect.stringMatching(/5 filas/) });
+    const fila = (await buildInventoryRows([id]))[0];
+    expect(fila).toMatchObject({ correoTitular: acc.masterEmail, nombre: "", correoMiembro: "", claveMiembro: "", precio: "", vence: "", estado: "Libre" });
+    expect(r.deleted).toEqual([]);
+  });
+
+  it("limpiar las 5 filas completas de un titular lo borra del panel", async () => {
+    const { acc, slots } = await seedAccount({ members: 3 });
+    await ocupar(slots[1]);
+    const r = await applySheetEdits(slots.map((s) => ({ id: String(s.id), changes: vacia })));
+    expect(r.results.every((x) => x.ok && x.nota === "titular borrado")).toBe(true);
+    expect(r.deleted.sort()).toEqual(slots.map((s) => String(s.id)).sort());
+    expect((await query("select count(*)::int as n from platform_accounts where id = $1", [acc.id])).rows[0].n).toBe(0);
+    // El historial de suscripciones se conserva.
+    expect((await query("select count(*)::int as n from subscriptions")).rows[0].n).toBeGreaterThan(0);
+  });
+
+  it("vaciar solo la columna del titular no borra nada", async () => {
+    const { acc, slots } = await seedAccount({ members: 2 });
+    await ocupar(slots[0]);
+    const r = await applySheetEdits(slots.map((s) => ({ id: String(s.id), changes: { correoTitular: "" } })));
+    expect(r.results.every((x) => x.ok && /no se borró/.test(x.nota))).toBe(true);
+    expect(r.deleted).toEqual([]);
+    const filas = await buildInventoryRows(slots.map((s) => String(s.id)));
+    expect(filas.every((f) => f.correoTitular === acc.masterEmail)).toBe(true);
+    expect(filas.find((f) => f.id === String(slots[0].id)).nombre).toBe("51999000111");
+  });
+});

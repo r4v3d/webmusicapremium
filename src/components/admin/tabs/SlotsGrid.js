@@ -324,6 +324,8 @@ export default function SlotsGrid() {
 
     if (data) {
       mergeRows(data.rows || [], data.deleted || []);
+      const nota = (data.results || []).find((r) => r.ok && r.nota)?.nota;
+      if (nota) showToast(nota.charAt(0).toUpperCase() + nota.slice(1) + ".");
       const failed = (data.results || []).filter((r) => !r.ok);
       if (failed.length) {
         showToast(failed.length === 1 ? failed[0].error : `${failed.length} filas no se guardaron: ${failed[0].error}`, "error");

@@ -6,7 +6,7 @@
 // 005_sheets_sync.sql, todas sus filas.
 import crypto from "node:crypto";
 import { query, withTransaction } from "./pg";
-import { createFamilyAccount, getOrCreateClient, toDateStr, updateFamilyAccount, updateMemberProfile } from "./db";
+import { createFamilyAccount, deleteFamilyAccount, getOrCreateClient, toDateStr, updateFamilyAccount, updateMemberProfile } from "./db";
 import { parseDateInput } from "./importParse";
 import { CONFIG } from "../data/config";
 
@@ -222,6 +222,13 @@ async function applyOneEdit(tx, slotId, changes) {
   )).rows[0];
   if (!cur) throw new SheetError("Este cupo ya no existe en el panel. Recarga el inventario.");
 
+  // Titular vacío = «borrar»: no se aplica a la fila; applySheetEdits decide si
+  // se borra la cuenta (cuando se limpian todas sus filas). El resto de la fila sí se guarda.
+  const clearTitular = Object.prototype.hasOwnProperty.call(changes, "correoTitular") && !text(changes.correoTitular);
+  if (clearTitular) {
+    const { correoTitular: _omit, ...rest } = changes;
+    changes = rest;
+  }
   const has = (k) => Object.prototype.hasOwnProperty.call(changes, k);
   let accountChanged = false;
 
@@ -263,7 +270,7 @@ async function applyOneEdit(tx, slotId, changes) {
 
   // Datos del cupo.
   if (has("nombre")) changes = nombreToChanges(changes, cur);
-  if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged };
+  if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged, clearTitular };
   if (cur.reserved_live) {
     throw new SheetError("Este cupo está apartado por una compra en curso. Espera unos minutos y vuelve a editarlo.");
   }
@@ -322,7 +329,7 @@ async function applyOneEdit(tx, slotId, changes) {
   }
 
   if (Object.keys(upd).length) await updateMemberProfile(cur.id, upd, { tx });
-  return { accountId: cur.platform_account_id, accountChanged };
+  return { accountId: cur.platform_account_id, accountChanged, clearTitular };
 }
 
 /**
@@ -334,6 +341,7 @@ export async function applySheetEdits(edits) {
   const results = [];
   const touchedSlots = new Set();
   const touchedAccounts = new Set();
+  const clearedByAccount = new Map(); // cuenta → cupos donde se vació el titular
 
   for (const edit of edits || []) {
     const id = text(edit?.id);
@@ -349,11 +357,42 @@ export async function applySheetEdits(edits) {
       const picked = Object.fromEntries(known.map((k) => [k, changes[k]]));
       const r = await withTransaction((tx) => applyOneEdit(tx, id, picked));
       if (r.accountChanged) touchedAccounts.add(String(r.accountId));
+      if (r.clearTitular) {
+        const key = String(r.accountId);
+        if (!clearedByAccount.has(key)) clearedByAccount.set(key, new Set());
+        clearedByAccount.get(key).add(id);
+      }
       results.push({ id, ok: true });
     } catch (error) {
       if (!(error instanceof SheetError)) console.error("[sheets] edición fallida", id, error);
       results.push({ id, ok: false, error: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
     }
+  }
+
+  // Titular borrado en TODAS sus filas y cupos ya vacíos → se borra la cuenta.
+  // Si no, el titular se queda y la fila lo explica (así no se pierde una cuenta con clientes).
+  for (const [accountId, clearedIds] of clearedByAccount) {
+    const slots = (await query(
+      `select id::text as id, status, customer_id, member_email,
+              (status = 'reserved' and reserved_until > now()) as reserved_live
+         from account_slots where platform_account_id::text = $1`,
+      [accountId]
+    )).rows;
+    const allCleared = slots.length > 0 && slots.every((s) => clearedIds.has(s.id));
+    const allEmpty = slots.every((s) => !s.reserved_live && !s.customer_id && !text(s.member_email) &&
+      (s.status === "free" || s.status === "reserved"));
+    let nota;
+    if (allCleared && allEmpty) {
+      await deleteFamilyAccount(accountId);
+      for (const s of slots) touchedSlots.add(s.id);
+      nota = "titular borrado";
+    } else {
+      touchedAccounts.add(accountId);
+      nota = allCleared
+        ? "el titular no se borró: aún tiene clientes o correos (limpia sus filas completas)"
+        : "el titular no se borró: para borrarlo, limpia sus 5 filas completas a la vez";
+    }
+    for (const r of results) if (r.ok && clearedIds.has(r.id)) r.nota = nota;
   }
 
   if (touchedAccounts.size) {

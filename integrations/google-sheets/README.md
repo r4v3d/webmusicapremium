@@ -129,7 +129,11 @@ sudo systemctl restart musicapremium-web musicapremium-worker
   - Si no se cargaron solas (pegado muy grande, o filas que completaste después), usa **MusicaPremium → Cargar filas nuevas**.
 - **Fechas:** la hoja debe estar en formato día/mes. En **File → Settings → Locale** elige **Peru** *antes* de pegar. Con el formato de EE.UU., `03/10/26` se leería como 10 de marzo; por eso, si detecta ese formato, la hoja no carga nada y te avisa.
 - **Agregar un titular vacío:** menú **MusicaPremium → Agregar titular…** (o **+ Titular** en el panel). Aparecen sus 5 filas libres.
-- **Borrar** titulares o cupos se hace en el panel (*Clientes → Familias*). Si borras una fila en la hoja, vuelve en la siguiente revisión.
+- **Borrar** (selecciona las celdas de A a F y pulsa Supr):
+  - **Una fila completa:** el cupo queda libre (se borran nombre, correo, contraseña, pagó y renovación). El titular se queda.
+  - **Las 5 filas completas de un titular, a la vez:** se borra el titular del panel. El historial de pagos se conserva.
+  - **Solo la columna del titular:** no se borra nada; el titular vuelve y *Sync* explica por qué.
+  - No uses *Eliminar fila* (clic derecho): el panel no se entera y la fila vuelve en la siguiente revisión. También puedes borrar titulares en el panel (*Clientes → Familias*).
 - Puedes pegar varias celdas a la vez, ordenar y filtrar. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
 - Las columnas ocultas (ID, plataforma, cupo, versión) las usa el sistema: no las muestres ni las edites.
 

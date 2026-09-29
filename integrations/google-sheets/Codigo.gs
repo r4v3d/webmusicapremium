@@ -273,7 +273,9 @@ function alEditar(e) {
     if (resp) {
       var hora = hora_();
       var marcas = {};
-      (resp.results || []).forEach(function (r) { marcas[r.id] = r.ok ? '✓ Guardado ' + hora : '✗ ' + r.error; });
+      (resp.results || []).forEach(function (r) {
+        marcas[r.id] = r.ok ? '✓ Guardado ' + hora + (r.nota ? ' · ' + r.nota : '') : '✗ ' + r.error;
+      });
       aplicarFilas_(sh, resp.rows || [], resp.deleted || [], { enviados: enviados, marcas: marcas });
     }
   } finally {
