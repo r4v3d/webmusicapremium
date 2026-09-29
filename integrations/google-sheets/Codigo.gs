@@ -4,58 +4,36 @@
  * Pega este archivo completo en Extensiones → Apps Script de tu hoja.
  * Instrucciones paso a paso: integrations/google-sheets/README.md
  *
- * Hojas que crea:
- *   · Cargar      → alta masiva de cuentas: pegas filas y usas el menú
- *                   «MusicaPremium → Subir filas de Cargar».
- *   · Inventario  → un cupo por fila, siempre igual al panel. Lo que edites aquí
- *                   se guarda en el panel en segundos, y lo que cambie en el
- *                   panel (ventas, renovaciones, ediciones) aparece aquí solo.
+ * Crea UNA pestaña, «Clientes», con el mismo formato que la tabla del panel:
+ *   CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN
+ * Un cupo por fila. Lo que edites aquí se guarda en el panel en segundos, y lo
+ * que cambie en el panel (ventas, renovaciones, ediciones) aparece aquí solo.
  *
  * La clave secreta vive en las propiedades del script, nunca en este código.
  */
 
-var HOJA_INV = 'Inventario';
-var HOJA_CARGA = 'Cargar';
+var HOJA = 'Clientes';
 var ETIQUETA = 'MusicaPremium';
+var MSG_SIN_ID = '✗ Fila sin ID: para agregar un titular usa el menú ' + ETIQUETA + ' → Agregar titular';
 
-// Columnas de «Inventario». fija = la pone el sistema; local = solo existe en la hoja.
+// Columnas. fija = la pone el sistema; local = solo existe en la hoja; oculta = no se ve.
 var COLS = [
-  { key: 'id', titulo: 'ID', ancho: 55, fija: true },
-  { key: 'plataforma', titulo: 'Plataforma', ancho: 85, fija: true },
-  { key: 'correoTitular', titulo: 'Correo titular', ancho: 210, texto: true },
-  { key: 'claveTitular', titulo: 'Clave titular', ancho: 120, texto: true },
-  { key: 'renuevaTitular', titulo: 'Renueva titular', ancho: 105, fecha: true },
-  { key: 'costoTitular', titulo: 'Costo titular', ancho: 90, numero: true },
-  { key: 'monedaTitular', titulo: 'Moneda', ancho: 70, lista: ['PEN', 'USD', 'ARS'] },
-  { key: 'cupo', titulo: 'Cupo', ancho: 50, fija: true },
-  { key: 'estado', titulo: 'Estado', ancho: 95, lista: ['Libre', 'Activo', 'Falta pago', 'Vencido', 'Reservado'] },
-  { key: 'correoMiembro', titulo: 'Correo miembro', ancho: 210, texto: true },
-  { key: 'claveMiembro', titulo: 'Clave miembro', ancho: 120, texto: true },
-  { key: 'tipoCorreo', titulo: 'Tipo correo', ancho: 85, lista: ['Propio', 'Cliente'] },
-  { key: 'cliente', titulo: 'Cliente', ancho: 140, texto: true },
-  { key: 'whatsapp', titulo: 'WhatsApp', ancho: 120, texto: true },
-  { key: 'precio', titulo: 'Precio S/', ancho: 75, numero: true },
-  { key: 'vence', titulo: 'Vence', ancho: 95, fecha: true },
-  { key: 'notasTitular', titulo: 'Notas titular', ancho: 180, texto: true },
-  { key: 'actualizado', titulo: 'Actualizado', ancho: 120, fija: true, texto: true },
+  { key: 'correoTitular', titulo: 'CORREO TITULAR', ancho: 230, texto: true },
+  { key: 'nombre', titulo: 'NOMBRE', ancho: 150, texto: true },
+  { key: 'correoMiembro', titulo: 'CORREO CLIENTE', ancho: 240, texto: true },
+  { key: 'claveMiembro', titulo: 'CONTRASEÑA', ancho: 140, texto: true },
+  { key: 'precio', titulo: 'PAGÓ', ancho: 70, numero: true },
+  { key: 'vence', titulo: 'RENOVACIÓN', ancho: 110, fecha: true },
   { key: 'sync', titulo: 'Sync', ancho: 230, fija: true, local: true, texto: true },
+  { key: 'id', titulo: 'ID', ancho: 60, fija: true, oculta: true, texto: true },
+  { key: 'plataforma', titulo: 'Plataforma', ancho: 80, fija: true, oculta: true },
+  { key: 'cupo', titulo: 'Cupo', ancho: 50, fija: true, oculta: true },
   { key: 'version', titulo: 'versión', ancho: 60, fija: true, oculta: true, texto: true },
 ];
+var COL_ID = indice_('id');
 var COL_SYNC = indice_('sync');
 var COL_VERSION = indice_('version');
-
-// Columnas de «Cargar».
-var CARGA = [
-  { key: 'plataforma', titulo: 'Plataforma', ancho: 95, nota: 'Tidal, Deezer o Qobuz.' },
-  { key: 'correoTitular', titulo: 'Correo titular', ancho: 210, texto: true, nota: 'Obligatorio. Si no existe, se crea la cuenta con 5 cupos.' },
-  { key: 'claveTitular', titulo: 'Clave titular', ancho: 120, texto: true, nota: 'Obligatoria solo si la cuenta es nueva. Si la cuenta existe y pones otra, se actualiza.' },
-  { key: 'renuevaTitular', titulo: 'Renueva titular', ancho: 105, fecha: true, nota: 'Opcional. Día/mes/año. Si la cuenta es nueva y lo dejas vacío: hoy + 30 días.' },
-  { key: 'costoTitular', titulo: 'Costo titular', ancho: 90, numero: true, nota: 'Opcional.' },
-  { key: 'correoMiembro', titulo: 'Correo miembro', ancho: 210, texto: true, nota: 'Opcional. Ocupa el primer cupo vacío de esa cuenta y queda listo para vender.' },
-  { key: 'claveMiembro', titulo: 'Clave miembro', ancho: 120, texto: true, nota: 'Obligatoria si pones correo miembro.' },
-  { key: 'resultado', titulo: 'Resultado', ancho: 330, texto: true, nota: 'Lo escribe el sistema. ✓ = subida; ✗ = no se subió (lee el motivo, corrige y vuelve a subir).' },
-];
-var CARGA_RESULTADO = CARGA.length - 1;
+var N_VISIBLES = 6; // CORREO TITULAR … RENOVACIÓN
 
 function indice_(key) {
   for (var i = 0; i < COLS.length; i++) if (COLS[i].key === key) return i;
@@ -67,8 +45,8 @@ function indice_(key) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu(ETIQUETA)
-    .addItem('Subir filas de «Cargar»', 'subirCarga')
-    .addItem('Recargar inventario completo', 'recargarInventarioManual')
+    .addItem('Agregar titular…', 'agregarTitular')
+    .addItem('Recargar todo desde el panel', 'recargarInventarioManual')
     .addSeparator()
     .addItem('Probar conexión', 'probarConexion')
     .addItem('Configurar conexión…', 'configurar')
@@ -104,16 +82,40 @@ function configurar() {
     ui.alert('No se pudo conectar', mensaje_(err), ui.ButtonSet.OK);
     return;
   }
-  prepararHojas_(info.servicios || []);
+  prepararHoja_();
   instalarActivadores_();
   recargarInventario();
 
   ui.alert('¡Conectado!',
-    'Las hojas «' + HOJA_CARGA + '» e «' + HOJA_INV + '» están listas.\n\n' +
+    'La pestaña «' + HOJA + '» está lista.\n\n' +
     (info.envioAutomatico
       ? 'Los cambios del panel llegan a la hoja en segundos.'
       : 'OJO: el servidor todavía no tiene GOOGLE_SHEETS_WEBAPP_URL. Lo que edites aquí sí llega al panel, pero los cambios del panel solo aparecerán cada 15 minutos hasta que lo configures.'),
     ui.ButtonSet.OK);
+}
+
+function agregarTitular() {
+  var ui = SpreadsheetApp.getUi();
+  var r = ui.prompt('Agregar titular (Tidal)',
+    'Correo del titular nuevo. Se crea con 5 cupos libres y la clave de siempre.',
+    ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  var email = (r.getResponseText() || '').trim();
+  if (!email) return;
+  try {
+    var resp = llamar_({ action: 'addTitular', email: email, service: 'tidal' });
+    var lock = LockService.getScriptLock();
+    lock.waitLock(120000);
+    try {
+      var sh = SpreadsheetApp.getActive().getSheetByName(HOJA);
+      if (sh) aplicarFilas_(sh, resp.rows || [], [], {});
+    } finally {
+      lock.releaseLock();
+    }
+    SpreadsheetApp.getActive().toast('Titular ' + email + ' creado con 5 cupos.', ETIQUETA, 6);
+  } catch (err) {
+    ui.alert('No se creó el titular', mensaje_(err), ui.ButtonSet.OK);
+  }
 }
 
 function probarConexion() {
@@ -173,7 +175,7 @@ function doPost(e) {
     var lock = LockService.getScriptLock();
     lock.waitLock(120000);
     try {
-      var sh = SpreadsheetApp.openById(props.getProperty('SS_ID')).getSheetByName(HOJA_INV);
+      var sh = SpreadsheetApp.openById(props.getProperty('SS_ID')).getSheetByName(HOJA);
       if (sh && msg.type === 'rows') aplicarFilas_(sh, msg.rows || [], msg.deleted || [], {});
     } finally {
       lock.releaseLock();
@@ -207,15 +209,13 @@ function mensaje_(err) {
   return String((err && err.message) || err);
 }
 
-// ---------------------------------------------------------------- Inventario
+// ---------------------------------------------------------------- Pestaña «Clientes»
 
 /** Activador instalable de edición: manda al panel lo que cambiaste. */
 function alEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
-  var nombre = sh.getName();
-  if (nombre === HOJA_CARGA) return limpiarResultadoCarga_(e);
-  if (nombre !== HOJA_INV) return;
+  if (sh.getName() !== HOJA) return;
 
   var r0 = Math.max(e.range.getRow(), 2);
   var r1 = e.range.getLastRow();
@@ -236,9 +236,9 @@ function alEditar(e) {
     var sinId = [];
     for (var i = 0; i < n; i++) {
       var fila = valores[i];
-      var id = String(fila[0] || '').trim();
+      var id = String(fila[COL_ID] || '').trim();
       if (!id) {
-        if (fila.some(function (v) { return v !== ''; })) sinId.push(r0 + i);
+        if (fila.slice(0, N_VISIBLES).some(function (v) { return v !== ''; })) sinId.push(r0 + i);
         continue;
       }
       var changes = {};
@@ -246,9 +246,7 @@ function alEditar(e) {
       edits.push({ id: id, changes: changes });
       enviados[id] = fila;
     }
-    sinId.forEach(function (row) {
-      sh.getRange(row, COL_SYNC + 1).setValue('✗ Fila sin ID: para agregar cuentas usa la hoja «' + HOJA_CARGA + '»');
-    });
+    sinId.forEach(function (row) { sh.getRange(row, COL_SYNC + 1).setValue(MSG_SIN_ID); });
     if (!edits.length) return;
 
     var resp;
@@ -276,7 +274,7 @@ function aplicarFilas_(sh, rows, deleted, opts) {
   var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, COLS.length).getValues() : [];
   var indice = {};
-  data.forEach(function (r, i) { if (r[0] !== '') indice[String(r[0])] = i + 2; });
+  data.forEach(function (r, i) { if (r[COL_ID] !== '') indice[String(r[COL_ID])] = i + 2; });
 
   var hora = hora_();
   var agregadas = [];
@@ -324,19 +322,19 @@ function aplicarFilas_(sh, rows, deleted, opts) {
 
 function recargarInventarioManual() {
   var n = recargarInventario(true);
-  SpreadsheetApp.getActive().toast(n === 0 ? 'El inventario ya estaba al día.' : 'Inventario recargado.', ETIQUETA, 5);
+  SpreadsheetApp.getActive().toast(n === 0 ? 'La hoja ya estaba al día.' : 'Hoja recargada desde el panel.', ETIQUETA, 5);
 }
 
 /**
- * Trae el inventario completo del panel. La corre un activador cada 15 minutos
- * como red de seguridad; si todo coincide, no escribe nada.
+ * Trae todos los cupos del panel. La corre un activador cada 15 minutos como
+ * red de seguridad; si todo coincide, no escribe nada.
  */
 function recargarInventario(lanzarErrores) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(60000)) return -1;
   try {
     var ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SS_ID') || SpreadsheetApp.getActive().getId());
-    var sh = ss.getSheetByName(HOJA_INV);
+    var sh = ss.getSheetByName(HOJA);
     if (!sh) return -1;
     var resp = llamar_({ action: 'snapshot' });
     var rows = resp.rows || [];
@@ -346,8 +344,8 @@ function recargarInventario(lanzarErrores) {
     var actuales = {};
     var sinId = [];
     data.forEach(function (r) {
-      if (r[0] === '') { if (r.some(function (v) { return v !== ''; })) sinId.push(r); }
-      else actuales[String(r[0])] = r;
+      if (r[COL_ID] === '') { if (r.slice(0, N_VISIBLES).some(function (v) { return v !== ''; })) sinId.push(r); }
+      else actuales[String(r[COL_ID])] = r;
     });
 
     var alDia = Object.keys(actuales).length === rows.length && data.length === rows.length + sinId.length &&
@@ -362,7 +360,7 @@ function recargarInventario(lanzarErrores) {
       return f;
     });
     sinId.forEach(function (r) {
-      r[COL_SYNC] = '✗ Fila sin ID: para agregar cuentas usa la hoja «' + HOJA_CARGA + '»';
+      r[COL_SYNC] = MSG_SIN_ID;
       salida.push(r);
     });
 
@@ -393,13 +391,12 @@ function filaDesdeServidor_(row) {
 function marcarFilas_(sh, ids, texto) {
   var last = sh.getLastRow();
   if (last < 2) return;
-  var col = sh.getRange(2, 1, last - 1, 1).getValues();
+  var col = sh.getRange(2, COL_ID + 1, last - 1, 1).getValues();
   col.forEach(function (r, i) {
     if (ids.indexOf(String(r[0])) >= 0) sh.getRange(i + 2, COL_SYNC + 1).setValue(texto);
   });
 }
 
-/** Las filas nuevas heredan formato y validaciones de la fila de arriba. */
 function asegurarFilas_(sh, hasta) {
   var max = sh.getMaxRows();
   if (hasta > max) sh.insertRowsAfter(max, hasta - max + 50);
@@ -413,64 +410,6 @@ function ordenar_(sh) {
     { column: indice_('correoTitular') + 1, ascending: true },
     { column: indice_('cupo') + 1, ascending: true },
   ]);
-}
-
-// ---------------------------------------------------------------- Cargar
-
-function subirCarga() {
-  var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(HOJA_CARGA);
-  if (!sh) { SpreadsheetApp.getUi().alert('Primero usa ' + ETIQUETA + ' → Configurar conexión.'); return; }
-  var last = sh.getLastRow();
-  if (last < 2) { ss.toast('La hoja «' + HOJA_CARGA + '» está vacía.', ETIQUETA, 5); return; }
-
-  var valores = sh.getRange(2, 1, last - 1, CARGA.length).getValues();
-  var pendientes = [];
-  valores.forEach(function (fila, i) {
-    var datos = fila.slice(0, CARGA_RESULTADO);
-    if (datos.every(function (v) { return v === ''; })) return;
-    if (String(fila[CARGA_RESULTADO]).indexOf('✓') === 0) return;
-    var row = { fila: i + 2 };
-    for (var c = 0; c < CARGA_RESULTADO; c++) row[CARGA[c].key] = paraEnviar_(fila[c]);
-    pendientes.push(row);
-  });
-  if (!pendientes.length) { ss.toast('No hay filas pendientes (las marcadas con ✓ ya se subieron).', ETIQUETA, 6); return; }
-
-  var resultados = valores.map(function (f) { return [f[CARGA_RESULTADO]]; });
-  var ok = 0, error = 0;
-  ss.toast('Subiendo ' + pendientes.length + ' filas…', ETIQUETA, 30);
-  for (var i = 0; i < pendientes.length; i += 100) {
-    var lote = pendientes.slice(i, i + 100);
-    try {
-      var resp = llamar_({ action: 'load', rows: lote });
-      (resp.results || []).forEach(function (r) {
-        resultados[r.fila - 2][0] = (r.ok ? '✓ ' : '✗ ') + r.mensaje;
-        if (r.ok) ok++; else error++;
-      });
-    } catch (err) {
-      lote.forEach(function (r) { resultados[r.fila - 2][0] = '✗ No se subió: ' + mensaje_(err); error++; });
-      break;
-    }
-  }
-  sh.getRange(2, CARGA_RESULTADO + 1, resultados.length, 1).setValues(resultados);
-  SpreadsheetApp.flush();
-  if (ok) recargarInventario();
-  ss.toast('Subidas: ' + ok + (error ? ' · Con error: ' + error + ' (mira la columna Resultado)' : ''), ETIQUETA, 10);
-}
-
-/** Si corriges una fila ya procesada de «Cargar», se borra su resultado para poder subirla otra vez. */
-function limpiarResultadoCarga_(e) {
-  if (e.range.getLastRow() < 2 || e.range.getColumn() > CARGA_RESULTADO) return;
-  var sh = e.range.getSheet();
-  var r0 = Math.max(e.range.getRow(), 2);
-  var n = e.range.getLastRow() - r0 + 1;
-  var rango = sh.getRange(r0, CARGA_RESULTADO + 1, n, 1);
-  var vals = rango.getValues();
-  var cambio = false;
-  vals.forEach(function (v) {
-    if (String(v[0]).indexOf('✗') === 0) { v[0] = ''; cambio = true; }
-  });
-  if (cambio) rango.setValues(vals);
 }
 
 // ---------------------------------------------------------------- Utilidades
@@ -503,79 +442,62 @@ function instalarActivadores_() {
   ScriptApp.newTrigger('recargarInventario').timeBased().everyMinutes(15).create();
 }
 
-function prepararHojas_(servicios) {
+function prepararHoja_() {
   var ss = SpreadsheetApp.getActive();
-  var carga = ss.getSheetByName(HOJA_CARGA) || ss.insertSheet(HOJA_CARGA, 0);
-  var inv = ss.getSheetByName(HOJA_INV) || ss.insertSheet(HOJA_INV, 1);
+  var sh = ss.getSheetByName(HOJA) || ss.insertSheet(HOJA, 0);
 
-  // --- Inventario
-  formatearHoja_(inv, COLS);
-  inv.setFrozenColumns(3);
-  COLS.forEach(function (c, i) {
-    if (c.oculta) inv.hideColumns(i + 1);
-    if (c.lista) {
-      inv.getRange(2, i + 1, inv.getMaxRows() - 1, 1).setDataValidation(
-        SpreadsheetApp.newDataValidation().requireValueInList(c.lista, true).setAllowInvalid(false).build());
-    }
-  });
-  inv.getRange(1, indice_('id') + 1).setNote('Identificador del cupo en el panel. No lo cambies.');
-  inv.getRange(1, indice_('estado') + 1).setNote('Libre = en stock. Activo / Falta pago / Vencido necesitan WhatsApp del cliente. «Reservado» lo pone el sistema durante una compra.');
-  inv.getRange(1, COL_SYNC + 1).setNote('✓ guardado en el panel · ↻ cambió en el panel · ✗ no se guardó (motivo). Si hay ✗, la celda vuelve al valor del panel.');
-
-  // Aviso (no bloqueo) al tocar columnas que pone el sistema.
-  inv.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
-    if (p.getDescription() === ETIQUETA) p.remove();
-  });
-  COLS.forEach(function (c, i) {
-    if (!c.fija) return;
-    var p = inv.getRange(1, i + 1, inv.getMaxRows(), 1).protect().setDescription(ETIQUETA);
-    p.setWarningOnly(true);
-  });
-  var cab = inv.getRange(1, 1, 1, COLS.length).protect().setDescription(ETIQUETA);
-  cab.setWarningOnly(true);
-  reglasSync_(inv, COL_SYNC + 1);
-
-  // --- Cargar
-  formatearHoja_(carga, CARGA);
-  var nombres = servicios.map(function (s) { return s.name; });
-  if (nombres.length) {
-    carga.getRange(2, 1, carga.getMaxRows() - 1, 1).setDataValidation(
-      SpreadsheetApp.newDataValidation().requireValueInList(nombres, true).setAllowInvalid(false).build());
-  }
-  CARGA.forEach(function (c, i) { if (c.nota) carga.getRange(1, i + 1).setNote(c.nota); });
-  carga.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
-    if (p.getDescription() === ETIQUETA) p.remove();
-  });
-  carga.getRange(1, 1, 1, CARGA.length).protect().setDescription(ETIQUETA).setWarningOnly(true);
-  reglasSync_(carga, CARGA_RESULTADO + 1);
-
-  ss.setActiveSheet(carga);
-}
-
-function formatearHoja_(sh, cols) {
-  if (sh.getMaxColumns() < cols.length) sh.insertColumnsAfter(sh.getMaxColumns(), cols.length - sh.getMaxColumns());
-  sh.getRange(1, 1, 1, cols.length)
-    .setValues([cols.map(function (c) { return c.titulo; })])
-    .setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff').setWrap(true);
+  if (sh.getMaxColumns() < COLS.length) sh.insertColumnsAfter(sh.getMaxColumns(), COLS.length - sh.getMaxColumns());
+  sh.getRange(1, 1, 1, COLS.length)
+    .setValues([COLS.map(function (c) { return c.titulo; })])
+    .setFontWeight('bold').setFontSize(11).setBackground('#0000ff').setFontColor('#ffffff')
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.setRowHeight(1, 34);
   sh.setFrozenRows(1);
+
   var filas = sh.getMaxRows() - 1;
-  cols.forEach(function (c, i) {
+  sh.getRange(2, 1, filas, N_VISIBLES).setHorizontalAlignment('center');
+  COLS.forEach(function (c, i) {
     sh.setColumnWidth(i + 1, c.ancho || 100);
     var rango = sh.getRange(2, i + 1, filas, 1);
-    if (c.fecha) rango.setNumberFormat('dd/mm/yyyy');
-    else if (c.numero) rango.setNumberFormat('0.00');
+    if (c.fecha) rango.setNumberFormat('dd/mm/yy');
     else if (c.texto) rango.setNumberFormat('@');
-    if (c.fija) rango.setBackground('#f3f4f6');
+    if (c.fija) rango.setBackground('#f3f4f6').setFontColor('#6b7280');
+    if (c.oculta) sh.hideColumns(i + 1);
   });
+  sh.getRange(2, indice_('correoTitular') + 1, filas, 1).setHorizontalAlignment('left');
+  sh.getRange(1, indice_('nombre') + 1).setNote('WhatsApp (número) o usuario (@…) del cliente. Escribirlo ocupa el cupo; borrarlo lo libera (se borran PAGÓ y RENOVACIÓN).');
+  sh.getRange(1, indice_('correoTitular') + 1).setNote('Cambiarlo en una fila cambia el titular de sus 5 cupos. Para crear uno nuevo: menú ' + ETIQUETA + ' → Agregar titular.');
+  sh.getRange(1, COL_SYNC + 1).setNote('✓ guardado en el panel · ↻ cambió en el panel · ✗ no se guardó (motivo). Si hay ✗, la celda vuelve al valor del panel.');
+
+  // Aviso (no bloqueo) al tocar lo que pone el sistema.
+  sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
+    if (p.getDescription() === ETIQUETA) p.remove();
+  });
+  COLS.forEach(function (c, i) {
+    if (c.fija) sh.getRange(1, i + 1, sh.getMaxRows(), 1).protect().setDescription(ETIQUETA).setWarningOnly(true);
+  });
+  sh.getRange(1, 1, 1, COLS.length).protect().setDescription(ETIQUETA).setWarningOnly(true);
+
+  reglas_(sh);
+  ss.setActiveSheet(sh);
 }
 
-function reglasSync_(sh, columna) {
-  var rango = sh.getRange(2, columna, sh.getMaxRows() - 1, 1);
-  var otras = sh.getConditionalFormatRules().filter(function (r) {
-    return !r.getRanges().some(function (x) { return x.getColumn() === columna; });
-  });
-  otras.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('✗').setBackground('#fde2e1').setFontColor('#b42318').setRanges([rango]).build());
-  otras.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('✓').setFontColor('#067647').setRanges([rango]).build());
-  otras.push(SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith('↻').setFontColor('#175cd3').setRanges([rango]).build());
-  sh.setConditionalFormatRules(otras);
+/** Colores: bandas por titular, cupos libres, renovaciones vencidas o próximas y la columna Sync. */
+function reglas_(sh) {
+  var L = function (key) { return String.fromCharCode(65 + indice_(key)); };
+  var tit = L('correoTitular'), nom = L('nombre'), ren = L('vence');
+  var datos = sh.getRange('A2:' + ren);
+  var nombre = sh.getRange(nom + '2:' + nom);
+  var renueva = sh.getRange(ren + '2:' + ren);
+  var sync = sh.getRange(L('sync') + '2:' + L('sync'));
+  var n = SpreadsheetApp.newConditionalFormatRule;
+  sh.setConditionalFormatRules([
+    n().whenFormulaSatisfied('=AND($' + ren + '2<>"",$' + nom + '2<>"",$' + ren + '2<TODAY())').setFontColor('#d32f2f').setBold(true).setRanges([renueva]).build(),
+    n().whenFormulaSatisfied('=AND($' + ren + '2<>"",$' + nom + '2<>"",$' + ren + '2-TODAY()<=3)').setFontColor('#e65100').setBold(true).setRanges([renueva]).build(),
+    n().whenFormulaSatisfied('=AND($' + tit + '2<>"",$' + nom + '2="")').setBackground('#e8f5e9').setRanges([nombre]).build(),
+    n().whenFormulaSatisfied('=AND($' + tit + '2<>"",ISODD(COUNTUNIQUE($' + tit + '$2:$' + tit + '2)))').setBackground('#eef2ff').setRanges([datos]).build(),
+    n().whenTextStartsWith('✗').setBackground('#fde2e1').setFontColor('#b42318').setRanges([sync]).build(),
+    n().whenTextStartsWith('✓').setFontColor('#067647').setRanges([sync]).build(),
+    n().whenTextStartsWith('↻').setFontColor('#175cd3').setRanges([sync]).build(),
+  ]);
 }

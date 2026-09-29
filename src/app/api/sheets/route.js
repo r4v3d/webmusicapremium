@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { verifySheetsRequest, sheetsPushConfigured, sheetsSecret } from "../../../lib/sheetsAuth";
-import { applySheetEdits, buildInventoryRows, loadSheetRows, sheetServices } from "../../../lib/sheetsSync";
+import { SheetError, applySheetEdits, buildInventoryRows, createTitular, loadSheetRows, sheetServices } from "../../../lib/sheetsSync";
 import { getFreeSlotsStock } from "../../../lib/db";
 import { announceStock } from "../../../lib/telegramBot";
 
@@ -48,6 +48,15 @@ export async function POST(req) {
       case "edit": {
         const edits = Array.isArray(msg.edits) ? msg.edits.slice(0, 1000) : [];
         return NextResponse.json({ ok: true, ...(await applySheetEdits(edits)) });
+      }
+
+      case "addTitular": {
+        try {
+          return NextResponse.json({ ok: true, rows: await createTitular({ service: msg.service, email: msg.email }) });
+        } catch (error) {
+          if (error instanceof SheetError) return NextResponse.json({ ok: false, error: error.message });
+          throw error;
+        }
       }
 
       case "load": {

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../test/pgliteDb";
 import { createFamilyAccount, createMemberProfile, getOrCreateClient, updateMemberProfile } from "./db";
-import { applySheetEdits, buildInventoryRows, loadSheetRows } from "./sheetsSync";
+import { applySheetEdits, buildInventoryRows, createTitular, loadSheetRows } from "./sheetsSync";
 import { signSheets, verifySheetsRequest } from "./sheetsAuth";
 import { __resetSheetsPushState, flushSheetOutbox } from "./sheetsPush";
 import { query } from "./pg";
@@ -235,5 +235,85 @@ describe("flushSheetOutbox", () => {
     await seedAccount();
     const r = await flushSheetOutbox({ fetchImpl: () => { throw new Error("no debe llamarse"); } });
     expect(r.discarded).toBeGreaterThan(0);
+  });
+});
+
+describe("columna NOMBRE (formato tabla)", () => {
+  const row = async (id) => (await buildInventoryRows([String(id)]))[0];
+
+  it("un número ocupa el cupo como WhatsApp; borrarlo lo libera", async () => {
+    const { slots } = await seedAccount();
+    const id = String(slots[0].id);
+
+    let r = await applySheetEdits([{ id, changes: { nombre: "961416008", precio: "15", vence: "08/11/26" } }]);
+    expect(r.results[0]).toEqual({ id, ok: true });
+    let fila = await row(id);
+    expect(fila).toMatchObject({ estado: "Activo", nombre: "961416008", whatsapp: "961416008", precio: 15, vence: "2026-11-08" });
+
+    // Mismo valor: no cambia nada.
+    r = await applySheetEdits([{ id, changes: { nombre: "961416008" } }]);
+    expect(r.results[0].ok).toBe(true);
+    expect((await row(id)).version).toBe(fila.version);
+
+    r = await applySheetEdits([{ id, changes: { nombre: "" } }]);
+    expect(r.results[0].ok).toBe(true);
+    fila = await row(id);
+    expect(fila).toMatchObject({ estado: "Libre", nombre: "", precio: "", vence: "" });
+    expect(fila.correoMiembro).not.toBe("");
+  });
+
+  it("un @usuario ocupa el cupo sin WhatsApp", async () => {
+    const { slots } = await seedAccount();
+    const id = String(slots[1].id);
+    const r = await applySheetEdits([{ id, changes: { nombre: "@MYKLRoberto" } }]);
+    expect(r.results[0]).toEqual({ id, ok: true });
+    expect(await row(id)).toMatchObject({ estado: "Activo", nombre: "@MYKLRoberto", cliente: "@MYKLRoberto", whatsapp: "" });
+  });
+
+  it("otro número en un cupo ocupado cambia de cliente sin heredar el nombre", async () => {
+    const { slots } = await seedAccount();
+    const id = String(slots[0].id);
+    const ana = await getOrCreateClient("51999111222", "Ana", "");
+    await updateMemberProfile(slots[0].id, { clientId: ana.id, status: "active", pricePen: 9, renewalDate: "2026-10-24" });
+
+    await applySheetEdits([{ id, changes: { nombre: "987654321" } }]);
+    const fila = await row(id);
+    expect(fila.nombre).toBe("987654321");
+    expect(fila.cliente).not.toBe("Ana");
+  });
+
+  it("precio en un cupo libre sin NOMBRE se rechaza", async () => {
+    const { slots } = await seedAccount();
+    const id = String(slots[2].id);
+    const r = await applySheetEdits([{ id, changes: { precio: "9" } }]);
+    expect(r.results[0].ok).toBe(false);
+    expect(r.results[0].error).toMatch(/NOMBRE/);
+  });
+});
+
+describe("createTitular", () => {
+  it("crea la cuenta con 5 cupos y la clave por defecto del servidor", async () => {
+    vi.stubEnv("DEFAULT_TITULAR_PASSWORD", "clave-de-siempre");
+    const rows = await createTitular({ email: "nuevo@x.com" });
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toMatchObject({ plataforma: "Tidal", correoTitular: "nuevo@x.com", claveTitular: "clave-de-siempre", estado: "Libre" });
+    await expect(createTitular({ email: "NUEVO@x.com" })).rejects.toThrow(/ya existe/);
+  });
+
+  it("sin clave ni DEFAULT_TITULAR_PASSWORD, avisa", async () => {
+    vi.stubEnv("DEFAULT_TITULAR_PASSWORD", "");
+    await expect(createTitular({ email: "otro@x.com" })).rejects.toThrow(/DEFAULT_TITULAR_PASSWORD/);
+  });
+});
+
+describe("marca de cambios de la tabla del panel", () => {
+  it("la secuencia de sheet_outbox avanza con cada cambio aunque se vacíe la cola", async () => {
+    const { slots } = await seedAccount();
+    const stamp = async () => (await query("select last_value::text as v from sheet_outbox_id_seq")).rows[0].v;
+    const a = await stamp();
+    await clearOutbox();
+    await query("update account_slots set member_password = 'x' where id = $1", [slots[0].id]);
+    await clearOutbox();
+    expect(Number(await stamp())).toBeGreaterThan(Number(a));
   });
 });

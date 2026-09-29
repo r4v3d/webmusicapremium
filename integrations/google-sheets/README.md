@@ -1,11 +1,14 @@
 # Google Sheets conectado al panel
 
-Una hoja de Google que siempre está igual que el panel de administrador:
+Una sola hoja de Google, pestaña **«Clientes»**, con el mismo formato que *Clientes → Tabla* del panel:
 
-- **Hoja «Cargar»**: pegas muchas cuentas de golpe, eliges el menú *Subir* y aparecen en el panel.
-- **Hoja «Inventario»**: un cupo por fila, ordenado por plataforma, titular y número de cupo. Lo que edites ahí se guarda en el panel en 1–3 segundos. Lo que cambie en el panel (una venta, una renovación, una edición tuya) aparece en la hoja en unos 5 segundos.
+| CORREO TITULAR | NOMBRE | CORREO CLIENTE | CONTRASEÑA | PAGÓ | RENOVACIÓN |
+|---|---|---|---|---|---|
 
-Además, cada 15 minutos la hoja compara todo con el panel y corrige cualquier diferencia.
+- Un cupo por fila, agrupados por titular (5 filas por cuenta).
+- Lo que edites en la hoja se guarda en el panel en 1–3 segundos.
+- Lo que cambie en el panel (una venta, una renovación, una edición tuya) aparece en la hoja en unos 5 segundos, y en la tabla del panel en unos 4.
+- Cada 15 minutos la hoja compara todo con el panel y corrige cualquier diferencia.
 
 > **Privacidad.** La hoja tiene las claves de tus cuentas. **No la compartas** con nadie. Quien pueda editarla también puede ver la clave secreta de la conexión.
 
@@ -43,11 +46,19 @@ Verás algo como `GOOGLE_SHEETS_SECRET=3f9a…` (64 letras y números). La neces
 
 Deja esta ventana abierta; vuelves a ella en el paso B5.
 
+**5.** Guarda la clave de siempre de los titulares. Con ella se crean los titulares nuevos (botón **+ Titular** del panel o menú *Agregar titular* de la hoja) sin escribirla cada vez. Reemplaza `TU_CLAVE` por la clave (deja las comillas simples):
+
+```bash
+sudo bash -c 'sed -i "/^DEFAULT_TITULAR_PASSWORD=/d" /etc/musicapremium/env && echo "DEFAULT_TITULAR_PASSWORD=TU_CLAVE" >> /etc/musicapremium/env'
+```
+
+Va en el servidor y no en el código, porque el código está en GitHub.
+
 ---
 
 ## Parte B · En Google Sheets (10 minutos)
 
-**B1. Crea la hoja.** Entra a <https://sheets.new> con tu cuenta de Google. Ponle un nombre, por ejemplo *MusicaPremium Inventario*.
+**B1. Crea la hoja.** Entra a <https://sheets.new> con tu cuenta de Google. Ponle un nombre, por ejemplo *TIDAL PREMIUM 2026*. También puedes usar una hoja que ya tengas: el script crea su propia pestaña «Clientes» y no toca las demás.
 
 **B2. Pega el código.**
 
@@ -77,7 +88,7 @@ Deja esta ventana abierta; vuelves a ella en el paso B5.
 sudo bash -c 'echo "GOOGLE_SHEETS_WEBAPP_URL=PEGA_AQUI_LA_URL" >> /etc/musicapremium/env'
 ```
 
-**B5. Reinicia la tienda** para que lea los dos valores nuevos:
+**B5. Reinicia la tienda** para que lea los valores nuevos:
 
 ```bash
 sudo systemctl restart musicapremium-web musicapremium-worker
@@ -91,7 +102,7 @@ sudo systemctl restart musicapremium-web musicapremium-worker
    - Segunda pregunta: pega la clave secreta del paso A4 y pulsa **Aceptar**.
 3. Si Google vuelve a pedir permisos, acéptalos como en B3.
 
-**Salió bien si** aparece *«¡Conectado!»* con la frase *«Los cambios del panel llegan a la hoja en segundos»*, y la hoja **Inventario** muestra todos tus cupos.
+**Salió bien si** aparece *«¡Conectado!»* con la frase *«Los cambios del panel llegan a la hoja en segundos»*, y la pestaña **Clientes** muestra todos tus cupos.
 
 **Prueba de ida y vuelta:**
 - En el panel, cambia la clave de un miembro. En unos segundos cambia en la hoja y la columna *Sync* dice `↻ Panel`.
@@ -101,50 +112,33 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 
 ## Cómo se usa
 
-### Hoja «Cargar»: alta masiva
+| Columna | Qué es |
+|---|---|
+| CORREO TITULAR | Cambiarlo en cualquier fila cambia el titular de sus 5 cupos. La clave del titular no se muestra: es la de `DEFAULT_TITULAR_PASSWORD`. |
+| NOMBRE | WhatsApp (número) o usuario (`@…`) del cliente. **Escribirlo ocupa el cupo** (queda Activo). **Borrarlo lo libera**: se borran PAGÓ y RENOVACIÓN; el correo y la contraseña se quedan para volver a venderlo. En verde = cupo libre. |
+| CORREO CLIENTE / CONTRASEÑA | El acceso del cupo. |
+| PAGÓ | Lo que paga el cliente, en soles. Necesita NOMBRE. |
+| RENOVACIÓN | Día/mes/año (`08/11/26`). En rojo si ya venció, en naranja si vence en 3 días o menos. Necesita NOMBRE. |
+| Sync | La pone el sistema: `✓ Guardado` ya está en el panel · `↻ Panel` cambió desde el panel · `✗` no se guardó, con el motivo (la celda vuelve sola al valor del panel). |
 
-| Columna | ¿Obligatoria? | Qué hace |
-|---|---|---|
-| Plataforma | Sí | Tidal, Deezer o Qobuz (lista desplegable). |
-| Correo titular | Sí | Si no existe, se crea la cuenta con 5 cupos vacíos. |
-| Clave titular | Solo si la cuenta es nueva | Si la cuenta ya existe y pones otra clave, se actualiza. |
-| Renueva titular | No | Fecha día/mes/año. Si la cuenta es nueva y la dejas vacía: hoy + 30 días. |
-| Costo titular | No | Lo que pagas por renovar la cuenta. |
-| Correo miembro | No | Ocupa el **primer cupo vacío** de esa cuenta y queda **listo para vender**. |
-| Clave miembro | Si pones correo miembro | |
-| Resultado | La llena el sistema | `✓` se subió · `✗` no se subió, con el motivo. |
+- **Agregar un titular:** menú **MusicaPremium → Agregar titular…** (o **+ Titular** en el panel). Aparecen sus 5 filas libres.
+- **Borrar** titulares o cupos se hace en el panel (*Clientes → Familias*). Si borras una fila en la hoja, vuelve en la siguiente revisión.
+- Puedes pegar varias celdas a la vez, ordenar y filtrar. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
+- Las columnas ocultas (ID, plataforma, cupo, versión) las usa el sistema: no las muestres ni las edites.
 
-**Ejemplo:** una cuenta nueva con 3 miembros son 3 filas con el mismo titular. La clave del titular basta ponerla en la primera:
+### En el panel: Clientes → Tabla
 
-| Plataforma | Correo titular | Clave titular | Renueva titular | Costo titular | Correo miembro | Clave miembro |
-|---|---|---|---|---|---|---|
-| Tidal | titular1@gmail.com | ClaveT1 | 15/11/2026 | 25 | miembro1@gmail.com | Clave1 |
-| Tidal | titular1@gmail.com | | | | miembro2@gmail.com | Clave2 |
-| Tidal | titular1@gmail.com | | | | miembro3@gmail.com | Clave3 |
+La misma tabla, editable como una hoja de cálculo:
 
-Cuando termines de pegar: **MusicaPremium → Subir filas de «Cargar»**.
+- **PC:** clic en una celda y escribe encima; doble clic, Enter o F2 para corregir; flechas y Tab para moverte; Supr para borrar; Ctrl+C / Ctrl+V (también varias celdas copiadas de Excel o Sheets).
+- **Celular:** toca una celda y escribe.
+- En RENOVACIÓN, `+1` suma un mes a la fecha que tenga (o a hoy si está vacía).
+- El número de cupo (columna de la izquierda) selecciona la fila para las acciones en lote.
+- Arriba dice **En vivo**, **Guardando…** o **Sin conexión**.
 
-- Las filas con `✓` no se vuelven a subir. Puedes borrarlas cuando quieras.
-- Si una fila sale con `✗`, corrígela: el `✗` se borra solo y la vuelves a subir con el mismo menú.
-- Si el miembro ya existía en esa cuenta, solo se actualiza su clave. No se duplica.
-- Igual que con la importación del panel, se anuncia el stock nuevo en tu canal de Telegram.
+### Si usabas la versión anterior (pestañas «Cargar» e «Inventario»)
 
-### Hoja «Inventario»: ver y editar
-
-- **Columnas blancas**: se pueden editar y se guardan solas al salir de la celda. Puedes pegar varias celdas a la vez.
-- **Columnas grises** (ID, Plataforma, Cupo, Actualizado, Sync): las pone el sistema. Si intentas editarlas, Google te avisa.
-- Los datos del **titular** (correo, clave, renovación, costo, moneda, notas) se repiten en los 5 cupos de su cuenta. Cambiarlos en cualquier fila cambia la cuenta y actualiza sus 5 filas.
-- **Estado**:
-  - *Libre* significa en stock. Al pasar un cupo a Libre, se borran su cliente, precio y vencimiento.
-  - *Activo*, *Falta pago* y *Vencido* necesitan el **WhatsApp** del cliente.
-  - *Reservado* lo pone el sistema mientras alguien está pagando. Ese cupo no se puede editar hasta que termine la compra.
-- **Columna Sync**:
-  - `✓ Guardado` significa que el cambio ya está en el panel.
-  - `↻ Panel` significa que la fila cambió desde el panel.
-  - `✗` significa que no se guardó, con el motivo. La celda vuelve sola al valor del panel.
-- **Agregar** cuentas se hace en «Cargar», no en Inventario.
-- **Borrar** cuentas o cupos se hace en el panel. Si borras una fila en la hoja, el panel no cambia y la fila vuelve en la siguiente revisión, o al usar *Recargar inventario completo*.
-- Puedes ordenar y filtrar la hoja como quieras. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
+Pega el código nuevo, guarda y vuelve a publicar (**Implementar → Gestionar implementaciones → ✏ → Nueva versión**). Luego usa **MusicaPremium → Configurar conexión…** otra vez. Se crea la pestaña «Clientes». Las pestañas viejas ya no se sincronizan: bórralas cuando quieras.
 
 ---
 

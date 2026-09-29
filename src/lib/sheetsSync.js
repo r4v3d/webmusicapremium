@@ -32,10 +32,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const INVENTORY_KEYS = [
   "id", "plataforma", "correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular",
   "cupo", "estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence",
-  "notasTitular", "actualizado",
+  "notasTitular", "actualizado", "cuenta", "nombre",
 ];
 const ACCOUNT_KEYS = ["correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular", "notasTitular"];
-const SLOT_KEYS = ["estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence"];
+const SLOT_KEYS = ["estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence", "nombre"];
+// NOMBRE (formato de tabla): un número se toma como WhatsApp; cualquier otra cosa (p. ej. @usuario), como nombre.
+const PHONE_RE = /^\+?[\d\s().-]+$/;
+const looksLikePhone = (v) => PHONE_RE.test(v) && v.replace(/\D/g, "").length >= 6;
 
 export function sheetServices() {
   return Object.entries(CONFIG.services).map(([code, s]) => ({ code, name: s.name }));
@@ -67,7 +70,7 @@ function rowVersion(row) {
 export async function buildInventoryRows(slotIds = null) {
   if (slotIds && slotIds.length === 0) return [];
   const { rows } = await query(
-    `select s.id::text as id, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
+    `select s.id::text as id, s.platform_account_id::text as cuenta, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
             pa.renewal_cost, pa.renewal_currency, pa.notes, s.slot_number, s.status,
             (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
             s.member_email, s.member_password, s.email_type, c.display_name,
@@ -115,6 +118,9 @@ function toSheetRow(r) {
     vence: occupied ? toDateStr(r.renewal_date) || "" : "",
     notasTitular: r.notes || "",
     actualizado: r.actualizado || "",
+    cuenta: r.cuenta || "",
+    // Lo que se ve en la columna NOMBRE: el WhatsApp o, si no tiene, el nombre.
+    nombre: occupied ? r.whatsapp || r.display_name || "" : "",
   };
   row.version = rowVersion(row);
   return row;
@@ -169,6 +175,33 @@ async function assertMemberFree(tx, email, platformCode, exceptSlotId) {
     [platformCode, email, exceptSlotId == null ? null : String(exceptSlotId)]
   );
   if (res.rows[0]) throw new SheetError(`El correo miembro ${email} ya está en la cuenta de ${res.rows[0].account_email}.`);
+}
+
+/**
+ * Traduce NOMBRE a las columnas de siempre: escribirlo ocupa el cupo (Activo),
+ * borrarlo lo libera. Si no cambió respecto de lo que se ve, no hace nada.
+ */
+function nombreToChanges(changes, cur) {
+  const { nombre, ...rest } = changes;
+  const value = text(nombre);
+  const curStatus = cur.status === "reserved" && !cur.reserved_live ? "free" : cur.status;
+  const occupied = curStatus !== "free" && curStatus !== "reserved";
+  const shown = occupied ? cur.whatsapp || cur.display_name || "" : "";
+  if (value === shown) return rest;
+
+  if (!value) return occupied && !("estado" in rest) ? { ...rest, estado: "Libre" } : rest;
+
+  const next = { ...rest };
+  if (looksLikePhone(value)) {
+    next.whatsapp = value;
+    // Otro número = otra persona: no heredar el nombre del cliente anterior.
+    if (digits(value) !== digits(cur.whatsapp)) next.cliente = "";
+  } else {
+    next.cliente = value;
+    next.whatsapp = "";
+  }
+  if (!occupied && !("estado" in rest)) next.estado = "Activo";
+  return next;
 }
 
 async function applyOneEdit(tx, slotId, changes) {
@@ -229,6 +262,7 @@ async function applyOneEdit(tx, slotId, changes) {
   }
 
   // Datos del cupo.
+  if (has("nombre")) changes = nombreToChanges(changes, cur);
   if (!SLOT_KEYS.some(has)) return { accountId: cur.platform_account_id, accountChanged };
   if (cur.reserved_live) {
     throw new SheetError("Este cupo está apartado por una compra en curso. Espera unos minutos y vuelve a editarlo.");
@@ -265,7 +299,7 @@ async function applyOneEdit(tx, slotId, changes) {
   if (nextStatus === "free") {
     const filled = ["cliente", "whatsapp", "precio", "vence"].filter((k) => has(k) && text(changes[k]));
     if (filled.length && !has("estado")) {
-      throw new SheetError("Un cupo libre no tiene cliente, precio ni vencimiento. Cambia primero el Estado.");
+      throw new SheetError("Este cupo está libre: escribe primero el NOMBRE del cliente.");
     }
     if (statusChanged) Object.assign(upd, { status: "free", clientId: null, pricePen: 0, renewalDate: null });
   } else {
@@ -273,8 +307,8 @@ async function applyOneEdit(tx, slotId, changes) {
     if (clientTouched) {
       const whatsapp = has("whatsapp") ? text(changes.whatsapp) : cur.whatsapp || "";
       const nickname = has("cliente") ? text(changes.cliente) : cur.display_name || "";
-      if (digits(whatsapp).length < 6) {
-        throw new SheetError("Para un cupo ocupado hace falta el WhatsApp del cliente.");
+      if (digits(whatsapp).length < 6 && !nickname) {
+        throw new SheetError("Para un cupo ocupado hace falta el NOMBRE del cliente (WhatsApp o usuario).");
       }
       const sameClient = cur.customer_id && digits(whatsapp) === digits(cur.whatsapp) && nickname === (cur.display_name || "");
       if (!sameClient) {
@@ -333,6 +367,37 @@ export async function applySheetEdits(edits) {
   const existing = new Set(rows.map((r) => r.id));
   const deleted = [...touchedSlots].filter((id) => !existing.has(id));
   return { results, rows, deleted };
+}
+
+// --- Titular nuevo (panel o menú de la hoja) ---
+
+/**
+ * Crea una cuenta titular con sus 5 cupos vacíos. Sin clave usa
+ * DEFAULT_TITULAR_PASSWORD del servidor (la de siempre; no vive en el código).
+ * Devuelve las filas de los 5 cupos.
+ */
+export async function createTitular({ service = "tidal", email, password = "" } = {}) {
+  const code = resolveService(service);
+  if (!code) throw new SheetError(`Plataforma desconocida («${text(service)}»).`);
+  const masterEmail = parseEmailField(email, "Correo titular", { required: true });
+  const masterPassword = text(password) || text(process.env.DEFAULT_TITULAR_PASSWORD);
+  if (!masterPassword) {
+    throw new SheetError("Falta la clave del titular: escríbela o configura DEFAULT_TITULAR_PASSWORD en el servidor.");
+  }
+  const accountId = await withTransaction(async (tx) => {
+    await assertTitularFree(tx, masterEmail, null);
+    const created = await createFamilyAccount({
+      service: code, masterEmail, password: masterPassword, ownerRenewalDate: plus30(), renewalCost: 0, notes: "",
+    }, { tx });
+    await tx.query(
+      `insert into account_slots(platform_account_id, slot_number, status, email_type, member_email, member_password)
+       select $1, n, 'free', 'admin', '', '' from generate_series(1, 5) as n`,
+      [created.id]
+    );
+    return created.id;
+  });
+  const ids = await query("select id::text as id from account_slots where platform_account_id = $1", [accountId]);
+  return buildInventoryRows(ids.rows.map((r) => r.id));
 }
 
 // --- Alta masiva desde la hoja «Cargar» ---
