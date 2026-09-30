@@ -14,8 +14,6 @@ const COLS = [
   { key: "claveMiembro", label: "Contraseña", cls: "col-clave" },
   { key: "precio", label: "Pagó", cls: "col-pago", kind: "money" },
   { key: "vence", label: "Renovación", cls: "col-renueva", kind: "date" },
-  { key: "renuevaTitular", label: "Renov. titular", cls: "col-rtit", kind: "date", account: true },
-  { key: "tarjetaTitular", label: "Tarjeta", cls: "col-tarjeta", account: true },
 ];
 const DATE_KEYS = new Set(COLS.filter((c) => c.kind === "date").map((c) => c.key));
 // Datos de la cuenta: se repiten en sus 5 filas y se atenúan fuera de la primera.
@@ -673,7 +671,7 @@ export default function SlotsGrid() {
           onCopy={onCopy}
           onPaste={onPaste}
           role="grid"
-          aria-label="Cupos: correo titular, nombre, correo cliente, contraseña, pagó, renovación, renovación del titular y tarjeta"
+          aria-label="Cupos: correo titular, nombre, correo cliente, contraseña, pagó y renovación"
         >
           <table className="slots-grid-table">
             <thead>
@@ -713,7 +711,7 @@ export default function SlotsGrid() {
       <p className="grid-help">
         <span className="only-desktop">Clic para elegir una celda y escribe encima · doble clic o Enter para corregir · Supr para borrar · Ctrl+V pega varias celdas desde Excel/Sheets.</span>
         <span className="only-touch">Toca una celda para editarla.</span>
-        {" "}Fechas: <code>dd/mm/aa</code> o <code>+1</code> (un mes más). Nombre vacío = cupo libre. Renov. titular y Tarjeta valen para las 5 filas del titular: escríbelas en cualquiera. El número del cupo selecciona la fila para acciones en lote.
+        {" "}Fechas: <code>dd/mm/aa</code> o <code>+1</code> (un mes más). Nombre vacío = cupo libre. La renovación y la tarjeta de cada titular están en Cobros → Renovaciones. El número del cupo selecciona la fila para acciones en lote.
       </p>
     </div>
   );

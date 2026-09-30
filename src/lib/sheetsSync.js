@@ -716,3 +716,118 @@ export async function loadSheetRows(rows) {
   }
   return { results, sellableByService };
 }
+
+// --- Pestaña «Titulares»: una fila por cuenta titular ---
+
+const TITULAR_KEYS = ["id", "plataforma", "correoTitular", "renuevaTitular", "tarjetaTitular"];
+
+function titularVersion(row) {
+  const values = TITULAR_KEYS.map((k) => row[k]);
+  return crypto.createHash("sha1").update(JSON.stringify(values)).digest("hex").slice(0, 16);
+}
+
+/** Filas de «Titulares», en orden fijo (plataforma y correo) para que no se muevan mientras se edita. */
+export async function buildTitularRows(accountIds = null) {
+  if (accountIds && accountIds.length === 0) return [];
+  const { rows } = await query(
+    `select id::text as id, platform_code, account_email, owner_renewal_date, renewal_card
+       from platform_accounts
+      where ($1::text[] is null or id::text = any($1::text[]))
+      order by platform_code, lower(account_email), id`,
+    [accountIds ? accountIds.map(String) : null]
+  );
+  return rows.map((r) => {
+    const row = {
+      id: r.id,
+      plataforma: serviceName(r.platform_code),
+      correoTitular: r.account_email || "",
+      renuevaTitular: toDateStr(r.owner_renewal_date) || "",
+      tarjetaTitular: r.renewal_card || "",
+    };
+    row.version = titularVersion(row);
+    return row;
+  });
+}
+
+function titularChanges(changes, cur) {
+  const has = (k) => Object.prototype.hasOwnProperty.call(changes, k);
+  const acc = {};
+  if (has("correoTitular")) {
+    const { email } = splitTitular(changes.correoTitular);
+    if (!email) throw new SheetError("El CORREO TITULAR no puede quedar vacío. Para borrar un titular, limpia sus filas en «Clientes».");
+    const clean = parseEmailField(email, "Correo titular", { required: true });
+    if (clean !== cur.account_email) acc.masterEmail = clean;
+  }
+  if (has("renuevaTitular")) {
+    const date = parseDateField(changes.renuevaTitular, "Fecha renovación");
+    if (date !== (toDateStr(cur.owner_renewal_date) || null)) acc.ownerRenewalDate = date;
+  }
+  if (has("tarjetaTitular")) {
+    const card = text(changes.tarjetaTitular);
+    if (card.length > 40) throw new SheetError("Tarjeta: máximo 40 caracteres.");
+    if (card !== (cur.renewal_card || "")) acc.renewalCard = card;
+  }
+  return acc;
+}
+
+/** Ediciones de filas de «Titulares» que ya tienen ID (el de la cuenta). Cada una en su transacción. */
+export async function applyTitularEdits(edits) {
+  const results = [];
+  const touched = new Set();
+  for (const edit of edits || []) {
+    const id = text(edit?.id);
+    if (!id) continue;
+    touched.add(id);
+    try {
+      await withTransaction(async (tx) => {
+        const cur = (await tx.query("select * from platform_accounts where id::text = $1 for update", [id])).rows[0];
+        if (!cur) throw new SheetError("Este titular ya no existe en el panel.");
+        const acc = titularChanges(edit.changes || {}, cur);
+        if (acc.masterEmail) await assertTitularFree(tx, acc.masterEmail, cur.id);
+        if (Object.keys(acc).length) await updateFamilyAccount(cur.id, acc, { tx });
+      });
+      results.push({ id, ok: true });
+    } catch (error) {
+      if (!(error instanceof SheetError)) console.error("[sheets] titular", id, error);
+      results.push({ id, ok: false, error: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
+    }
+  }
+  const titulares = await buildTitularRows([...touched]);
+  const existing = new Set(titulares.map((r) => r.id));
+  return { results, titulares, deleted: [...touched].filter((id) => !existing.has(id)) };
+}
+
+/**
+ * Filas pegadas en «Titulares» sin ID: se buscan por correo (sin distinguir
+ * mayúsculas; «correo - IO» vale) y se les pone la fecha y la tarjeta. No crea
+ * titulares: esos nacen en «Clientes» o con «Agregar titular».
+ */
+export async function importTitularRows(rows) {
+  const results = [];
+  for (const row of rows || []) {
+    const fila = row?.fila ?? null;
+    try {
+      await withTransaction(async (tx) => {
+        const { email } = splitTitular(row.correoTitular);
+        if (!email) throw new SheetError("Falta el CORREO TITULAR.");
+        const cur = (await tx.query(
+          "select * from platform_accounts where lower(account_email) = lower($1) order by id limit 1 for update",
+          [email]
+        )).rows[0];
+        if (!cur) {
+          throw new SheetError(`${email} no existe en el panel. Primero cárgalo en «Clientes» (o menú Agregar titular).`);
+        }
+        const changes = {};
+        if (text(row.renuevaTitular)) changes.renuevaTitular = row.renuevaTitular;
+        if (text(row.tarjetaTitular)) changes.tarjetaTitular = row.tarjetaTitular;
+        const acc = titularChanges(changes, cur);
+        if (Object.keys(acc).length) await updateFamilyAccount(cur.id, acc, { tx });
+      });
+      results.push({ fila, ok: true });
+    } catch (error) {
+      if (!(error instanceof SheetError)) console.error("[sheets] titular nuevo", fila, error);
+      results.push({ fila, ok: false, mensaje: error instanceof SheetError ? error.message : "Error interno al guardar. Reintenta." });
+    }
+  }
+  return { results };
+}

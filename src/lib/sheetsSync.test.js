@@ -1,7 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../test/pgliteDb";
 import { createFamilyAccount, createMemberProfile, getOrCreateClient, updateMemberProfile } from "./db";
-import { applySheetEdits, buildInventoryRows, createTitular, importSheetRows, loadSheetRows } from "./sheetsSync";
+import {
+  applySheetEdits, applyTitularEdits, buildInventoryRows, buildTitularRows, createTitular, importSheetRows,
+  importTitularRows, loadSheetRows,
+} from "./sheetsSync";
 import { signSheets, verifySheetsRequest } from "./sheetsAuth";
 import { __resetSheetsPushState, flushSheetOutbox } from "./sheetsPush";
 import { query } from "./pg";
@@ -485,5 +488,42 @@ describe("RENOVACIÓN TITULAR y TARJETA", () => {
     ]);
     expect(r.results[0].ok).toBe(true);
     expect(r.rows[0]).toMatchObject({ renuevaTitular: "2026-09-30", tarjetaTitular: "6053" });
+  });
+});
+
+describe("pestaña «Titulares»", () => {
+  it("una fila por cuenta, en orden fijo por correo", async () => {
+    await createFamilyAccount({ service: "tidal", masterEmail: "zeta@x.com", password: "p" });
+    await createFamilyAccount({ service: "tidal", masterEmail: "Alfa@x.com", password: "p", ownerRenewalDate: "2026-10-12", renewalCard: "4642" });
+    const rows = await buildTitularRows();
+    expect(rows.map((r) => r.correoTitular)).toEqual(["Alfa@x.com", "zeta@x.com"]);
+    expect(rows[0]).toMatchObject({ plataforma: "Tidal", renuevaTitular: "2026-10-12", tarjetaTitular: "4642" });
+    expect(rows[0].version).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("editar fecha, tarjeta y correo; el correo vacío o repetido se rechaza", async () => {
+    const a = await createFamilyAccount({ service: "tidal", masterEmail: "a@x.com", password: "p" });
+    await createFamilyAccount({ service: "tidal", masterEmail: "b@x.com", password: "p" });
+    let r = await applyTitularEdits([{ id: String(a.id), changes: { renuevaTitular: "30/09/2026", tarjetaTitular: "6053", correoTitular: "a2@x.com" } }]);
+    expect(r.results[0]).toEqual({ id: String(a.id), ok: true });
+    expect(r.titulares[0]).toMatchObject({ correoTitular: "a2@x.com", renuevaTitular: "2026-09-30", tarjetaTitular: "6053" });
+
+    r = await applyTitularEdits([{ id: String(a.id), changes: { correoTitular: "" } }]);
+    expect(r.results[0]).toMatchObject({ ok: false, error: expect.stringMatching(/no puede quedar vacío/) });
+    r = await applyTitularEdits([{ id: String(a.id), changes: { correoTitular: "B@x.com" } }]);
+    expect(r.results[0]).toMatchObject({ ok: false, error: expect.stringMatching(/ya existe/) });
+    expect(r.titulares[0].correoTitular).toBe("a2@x.com");
+  });
+
+  it("filas pegadas: se buscan por correo (con etiqueta y sin distinguir mayúsculas); las que no existen se explican", async () => {
+    await createFamilyAccount({ service: "tidal", masterEmail: "get.m.ushroom41.91@gmail.com", password: "p" });
+    const r = await importTitularRows([
+      { fila: 2, correoTitular: "GET.m.ushroom41.91@gmail.com - YO", renuevaTitular: "30/09/2026", tarjetaTitular: "6053" },
+      { fila: 3, correoTitular: "no-existe@gmail.com", renuevaTitular: "11/10/2026", tarjetaTitular: "4642" },
+    ]);
+    expect(r.results[0]).toEqual({ fila: 2, ok: true });
+    expect(r.results[1]).toMatchObject({ fila: 3, ok: false, mensaje: expect.stringMatching(/no existe en el panel/) });
+    const [row] = await buildTitularRows();
+    expect(row).toMatchObject({ renuevaTitular: "2026-09-30", tarjetaTitular: "6053" });
   });
 });

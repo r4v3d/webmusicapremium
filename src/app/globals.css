@@ -6239,7 +6239,7 @@ a {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
-  min-width: 1040px;
+  min-width: 860px;
   table-layout: fixed;
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
@@ -6280,20 +6280,16 @@ a {
 
 .slots-grid-table .col-num { width: 34px; padding: 0; color: var(--text-dim); font-size: 0.7rem; cursor: pointer; background: var(--bg-tertiary); }
 .slots-grid-table tr.is-selected .col-num { color: var(--accent-cyan); font-weight: 700; }
-.slots-grid-table .col-titular { width: 18%; }
+.slots-grid-table .col-titular { width: 22%; }
 .slots-grid-table td.col-titular { text-align: left; color: var(--text-muted); }
-.slots-grid-table .col-nombre { width: 12%; }
+.slots-grid-table .col-nombre { width: 15%; }
 .slots-grid-table td.col-nombre { font-weight: 600; color: var(--text-main); }
-.slots-grid-table .col-correo { width: 20%; }
-.slots-grid-table .col-clave { width: 11%; }
+.slots-grid-table .col-correo { width: 25%; }
+.slots-grid-table .col-clave { width: 15%; }
 .slots-grid-table td.col-clave { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
-.slots-grid-table .col-pago { width: 6%; }
+.slots-grid-table .col-pago { width: 8%; }
 .slots-grid-table td.col-pago { color: var(--accent-cyan); font-weight: 700; }
-.slots-grid-table .col-renueva { width: 9%; }
-.slots-grid-table .col-rtit { width: 10%; }
-.slots-grid-table .col-tarjeta { width: 7%; }
-.slots-grid-table td.col-rtit { color: var(--text-muted); }
-.slots-grid-table td.col-tarjeta { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: var(--text-muted); }
+.slots-grid-table .col-renueva { width: 12%; }
 .slots-grid-table td.col-renueva { font-weight: 600; }
 .grid-selall { background: none; border: none; color: #fff; font-size: 0.95rem; cursor: pointer; padding: 4px; line-height: 1; }
 
@@ -6340,14 +6336,12 @@ a {
 
 @media (max-width: 768px) {
   .slots-grid-wrap { max-height: calc(100dvh - var(--admin-header-h) - var(--admin-bottomnav-h) - 120px); }
-  .slots-grid-table { min-width: 780px; font-size: 0.78rem; }
+  .slots-grid-table { min-width: 600px; font-size: 0.78rem; }
   .slots-grid-table td { padding: 0 5px; }
-  .slots-grid-table .col-titular { width: 15%; }
-  .slots-grid-table .col-nombre { width: 14%; }
-  .slots-grid-table .col-correo { width: 20%; }
-  .slots-grid-table .col-clave { width: 12%; }
-  .slots-grid-table .col-pago { width: 6%; }
-  .slots-grid-table .col-renueva { width: 10%; }
-  .slots-grid-table .col-rtit { width: 10%; }
-  .slots-grid-table .col-tarjeta { width: 7%; }
+  .slots-grid-table .col-titular { width: 17%; }
+  .slots-grid-table .col-nombre { width: 18%; }
+  .slots-grid-table .col-correo { width: 25%; }
+  .slots-grid-table .col-clave { width: 15%; }
+  .slots-grid-table .col-pago { width: 8%; }
+  .slots-grid-table .col-renueva { width: 13%; }
 }

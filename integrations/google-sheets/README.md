@@ -1,11 +1,17 @@
 # Google Sheets conectado al panel
 
-Una sola hoja de Google, pestaña **«Clientes»**, con el mismo formato que *Clientes → Tabla* del panel:
+Una hoja de Google con dos pestañas:
 
-| CORREO TITULAR | NOMBRE | CORREO CLIENTE | CONTRASEÑA | PAGÓ | RENOVACIÓN | RENOVACIÓN TITULAR | TARJETA |
-|---|---|---|---|---|---|---|---|
+**«Clientes»**: el mismo formato que *Clientes → Tabla* del panel. Un cupo por fila, agrupados por titular (5 filas por cuenta).
 
-- Un cupo por fila, agrupados por titular (5 filas por cuenta).
+| CORREO TITULAR | NOMBRE | CORREO CLIENTE | CONTRASEÑA | PAGÓ | RENOVACIÓN |
+|---|---|---|---|---|---|
+
+**«Titulares»**: una fila por cuenta titular, igual que *Cobros → Renovaciones* del panel.
+
+| CORREO TITULAR | FECHA RENOVACIÓN | TARJETA |
+|---|---|---|
+
 - Lo que edites en la hoja se guarda en el panel en 1–3 segundos.
 - Lo que cambie en el panel (una venta, una renovación, una edición tuya) aparece en la hoja en unos 5 segundos, y en la tabla del panel en unos 4.
 - Cada 15 minutos la hoja compara todo con el panel y corrige cualquier diferencia.
@@ -119,8 +125,6 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 | CORREO CLIENTE / CONTRASEÑA | El acceso del cupo. |
 | PAGÓ | Lo que paga el cliente, en soles. Necesita NOMBRE. |
 | RENOVACIÓN | Día/mes/año (`08/11/26`). En rojo si ya venció, en naranja si vence en 3 días o menos. Necesita NOMBRE. |
-| RENOVACIÓN TITULAR | Cuándo renuevas tú la cuenta titular. Es del titular: escríbela en **cualquiera** de sus filas y se pone en las 5 (y en *Cobros → Renovaciones* del panel). |
-| TARJETA | Con qué tarjeta pagas esa renovación (p. ej. `4642`). Igual que la anterior: una fila basta. Si pegas valores distintos en filas del mismo titular, no se guarda ninguno y *Sync* lo explica. |
 | Sync | La pone el sistema: `✓ Guardado` ya está en el panel · `↻ Panel` cambió desde el panel · `✗` no se guardó, con el motivo (la celda vuelve sola al valor del panel). |
 
 - **Pegar muchas filas de golpe** (por ejemplo, copiadas de tus hojas antiguas): pégalas **debajo de la última fila**, en las columnas A–F, nunca encima de filas que ya existen. Puedes pegar todo junto o columna por columna: mientras pegas, nada se mueve y *Sync* dice «Fila nueva». Cuando termines, usa **MusicaPremium → Cargar filas nuevas**:
@@ -137,7 +141,19 @@ sudo systemctl restart musicapremium-web musicapremium-worker
   - No uses *Eliminar fila* (clic derecho): el panel no se entera y la fila vuelve en la siguiente revisión. También puedes borrar un titular en el panel: *Clientes → Tabla*, elige una celda de sus filas y pulsa **Borrar titular**.
 - Puedes pegar varias celdas a la vez, ordenar y filtrar. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
 - Las columnas ocultas (ID, plataforma, cupo, versión) las usa el sistema: no las muestres ni las edites.
-- **Si tu hoja es de la versión anterior** (sin RENOVACIÓN TITULAR ni TARJETA): al abrirla con el código nuevo, las dos columnas se insertan solas después de RENOVACIÓN y lo demás se corre a la derecha, sin perder datos.
+- **Si tu «Clientes» tenía las columnas RENOVACIÓN TITULAR y TARJETA** (versión anterior): al abrir la hoja con el código nuevo se quitan solas y se crea la pestaña «Titulares». Esos datos no se pierden: ya estaban en el panel. La pestaña se llena en unos segundos, o al usar **MusicaPremium → Recargar todo desde el panel** (Google no deja que la hoja se conecte al panel en el momento de abrirla).
+
+### Pestaña «Titulares»
+
+| Columna | Qué es |
+|---|---|
+| CORREO TITULAR | Una fila por titular. Cambiar el correo **renombra** el titular (y sus 5 filas en «Clientes»). Los titulares nuevos se crean en «Clientes» o con *Agregar titular*. |
+| FECHA RENOVACIÓN | Cuándo renuevas tú la cuenta. En rojo si ya venció y en naranja si vence en 3 días o menos. |
+| TARJETA | Con qué tarjeta pagas esa renovación (p. ej. `4642`). |
+
+- **Pegar tu lista** (CORREO TITULAR · FECHA RENOVACIÓN · TARJETA): pégala **debajo de la última fila**, todo junto o columna por columna, y usa **MusicaPremium → Cargar filas nuevas**. Cada fila se busca por su correo (da igual si tiene mayúsculas o una etiqueta como ` - YO`) y se le ponen la fecha y la tarjeta. Las filas se juntan con las que ya estaban: no queda repetido ningún titular.
+- Si un correo no existe en el panel, la fila se queda al final con el motivo en *Sync*. Cárgalo primero en «Clientes» y vuelve a usar el menú.
+- El orden es fijo, por correo, para que las filas no se muevan mientras editas. Para verlas por fecha, usa un filtro (*Data → Create a filter*).
 
 ### En el panel: Clientes → Tabla
 

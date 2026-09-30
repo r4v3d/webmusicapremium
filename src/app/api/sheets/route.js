@@ -1,6 +1,9 @@
 import { NextResponse, after } from "next/server";
 import { verifySheetsRequest, sheetsPushConfigured, sheetsSecret } from "../../../lib/sheetsAuth";
-import { SheetError, applySheetEdits, buildInventoryRows, createTitular, importSheetRows, loadSheetRows, sheetServices } from "../../../lib/sheetsSync";
+import {
+  SheetError, applySheetEdits, applyTitularEdits, buildInventoryRows, buildTitularRows, createTitular,
+  importSheetRows, importTitularRows, loadSheetRows, sheetServices,
+} from "../../../lib/sheetsSync";
 import { getFreeSlotsStock } from "../../../lib/db";
 import { announceStock } from "../../../lib/telegramBot";
 
@@ -54,11 +57,23 @@ export async function POST(req) {
         return NextResponse.json({ ok: true, servicios: sheetServices(), envioAutomatico: sheetsPushConfigured() });
 
       case "snapshot":
-        return NextResponse.json({ ok: true, servicios: sheetServices(), rows: await buildInventoryRows() });
+        return NextResponse.json({
+          ok: true, servicios: sheetServices(), rows: await buildInventoryRows(), titulares: await buildTitularRows(),
+        });
 
       case "edit": {
         const edits = Array.isArray(msg.edits) ? msg.edits.slice(0, 1000) : [];
         return NextResponse.json({ ok: true, ...(await applySheetEdits(edits)) });
+      }
+
+      case "titularEdit": {
+        const edits = Array.isArray(msg.edits) ? msg.edits.slice(0, 1000) : [];
+        return NextResponse.json({ ok: true, ...(await applyTitularEdits(edits)) });
+      }
+
+      case "titularImport": {
+        const rows = Array.isArray(msg.rows) ? msg.rows.slice(0, 500) : [];
+        return NextResponse.json({ ok: true, ...(await importTitularRows(rows)) });
       }
 
       case "addTitular": {
