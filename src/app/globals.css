@@ -6345,3 +6345,11 @@ a {
   .slots-grid-table .col-pago { width: 8%; }
   .slots-grid-table .col-renueva { width: 13%; }
 }
+
+/* --- Checkout: Yape automático (Mercado Pago) --- */
+.mp-yape-steps { margin: 12px 0 16px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 0.9rem; line-height: 1.5; }
+.mp-yape-steps strong { color: var(--text-main); }
+.mp-yape-form { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.mp-yape-form .form-input { margin-bottom: 4px; font-size: 16px; }
+.mp-yape-otp { letter-spacing: 0.4em; font-variant-numeric: tabular-nums; text-align: center; font-size: 1.2rem !important; }
+.mp-yape-form .checkout-btn { margin-top: 6px; }

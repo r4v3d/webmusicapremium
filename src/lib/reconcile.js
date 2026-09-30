@@ -6,7 +6,7 @@ import { expireStaleIntents } from "./paymentIntents";
 import { deliverOrder, MAX_DELIVERY_ATTEMPTS } from "./delivery";
 import { alertAdmin } from "./notify";
 import { binanceConfigured } from "./binanceAccount";
-import { hasOpenBinanceIntents, pollTaypi, syncBinance } from "./providerSync";
+import { hasOpenBinanceIntents, pollMercadoPago, pollTaypi, syncBinance } from "./providerSync";
 import { findWalletMismatches } from "./wallet";
 import { purgeRateLimits } from "./rateLimitDb";
 import { getProvider } from "./providers";
@@ -139,6 +139,11 @@ export async function runReconciliation({ state = createWorkerState(), now = Dat
   if (getProvider("taypi")?.enabled) {
     const taypi = await pollTaypi();
     if (taypi.length) summary.taypi = taypi;
+  }
+
+  if (getProvider("mercadopago_yape")?.enabled) {
+    const mp = await pollMercadoPago();
+    if (mp.length) summary.mercadopago = mp;
   }
 
   const binance = await binanceStep(state, now);

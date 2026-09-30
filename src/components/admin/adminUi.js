@@ -27,6 +27,7 @@ export const STATUS_LABELS = {
 export const PROVIDER_LABELS = {
   manual_yape: "Yape/Plin (verificado)",
   taypi: "Yape/Plin · TAYPI",
+  mercadopago_yape: "Yape · Mercado Pago",
   binance_account: "USDT · Binance",
   wallet_pen: "Saldo S/",
   wallet_usdt: "Saldo USDT",

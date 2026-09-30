@@ -2,7 +2,7 @@ import { NextResponse, after } from "next/server";
 import { authorizeCheckout, buildCheckoutView, loadOrderRow } from "../../../../../../lib/checkoutView";
 import { getIntentById } from "../../../../../../lib/paymentIntents";
 import { query } from "../../../../../../lib/pg";
-import { syncBinance, handleTaypiPayment } from "../../../../../../lib/providerSync";
+import { syncBinance, handleTaypiPayment, pollMercadoPago } from "../../../../../../lib/providerSync";
 import { binanceConfigured } from "../../../../../../lib/binanceAccount";
 import { getPayment as taypiGetPayment } from "../../../../../../lib/taypi";
 import { recordEvent } from "../../../../../../lib/idempotency";
@@ -52,6 +52,12 @@ export async function POST(req, { params }) {
         if (r.status === "settled" && r.orderId) after(() => deliverOrder(r.orderId).catch(() => {}));
       }
       message = "Para verificar tu pago al instante, pega el Order ID que te muestra Binance y pulsa «Verificar pago».";
+    } else if (intent.provider === "mercadopago_yape") {
+      const results = await pollMercadoPago({ intentId: intent.id });
+      for (const r of results) {
+        if (r.status === "settled" && r.orderId) after(() => deliverOrder(r.orderId).catch(() => {}));
+      }
+      message = "Si Yape te descontó, el pago se confirma en segundos. Si no, vuelve a intentar con un código de aprobación nuevo.";
     } else if (intent.provider === "taypi" && intent.provider_ref) {
       const payment = await taypiGetPayment(intent.provider_ref);
       const status = String(payment.status || "").toLowerCase();

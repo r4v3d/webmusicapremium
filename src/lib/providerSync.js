@@ -7,6 +7,15 @@ import { applyPayment } from "./settle";
 import { TOPUP_EARLY_MS, decideOrderIdClaim, extractNoteCodes, getPayTransactions, matchTransaction, normalizeNote, truncate3 } from "./binanceAccount";
 import { getPayment as taypiGetPayment } from "./taypi";
 import { alertAdmin, notifyCustomer } from "./notify";
+import crypto from "node:crypto";
+import {
+  createYapePayment as mpCreateYapePayment, intentIdFromReference as mpIntentIdFromReference,
+  intentReference as mpIntentReference, rejectionMessage as mpRejectionMessage,
+  searchPaymentsByReference as mpSearchPaymentsByReference,
+} from "./mercadopago";
+import { CONFIG } from "../data/config";
+
+const CONFIG_APP_NAME = () => CONFIG.appName;
 
 export { extractNoteCodes };
 
@@ -260,4 +269,136 @@ export async function claimBinanceByOrderId({ intentId, binanceOrderId, fetchTra
     await notifyCustomer(r.customerId, `✅ Recarga acreditada: <b>${Number(r.amount).toFixed(3)} USDT</b>.`);
   }
   return { ...r, intentId: intent.id };
+}
+
+// --- Mercado Pago · Yape ---
+
+const MP_PROVIDER = "mercadopago_yape";
+
+/** Resultado de un evento que ya no hay que reprocesar (sin resultado o con error sí se reintenta). */
+export function mpAlreadyApplied(previousResult) {
+  return Boolean(previousResult) && previousResult !== "error";
+}
+
+/**
+ * Un pago de Mercado Pago ya consultado a su API (nunca el cuerpo del webhook).
+ * Aprobado → se liquida el intento de su external_reference. El monto es el que
+ * dice Mercado Pago, y applyPayment lo compara contra lo esperado.
+ */
+export async function handleMercadoPagoPayment(payment, { eventRowId = null } = {}) {
+  const intentId = mpIntentIdFromReference(payment?.external_reference);
+  const intentRes = intentId
+    ? await query("select * from payment_intents where id = $1 and provider = $2", [intentId, MP_PROVIDER])
+    : { rows: [] };
+  const intent = intentRes.rows[0];
+  if (!intent) {
+    await markEvent(eventRowId, "mismatch", { detail: `sin intento para ${payment?.external_reference || "(sin referencia)"}` });
+    return { ok: false, status: "not_found" };
+  }
+  const status = String(payment.status || "").toLowerCase();
+  if (status === "approved") {
+    await query(
+      "update payment_intents set provider_ref = $2, updated_at = now() where id = $1 and provider_ref is distinct from $2",
+      [intent.id, String(payment.id)]
+    );
+    const r = await applyPayment({
+      intentId: intent.id, provider: MP_PROVIDER, providerTxnId: String(payment.id),
+      amount: Number(payment.transaction_amount), currency: String(payment.currency_id || "PEN").toUpperCase(),
+    });
+    await markEvent(eventRowId, r.status, { intentId: intent.id });
+    return r;
+  }
+  if (["refunded", "charged_back"].includes(status)) {
+    await markEvent(eventRowId, "mismatch", { detail: `pago ${status}`, intentId: intent.id });
+    await alertAdmin(`Mercado Pago: pago ${status === "refunded" ? "devuelto" : "desconocido por el cliente (contracargo)"}`, [
+      `Pedido ${intent.order_id || "(recarga)"} · pago ${payment.id} · S/ ${Number(payment.transaction_amount).toFixed(2)}`,
+      "Revisa si corresponde quitar el acceso al cliente.",
+    ], { level: "warn" });
+    return { ok: true, status: "flagged" };
+  }
+  // Rechazado, pendiente o cancelado: el intento sigue abierto para otro intento del cliente.
+  await markEvent(eventRowId, "ignored", { detail: `${status}${payment.status_detail ? ` (${payment.status_detail})` : ""}`, intentId: intent.id });
+  return { ok: true, status: "ignored", paymentStatus: status, statusDetail: payment.status_detail || null };
+}
+
+/**
+ * Cobro desde el checkout: token de Yape creado en el navegador → pago en
+ * Mercado Pago → si se aprueba, se liquida al instante.
+ * Resultados: settled | underpaid | duplicate | rejected (con message) | pending | closed | error
+ */
+export async function payIntentWithYape({ intent, order, yapeToken }, { createPayment = mpCreateYapePayment } = {}) {
+  if (!intent || intent.provider !== MP_PROVIDER) return { ok: false, status: "not_found" };
+  if (!["created", "awaiting", "underpaid"].includes(intent.status)) return { ok: false, status: "closed" };
+  const amount = intent.status === "underpaid"
+    ? Math.max(0, Number(intent.amount_expected) - Number(intent.amount_received || 0))
+    : Number(intent.amount_expected);
+  if (!(amount > 0)) return { ok: false, status: "closed" };
+
+  // Marca de intento: la consulta de respaldo solo revisa intentos que llegaron a cobrarse.
+  await query("update payment_intents set raw_response = coalesce(raw_response, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1",
+    [intent.id, JSON.stringify({ mpLastAttemptAt: new Date().toISOString() })]);
+
+  let payment;
+  try {
+    payment = await createPayment({
+      token: yapeToken,
+      amount,
+      description: `${CONFIG_APP_NAME()} ${intent.order_id || "recarga"}`,
+      email: order?.email || `pedido-${intent.order_id || intent.id}@cheapmusic.best`,
+      externalReference: mpIntentReference(intent.id),
+      idempotencyKey: `yape-${intent.id}-${crypto.createHash("sha256").update(String(yapeToken)).digest("hex").slice(0, 32)}`,
+      metadata: { intent_id: String(intent.id), order_id: intent.order_id || null },
+    });
+  } catch (error) {
+    // 4xx: token vencido o datos mal escritos. 5xx/timeout: la consulta de respaldo lo resuelve.
+    if (error.status && error.status < 500) {
+      return { ok: false, status: "rejected", message: "No se pudo procesar el pago con esos datos. Genera un código de aprobación nuevo en tu app de Yape e inténtalo otra vez." };
+    }
+    console.error("[mercadopago] crear pago:", error.message);
+    return { ok: false, status: "error", message: "Mercado Pago no respondió. Si Yape te descontó, espera un minuto: lo confirmamos solos." };
+  }
+
+  const ev = await recordEvent({
+    provider: "mercadopago", eventId: `${payment.id}:${payment.status}`, eventType: "checkout",
+    payload: payment, signatureValid: true, intentId: intent.id,
+  });
+  if (payment.status === "approved") {
+    // applyPayment es idempotente: aunque el evento ya exista, se reintenta si no quedó liquidado.
+    if (ev.duplicate && mpAlreadyApplied(ev.previousResult)) return { ok: true, status: "duplicate", orderId: intent.order_id };
+    return handleMercadoPagoPayment(payment, { eventRowId: ev.eventRowId });
+  }
+  if (!ev.duplicate) await markEvent(ev.eventRowId, "ignored", { detail: `${payment.status} (${payment.status_detail || ""})`, intentId: intent.id });
+  if (payment.status === "rejected") {
+    return { ok: false, status: "rejected", message: mpRejectionMessage(payment.status_detail), statusDetail: payment.status_detail };
+  }
+  return { ok: false, status: "pending", message: "Tu pago se está procesando. Esta página se actualizará sola." };
+}
+
+/**
+ * Respaldo del webhook: intentos de Yape que llegaron a cobrarse en las últimas
+ * 24 h y siguen abiertos. Se buscan sus pagos por external_reference.
+ */
+export async function pollMercadoPago({ search = mpSearchPaymentsByReference, intentId = null } = {}) {
+  const open = await query(
+    `select * from payment_intents
+      where provider = $1 and status in ('created','awaiting','underpaid')
+        and raw_response ? 'mpLastAttemptAt' and created_at > now() - interval '24 hours'
+        and ($2::bigint is null or id = $2::bigint)
+      order by id limit 40`,
+    [MP_PROVIDER, intentId]
+  );
+  const results = [];
+  for (const intent of open.rows) {
+    try {
+      const payments = await search(mpIntentReference(intent.id));
+      for (const payment of payments.filter((p) => p.status === "approved")) {
+        const ev = await recordEvent({ provider: "mercadopago", eventId: `${payment.id}:approved`, eventType: "poll", payload: payment, signatureValid: true, intentId: intent.id });
+        if (ev.duplicate && mpAlreadyApplied(ev.previousResult)) continue;
+        results.push({ intentId: intent.id, ...(await handleMercadoPagoPayment(payment, { eventRowId: ev.eventRowId })) });
+      }
+    } catch (error) {
+      results.push({ intentId: intent.id, status: "error", error: error.message });
+    }
+  }
+  return results;
 }
