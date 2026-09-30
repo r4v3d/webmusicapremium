@@ -1,18 +1,20 @@
-import { Epilogue, Mulish } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import PendingOrderBanner from "../components/PendingOrderBanner";
 
-const epilogue = Epilogue({
-  subsets: ["latin"],
+// Fuentes incluidas en el repo (variables, subconjunto latino; licencia OFL en ./fonts).
+// Con next/font/google el build las descargaba y en el VPS fallaba cuando Google no respondía.
+const epilogue = localFont({
+  src: "./fonts/epilogue-latin-wght-normal.woff2",
   variable: "--font-epilogue",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "100 900",
   display: "swap",
 });
 
-const mulish = Mulish({
-  subsets: ["latin"],
+const mulish = localFont({
+  src: "./fonts/mulish-latin-wght-normal.woff2",
   variable: "--font-mulish",
-  weight: ["300", "400", "500", "600", "700"],
+  weight: "200 1000",
   display: "swap",
 });
 
