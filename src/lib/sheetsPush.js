@@ -1,4 +1,4 @@
-// Empuje panel → hoja. El worker vacía sheet_outbox (lo llenan los triggers de
+// Empuje panel → hoja. El worker envía lo pendiente de sheet_outbox (lo llenan los triggers de
 // 005_sheets_sync.sql) y manda las filas frescas a la app web del script.
 // Escucha NOTIFY mpb_sheets para hacerlo en segundos, no al siguiente ciclo.
 import pg from "pg";
@@ -34,18 +34,23 @@ export async function postToSheet(message, { fetchImpl = fetch, url = sheetsWebA
 }
 
 /**
- * Un pase: toma hasta BATCH cupos pendientes, los manda y los borra de la cola.
+ * Un pase: toma hasta BATCH cupos pendientes, los manda y los marca como enviados.
  * Si la hoja no está configurada, la cola se vacía sin enviar (la primera
  * sincronización completa la hace el propio script al configurarse).
  */
 export async function flushSheetOutbox({ fetchImpl = fetch, now = Date.now() } = {}) {
+  // Los cambios enviados se guardan 2 horas: la tabla del panel los usa para bajar solo lo que cambió.
+  await query("delete from sheet_outbox where pushed_at < now() - interval '2 hours'");
   if (!sheetsPushConfigured()) {
-    const res = await query("delete from sheet_outbox");
+    const res = await query("update sheet_outbox set pushed_at = now() where pushed_at is null");
     return { pushed: 0, discarded: res.rowCount, more: false };
   }
   if (now < state.nextTryAt) return { pushed: 0, waiting: true, more: false };
 
-  const pending = await query("select id, slot_id from sheet_outbox order by id limit $1", [BATCH]);
+  const pending = await query(
+    "select id, slot_id from sheet_outbox where pushed_at is null order by id limit $1",
+    [BATCH]
+  );
   if (!pending.rows.length) return { pushed: 0, more: false };
 
   const ids = pending.rows.map((r) => r.id);
@@ -55,9 +60,14 @@ export async function flushSheetOutbox({ fetchImpl = fetch, now = Date.now() } =
   const deleted = slotIds.filter((id) => !found.has(id));
 
   try {
-    // «Titulares» es chica (una fila por cuenta): va completa y la hoja solo reescribe si algo cambió.
-    const titulares = await buildTitularRows();
-    await postToSheet({ type: "rows", rows, deleted, titulares }, { fetchImpl, now });
+    // «Titulares»: solo las cuentas tocadas, más la lista de ids vigentes para
+    // que la hoja quite las que se borraron (ids nada más: pesa poco aunque sean miles).
+    const cuentas = [...new Set(rows.map((r) => r.cuenta).filter(Boolean))];
+    const titulares = await buildTitularRows(cuentas);
+    const titularIds = deleted.length
+      ? (await query("select id::text as id from platform_accounts")).rows.map((r) => r.id)
+      : null;
+    await postToSheet({ type: "rows", rows, deleted, titulares, titularIds }, { fetchImpl, now });
   } catch (error) {
     state.failingSince ??= now;
     state.backoffMs = Math.min(Math.max(state.backoffMs * 2, 15_000), 5 * 60_000);
@@ -76,7 +86,7 @@ export async function flushSheetOutbox({ fetchImpl = fetch, now = Date.now() } =
     await alertAdmin("Google Sheets vuelve a recibir los cambios", ["La cola pendiente se envió."]);
   }
   Object.assign(state, { failingSince: null, alerted: false, nextTryAt: 0, backoffMs: 0 });
-  await query("delete from sheet_outbox where id = any($1::bigint[])", [ids]);
+  await query("update sheet_outbox set pushed_at = now() where id = any($1::bigint[])", [ids]);
   return { pushed: rows.length, deleted: deleted.length, more: pending.rows.length === BATCH };
 }
 
