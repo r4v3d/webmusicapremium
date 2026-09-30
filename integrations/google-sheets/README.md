@@ -120,25 +120,29 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 
 | Columna | Qué es |
 |---|---|
-| CORREO TITULAR | Para **renombrar** un titular, cambia el correo en sus 5 filas a la vez. Cambiarlo en una sola fila no hace nada (sale ✗ y vuelve): para pasar un cliente a otro titular usa *Transferir* en el panel. La clave del titular no se muestra: es la de `DEFAULT_TITULAR_PASSWORD`. |
+| CORREO TITULAR | La clave del titular no se muestra: es la de `DEFAULT_TITULAR_PASSWORD`. Para pasar un cliente a otro titular, pon su fila bajo el otro titular y usa **Aplicar cambios pegados**. Escribir otro titular en una sola celda no renombra la cuenta (sale ✗ y vuelve). |
 | NOMBRE | WhatsApp (número) o usuario (`@…`) del cliente. **Escribirlo ocupa el cupo** (queda Activo). **Borrarlo lo libera**: se borran PAGÓ y RENOVACIÓN; el correo y la contraseña se quedan para volver a venderlo. En verde = cupo libre. |
 | CORREO CLIENTE / CONTRASEÑA | El acceso del cupo. |
 | PAGÓ | Lo que paga el cliente, en soles. Necesita NOMBRE. |
 | RENOVACIÓN | Día/mes/año (`08/11/26`). En rojo si ya venció, en naranja si vence en 3 días o menos. Necesita NOMBRE. |
-| Sync | La pone el sistema: `✓ Guardado` ya está en el panel · `↻ Panel` cambió desde el panel · `✗` no se guardó, con el motivo (la celda vuelve sola al valor del panel). |
+| Sync | La pone el sistema: `✓ Guardado` / `✓ Sincronizado` ya está en el panel · `↻ Panel` cambió desde el panel · `Pegado` falta usar *Aplicar cambios pegados* · `✗` no se guardó, con el motivo. |
 
-- **Pegar muchas filas de golpe** (por ejemplo, copiadas de tus hojas antiguas): pégalas **debajo de la última fila**, en las columnas A–F, nunca encima de filas que ya existen. Puedes pegar todo junto o columna por columna: mientras pegas, nada se mueve y *Sync* dice «Fila nueva». Cuando termines, usa **MusicaPremium → Cargar filas nuevas**:
-  - Si el titular no existe, se crea con 5 cupos y la clave de siempre. Un texto después del correo, como `correo@gmail.com - IO`, queda como nota del titular.
-  - La fila ocupa el primer cupo libre de su titular, con su NOMBRE, PAGÓ y RENOVACIÓN.
-  - Si el correo cliente ya estaba en ese titular, se actualiza ese cupo: pegar dos veces no duplica.
-  - Las filas que entran reaparecen ordenadas y con su ID. Las que no, se quedan al final con el motivo en *Sync* (por ejemplo, un titular con más de 5 clientes).
-- **Fechas:** la hoja debe estar en formato día/mes. En **File → Settings → Locale** elige **Peru** *antes* de pegar. Con el formato de EE.UU., `03/10/26` se leería como 10 de marzo; por eso, si detecta ese formato, la hoja no carga nada y te avisa.
+### Dos formas de editar
+
+- **Una celda a la vez** (escribes o corriges un dato): se guarda en el panel en 1–3 segundos. *Sync* dice `✓ Guardado`.
+- **Muchas filas a la vez**: cuando reemplaces la hoja con tus datos arreglados, pega todo lo que quieras, **en el orden que quieras**, encima o debajo, todo junto o columna por columna. Mientras pegas no se aplica nada, no se mueve nada y *Sync* dice «Pegado». Cuando termines, usa **MusicaPremium → Aplicar cambios pegados…**:
+  1. Te muestra un resumen de lo que va a cambiar: titulares nuevos, clientes nuevos y actualizados, cupos que quedan libres, filas con error. No cambia nada hasta que dices **Sí**.
+  2. **La hoja manda**: cada cliente se reconoce por su titular y su correo, no por la fila en la que está.
+     - Si un cliente ya no aparece debajo de su titular, su cupo queda libre.
+     - Si aparece bajo otro titular, se mueve a ese.
+     - Los titulares nuevos se crean con 5 cupos y la clave de siempre.
+     - Lo que no cambió no se toca.
+  3. **Tu orden se respeta**: cada fila queda donde la pusiste, con su ID. Los cupos libres de un titular van debajo de sus filas, y los titulares del panel que no estaban en la hoja van al final. Esos titulares **no se tocan** y el resumen dice cuántos son.
+  4. Las filas con problema (sin contraseña, un cliente repetido, un titular con más de 5 clientes…) se quedan tal cual, con el motivo en *Sync*. Corrígelas y vuelve a usar el menú.
+- **Fechas:** la hoja debe estar en formato día/mes. En **File → Settings → Locale** elige **Peru** *antes* de pegar. Con el formato de EE.UU., `03/10/26` se leería como 10 de marzo; por eso, si detecta ese formato, no aplica nada y te avisa.
 - **Agregar un titular vacío:** menú **MusicaPremium → Agregar titular…** (o **+ Titular** en el panel). Aparecen sus 5 filas libres.
-- **Borrar** (selecciona las celdas de A a F y pulsa Supr):
-  - **Una fila completa:** el cupo queda libre (se borran nombre, correo, contraseña, pagó y renovación). El titular se queda.
-  - **Las 5 filas completas de un titular, a la vez:** se borra el titular del panel. El historial de pagos se conserva.
-  - **Solo la columna del titular:** no se borra nada; el titular vuelve y *Sync* explica por qué.
-  - No uses *Eliminar fila* (clic derecho): el panel no se entera y la fila vuelve en la siguiente revisión. También puedes borrar un titular en el panel: *Clientes → Tabla*, elige una celda de sus filas y pulsa **Borrar titular**.
+- **Liberar cupos:** borra sus filas (o el cliente de la fila) y usa **Aplicar cambios pegados**. Para **borrar un titular**, usa el panel: *Clientes → Tabla*, elige una celda de sus filas y pulsa **Borrar titular**.
+- Funciona igual con miles de filas. Con 5.500 cupos, aplicar todo tarda unos segundos en el servidor, más lo que tarde Google en leer y escribir la hoja.
 - Puedes pegar varias celdas a la vez, ordenar y filtrar. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
 - Las columnas ocultas (ID, plataforma, cupo, versión) las usa el sistema: no las muestres ni las edites.
 - **Si tu «Clientes» tenía las columnas RENOVACIÓN TITULAR y TARJETA** (versión anterior): al abrir la hoja con el código nuevo se quitan solas y se crea la pestaña «Titulares». Esos datos no se pierden: ya estaban en el panel. La pestaña se llena en unos segundos, o al usar **MusicaPremium → Recargar todo desde el panel** (Google no deja que la hoja se conecte al panel en el momento de abrirla).
@@ -151,9 +155,8 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 | FECHA RENOVACIÓN | Cuándo renuevas tú la cuenta. En rojo si ya venció y en naranja si vence en 3 días o menos. |
 | TARJETA | Con qué tarjeta pagas esa renovación (p. ej. `4642`). |
 
-- **Pegar tu lista** (CORREO TITULAR · FECHA RENOVACIÓN · TARJETA): pégala **debajo de la última fila**, todo junto o columna por columna, y usa **MusicaPremium → Cargar filas nuevas**. Cada fila se busca por su correo (da igual si tiene mayúsculas o una etiqueta como ` - YO`) y se le ponen la fecha y la tarjeta. Las filas se juntan con las que ya estaban: no queda repetido ningún titular.
-- Si un correo no existe en el panel, la fila se queda al final con el motivo en *Sync*. Cárgalo primero en «Clientes» y vuelve a usar el menú.
-- El orden es fijo, por correo, para que las filas no se muevan mientras editas. Para verlas por fecha, usa un filtro (*Data → Create a filter*).
+- **Pegar tu lista** (CORREO TITULAR · FECHA RENOVACIÓN · TARJETA): pégala entera, en el orden que quieras, y usa **MusicaPremium → Aplicar cambios pegados…** (aplica las dos pestañas juntas). Cada fila se reconoce por su correo (da igual si tiene mayúsculas o una etiqueta como ` - YO`) y se le ponen la fecha y la tarjeta. Si el titular no existe, se crea. Si dejas la fecha o la tarjeta vacía, no se borra la que tiene el panel.
+- Tu orden se respeta. Los titulares del panel que no están en tu lista van al final.
 
 ### En el panel: Clientes → Tabla
 

@@ -4,6 +4,7 @@ import {
   SheetError, applySheetEdits, applyTitularEdits, buildInventoryRows, buildTitularRows, createTitular,
   importSheetRows, importTitularRows, loadSheetRows, sheetServices,
 } from "../../../lib/sheetsSync";
+import { bulkAplicar, bulkLiberar, bulkTitulares, previewBulk } from "../../../lib/sheetsBulk";
 import { getFreeSlotsStock } from "../../../lib/db";
 import { announceStock } from "../../../lib/telegramBot";
 
@@ -65,6 +66,22 @@ export async function POST(req) {
         const edits = Array.isArray(msg.edits) ? msg.edits.slice(0, 1000) : [];
         return NextResponse.json({ ok: true, ...(await applySheetEdits(edits)) });
       }
+
+      // Sincronización completa («la hoja manda»): ver sheetsBulk.js.
+      case "bulkPreview": {
+        const clientes = Array.isArray(msg.clientes) ? msg.clientes.slice(0, 50000) : [];
+        const titulares = Array.isArray(msg.titulares) ? msg.titulares.slice(0, 20000) : [];
+        return NextResponse.json({ ok: true, ...(await previewBulk({ clientes, titulares })) });
+      }
+
+      case "bulkLiberar":
+        return NextResponse.json({ ok: true, ...(await bulkLiberar(Array.isArray(msg.rows) ? msg.rows.slice(0, 5000) : [])) });
+
+      case "bulkAplicar":
+        return NextResponse.json({ ok: true, ...(await bulkAplicar(Array.isArray(msg.rows) ? msg.rows.slice(0, 5000) : [])) });
+
+      case "bulkTitulares":
+        return NextResponse.json({ ok: true, ...(await bulkTitulares(Array.isArray(msg.rows) ? msg.rows.slice(0, 5000) : [])) });
 
       case "titularEdit": {
         const edits = Array.isArray(msg.edits) ? msg.edits.slice(0, 1000) : [];

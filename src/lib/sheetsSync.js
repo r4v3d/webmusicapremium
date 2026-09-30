@@ -56,7 +56,7 @@ function resolveService(value) {
   return Object.entries(CONFIG.services).find(([code, s]) => code === v || s.name.toLowerCase() === v)?.[0] || null;
 }
 
-const text = (v) => (v == null ? "" : String(v).trim());
+export const text = (v) => (v == null ? "" : String(v).trim());
 const digits = (v) => text(v).replace(/\D/g, "");
 const money = (v) => (v == null || v === "" ? "" : Math.round(Number(v) * 100) / 100);
 
@@ -65,35 +65,63 @@ function rowVersion(row) {
   return crypto.createHash("sha1").update(JSON.stringify(values)).digest("hex").slice(0, 16);
 }
 
+const INVENTORY_COLUMNS = `
+  s.id::text as id, s.platform_account_id::text as cuenta, pa.platform_code, pa.account_email, pa.account_password,
+  pa.owner_renewal_date, pa.renewal_cost, pa.renewal_currency, pa.renewal_card, pa.notes, s.slot_number, s.status,
+  (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
+  s.member_email, s.member_password, s.email_type, c.display_name, wa.contact_value as whatsapp,
+  sub.plan_price, sub.renewal_date,
+  to_char(greatest(s.updated_at, pa.updated_at, coalesce(sub.updated_at, s.updated_at))
+          at time zone 'America/Lima', 'YYYY-MM-DD HH24:MI') as actualizado`;
+const INVENTORY_ORDER = "order by pa.platform_code, lower(pa.account_email), s.slot_number nulls last, s.id";
+
 /**
  * Filas del inventario, ordenadas por plataforma, titular y cupo.
- * Sin slotIds, todo el inventario (la recarga completa de la hoja).
+ * Sin slotIds, todo el inventario (recarga completa): una sola pasada con
+ * agrupados, sin subconsultas por fila. Con slotIds (pocos cupos), búsquedas
+ * por índice solo para esos cupos.
  */
 export async function buildInventoryRows(slotIds = null) {
   if (slotIds && slotIds.length === 0) return [];
-  const { rows } = await query(
-    `select s.id::text as id, s.platform_account_id::text as cuenta, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
-            pa.renewal_cost, pa.renewal_currency, pa.renewal_card, pa.notes, s.slot_number, s.status,
-            (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
-            s.member_email, s.member_password, s.email_type, c.display_name,
-            (select cc.contact_value from customer_contacts cc
-              where cc.customer_id = s.customer_id and cc.contact_type = 'whatsapp'
-              order by cc.is_primary desc, cc.id limit 1) as whatsapp,
-            sub.plan_price, sub.renewal_date,
-            to_char(greatest(s.updated_at, pa.updated_at, coalesce(sub.updated_at, s.updated_at))
-                    at time zone 'America/Lima', 'YYYY-MM-DD HH24:MI') as actualizado
-       from account_slots s
-       join platform_accounts pa on pa.id = s.platform_account_id
-       left join customers c on c.id = s.customer_id
-       left join lateral (
-         select plan_price, renewal_date, updated_at from subscriptions sb
-          where sb.account_slot_id = s.id and sb.subscription_status in ('active','pending_payment')
-          order by sb.id desc limit 1
-       ) sub on true
-      where ($1::text[] is null or s.id::text = any($1::text[]))
-      order by pa.platform_code, lower(pa.account_email), s.slot_number nulls last, s.id`,
-    [slotIds ? slotIds.map(String) : null]
-  );
+  const ids = slotIds ? slotIds.map((x) => String(x)).filter((x) => /^\d+$/.test(x)) : null;
+  if (ids && ids.length === 0) return [];
+  const { rows } = ids
+    ? await query(
+      `select ${INVENTORY_COLUMNS}
+         from account_slots s
+         join platform_accounts pa on pa.id = s.platform_account_id
+         left join customers c on c.id = s.customer_id
+         left join lateral (
+           select cc.contact_value from customer_contacts cc
+            where cc.customer_id = s.customer_id and cc.contact_type = 'whatsapp'
+            order by cc.is_primary desc, cc.id limit 1
+         ) wa on true
+         left join lateral (
+           select plan_price, renewal_date, updated_at from subscriptions sb
+            where sb.account_slot_id = s.id and sb.subscription_status in ('active','pending_payment')
+            order by sb.id desc limit 1
+         ) sub on true
+        where s.id = any($1::bigint[])
+        ${INVENTORY_ORDER}`,
+      [ids]
+    )
+    : await query(
+      `with wa as (
+         select distinct on (customer_id) customer_id, contact_value from customer_contacts
+          where contact_type = 'whatsapp' order by customer_id, is_primary desc, id
+       ), sub as (
+         select distinct on (account_slot_id) account_slot_id, plan_price, renewal_date, updated_at from subscriptions
+          where subscription_status in ('active','pending_payment') and account_slot_id is not null
+          order by account_slot_id, id desc
+       )
+       select ${INVENTORY_COLUMNS}
+         from account_slots s
+         join platform_accounts pa on pa.id = s.platform_account_id
+         left join customers c on c.id = s.customer_id
+         left join wa on wa.customer_id = s.customer_id
+         left join sub on sub.account_slot_id = s.id
+        ${INVENTORY_ORDER}`
+    );
   return rows.map(toSheetRow);
 }
 
@@ -131,7 +159,7 @@ function toSheetRow(r) {
 
 // --- Edición desde la hoja «Inventario» ---
 
-function parseDateField(value, label) {
+export function parseDateField(value, label) {
   const v = text(value);
   if (!v) return null;
   const date = parseDateInput(v);
@@ -149,7 +177,7 @@ function parseMoneyField(value, label) {
   return Math.round(n * 100) / 100;
 }
 
-function parseEmailField(value, label, { required = false } = {}) {
+export function parseEmailField(value, label, { required = false } = {}) {
   const v = text(value);
   if (!v) {
     if (required) throw new SheetError(`${label} no puede quedar vacío.`);
@@ -207,7 +235,7 @@ function nombreToChanges(changes, cur) {
   return next;
 }
 
-async function applyOneEdit(tx, slotId, changes) {
+export async function applyOneEdit(tx, slotId, changes) {
   const cur = (await tx.query(
     `select s.*, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
             pa.renewal_cost, pa.renewal_currency, pa.renewal_card, pa.notes as account_notes,
@@ -531,7 +559,7 @@ export async function createTitular({ service = "tidal", email, password = "" } 
 
 // --- Alta masiva desde la hoja «Cargar» ---
 
-const plus30 = () => {
+export const plus30 = () => {
   const d = new Date();
   d.setDate(d.getDate() + 30);
   return toDateStr(d);
@@ -633,7 +661,7 @@ async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desd
 // --- Filas nuevas de la pestaña «Clientes» (sin ID) ---
 
 /** «g.etmushroom7572@gmail.com - IO» → correo y etiqueta («IO»), que queda como nota del titular. */
-function splitTitular(value) {
+export function splitTitular(value) {
   const raw = text(value);
   const email = /[^\s@]+@[^\s@]+\.[^\s@]+/.exec(raw)?.[0] || raw;
   const label = raw.replace(email, "").replace(/^[\s\-–—:|]+|[\s\-–—:|]+$/g, "").trim();
@@ -830,4 +858,37 @@ export async function importTitularRows(rows) {
     }
   }
   return { results };
+}
+
+// --- Cambios del inventario para la tabla del panel ---
+
+/**
+ * Marca de cambios: la secuencia de sheet_outbox (cada cambio del inventario
+ * deja una fila por los triggers de 005). Solo avanza.
+ */
+export async function inventoryStamp() {
+  const { rows } = await query("select last_value::text as v from sheet_outbox_id_seq");
+  return rows[0]?.v || "0";
+}
+
+/**
+ * Qué cambió desde la marca `since`: { stamp, unchanged } si nada, { stamp,
+ * changes: { rows, deleted } } con solo los cupos tocados, o { stamp, rows }
+ * con todo si `since` es más vieja que lo que guarda la cola (2 horas).
+ */
+export async function inventoryChangesSince(since) {
+  const stamp = await inventoryStamp();
+  const from = /^\d+$/.test(String(since ?? "")) ? Number(since) : null;
+  if (from === null) return { stamp, rows: await buildInventoryRows() };
+  if (String(from) === stamp) return { stamp, unchanged: true };
+
+  const { rows: [limits] } = await query("select min(id)::text as min from sheet_outbox");
+  const min = limits?.min == null ? null : Number(limits.min);
+  // La cola guarda los últimos cambios; si ya se borró lo que va después de `since`, todo de nuevo.
+  if (min === null || from < min - 1) return { stamp, rows: await buildInventoryRows() };
+
+  const touched = (await query("select distinct slot_id from sheet_outbox where id > $1", [from])).rows.map((r) => r.slot_id);
+  const rows = await buildInventoryRows(touched);
+  const found = new Set(rows.map((r) => r.id));
+  return { stamp, changes: { rows, deleted: touched.filter((id) => !found.has(id)) } };
 }

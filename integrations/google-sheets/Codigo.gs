@@ -9,16 +9,17 @@
  *                  CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN
  *   · Titulares  → una fila por cuenta titular:
  *                  CORREO TITULAR · FECHA RENOVACIÓN · TARJETA
- * Lo que edites se guarda en el panel en segundos, y lo que cambie en el panel
- * (ventas, renovaciones, ediciones) aparece aquí solo. Las filas que pegues
- * abajo sin ID se cargan con el menú «Cargar filas nuevas».
+ * Lo que escribas en una celda se guarda en el panel en segundos, y lo que cambie
+ * en el panel (ventas, renovaciones, ediciones) aparece aquí solo.
+ * Para cambios grandes, pega los datos arreglados (en el orden que quieras) y usa
+ * el menú «Aplicar cambios pegados»: la hoja manda y el orden se respeta.
  *
  * La clave secreta vive en las propiedades del script, nunca en este código.
  */
 
 var ETIQUETA = 'MusicaPremium';
-var MSG_PENDIENTE = 'Fila nueva: cuando termines de pegar, usa el menú ' + ETIQUETA + ' → Cargar filas nuevas.';
-var LOTE = 50; // filas nuevas por llamada al servidor
+var MSG_PEGADO = 'Pegado: cuando termines, usa el menú ' + ETIQUETA + ' → Aplicar cambios pegados.';
+var LOTE_FILAS = 500; // filas por llamada al servidor (sin partir titulares)
 
 // Columnas. fija = la pone el sistema; local = solo existe en la hoja; oculta = no se ve.
 var CLIENTES = {
@@ -38,9 +39,7 @@ var CLIENTES = {
   ],
   visibles: 6,              // CORREO TITULAR … RENOVACIÓN
   accionEditar: 'edit',
-  accionCargar: 'import',
   campoFilas: 'rows',       // dónde vienen sus filas en las respuestas del servidor
-  orden: ['plataforma', 'correoTitular', 'cupo'],
   notas: {
     correoTitular: 'Para renombrar un titular, cámbialo en sus 5 filas a la vez. Para crear uno nuevo: menú ' + ETIQUETA + ' → Agregar titular.',
     nombre: 'WhatsApp (número) o usuario (@…) del cliente. Escribirlo ocupa el cupo; borrarlo lo libera (se borran PAGÓ y RENOVACIÓN).',
@@ -60,9 +59,7 @@ var TITULARES = {
   ],
   visibles: 3,
   accionEditar: 'titularEdit',
-  accionCargar: 'titularImport',
   campoFilas: 'titulares',
-  orden: ['plataforma', 'correoTitular'],
   notas: {
     correoTitular: 'Una fila por titular. Cambiar el correo renombra el titular. Los titulares nuevos se crean en «Clientes» (o menú ' + ETIQUETA + ' → Agregar titular).',
     renuevaTitular: 'Día/mes/año. En rojo si ya venció, en naranja si vence en 3 días o menos.',
@@ -88,7 +85,7 @@ function onOpen() {
   try { asegurarFormato_(CLIENTES, SpreadsheetApp.getActive().getSheetByName(CLIENTES.nombre)); } catch (e) { console.error(mensaje_(e)); }
   SpreadsheetApp.getUi()
     .createMenu(ETIQUETA)
-    .addItem('Cargar filas nuevas', 'cargarFilasNuevas')
+    .addItem('Aplicar cambios pegados…', 'aplicarCambiosPegados')
     .addItem('Agregar titular…', 'agregarTitular')
     .addItem('Recargar todo desde el panel', 'recargarInventarioManual')
     .addSeparator()
@@ -223,7 +220,18 @@ function doPost(e) {
       if (msg.type === 'rows') {
         if (sh) aplicarFilas_(CLIENTES, sh, msg.rows || [], msg.deleted || [], {});
         var shT = ss.getSheetByName(TITULARES.nombre);
-        if (shT && msg.titulares) recargarSinLock_(TITULARES, shT, msg.titulares);
+        if (shT && msg.titulares) {
+          // titularIds (si viene) = todas las cuentas que existen: las demás se quitan de la hoja.
+          var borrados = [];
+          if (msg.titularIds) {
+            var vigentes = {};
+            msg.titularIds.forEach(function (id) { vigentes[id] = true; });
+            var lastT = shT.getLastRow();
+            var idsT = lastT >= 2 ? shT.getRange(2, col_(TITULARES, 'id') + 1, lastT - 1, 1).getValues() : [];
+            idsT.forEach(function (r) { var id = String(r[0] || '').trim(); if (/^\d+$/.test(id) && !vigentes[id]) borrados.push(id); });
+          }
+          aplicarFilas_(TITULARES, shT, msg.titulares, borrados, {});
+        }
       }
     } finally {
       lock.releaseLock();
@@ -259,7 +267,13 @@ function mensaje_(err) {
 
 // ---------------------------------------------------------------- Edición
 
-/** Activador instalable de edición: manda al panel lo que cambiaste en filas que ya existen. */
+/**
+ * Activador instalable de edición.
+ * - Una sola fila con ID (escribir en una celda): se guarda en el panel al momento.
+ * - Varias filas a la vez (pegar, borrar un bloque): no se aplica fila por fila,
+ *   porque lo pegado casi nunca coincide con el ID oculto de cada fila. Esas
+ *   filas quedan «Pegado» (sin ID) hasta usar el menú «Aplicar cambios pegados».
+ */
 function alEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
@@ -280,35 +294,25 @@ function alEditar(e) {
   lock.waitLock(120000);
   try {
     var n = r1 - r0 + 1;
-    var valores = sh.getRange(r0, 1, n, t.cols.length).getValues();
-    var edits = [];
-    var enviados = {};
-    // Filas nuevas (sin ID): no se cargan solas. Si se cargaran al completarse,
-    // la hoja se reordenaría mientras pegas columna por columna y lo siguiente
-    // caería en otras filas. Se cargan todas juntas con el menú.
-    var syncCol = sh.getRange(r0, col_(t, 'sync') + 1, n, 1);
-    var syncVals = syncCol.getValues();
-    var hayNuevas = false;
-    for (var i = 0; i < n; i++) {
-      var fila = valores[i];
-      var id = idDe_(t, fila);
-      if (!id) {
-        if (tieneDatos_(t, fila)) { syncVals[i][0] = MSG_PENDIENTE; hayNuevas = true; }
-        continue;
-      }
-      var changes = {};
-      editables.forEach(function (ci) { changes[t.cols[ci].key] = paraEnviar_(fila[ci]); });
-      edits.push({ id: id, changes: changes });
-      enviados[id] = fila;
+    var colSync = col_(t, 'sync');
+    if (n > 1) { marcarPegado_(t, sh, r0, n); return; }
+
+    var fila = sh.getRange(r0, 1, 1, t.cols.length).getValues()[0];
+    var id = idDe_(t, fila);
+    if (!id) {
+      if (tieneDatos_(t, fila)) sh.getRange(r0, colSync + 1).setValue(MSG_PEGADO);
+      return;
     }
-    if (hayNuevas) syncCol.setValues(syncVals);
-    if (!edits.length) return;
+    var changes = {};
+    editables.forEach(function (ci) { changes[t.cols[ci].key] = paraEnviar_(fila[ci]); });
+    var enviados = {};
+    enviados[id] = fila;
 
     var resp;
     try {
-      resp = llamar_({ action: t.accionEditar, edits: edits });
+      resp = llamar_({ action: t.accionEditar, edits: [{ id: id, changes: changes }] });
     } catch (err) {
-      marcarFilas_(t, sh, Object.keys(enviados), '✗ No se guardó: ' + mensaje_(err));
+      sh.getRange(r0, colSync + 1).setValue('✗ No se guardó: ' + mensaje_(err));
       return;
     }
     var hora = hora_();
@@ -322,84 +326,132 @@ function alEditar(e) {
   }
 }
 
-// ---------------------------------------------------------------- Filas nuevas
+/** Filas pegadas: sin ID (ya no representan ese cupo) y con el aviso en Sync. */
+function marcarPegado_(t, sh, r0, n) {
+  var rango = sh.getRange(r0, 1, n, t.cols.length);
+  var data = rango.getValues();
+  var colSync = col_(t, 'sync');
+  data.forEach(function (fila) {
+    // Todo lo que pone el sistema (ID, plataforma, cupo, versión) ya no vale para lo pegado.
+    t.cols.forEach(function (c, ci) { if (c.fija) fila[ci] = ''; });
+    fila[colSync] = tieneDatos_(t, fila) ? MSG_PEGADO : '';
+  });
+  var desde = colSync + 1;
+  // Solo se escriben las columnas del sistema: lo que pegaste queda tal cual.
+  sh.getRange(r0, desde, n, t.cols.length - colSync).setValues(data.map(function (f) { return f.slice(colSync); }));
+}
 
-/** Menú: carga al panel las filas sin ID de las dos pestañas (primero «Clientes», que crea titulares). */
-function cargarFilasNuevas() {
+// ---------------------------------------------------------------- Aplicar la hoja completa
+
+/** Nombre viejo del menú. */
+function cargarFilasNuevas() { aplicarCambiosPegados(); }
+
+/**
+ * Menú «Aplicar cambios pegados»: la hoja manda. Lee las dos pestañas completas,
+ * muestra qué va a cambiar y, si confirmas, deja el panel igual a la hoja:
+ *   · Clientes: cada cliente es el par (correo titular, correo cliente). Los
+ *     clientes que ya no están bajo un titular de la hoja dejan libre su cupo.
+ *   · Titulares: fecha de renovación y tarjeta (vacío = no se cambia).
+ * Los titulares del panel que no están en la hoja no se tocan. Al terminar, las
+ * filas quedan en el orden en que las pusiste, cada una con su ID.
+ */
+function aplicarCambiosPegados() {
   var ss = SpreadsheetApp.getActive();
-  if (!ss.getSheetByName(CLIENTES.nombre)) { SpreadsheetApp.getUi().alert('Primero usa ' + ETIQUETA + ' → Configurar conexión.'); return; }
+  var ui = SpreadsheetApp.getUi();
+  var shC = ss.getSheetByName(CLIENTES.nombre);
+  var shT = ss.getSheetByName(TITULARES.nombre);
+  if (!shC) { ui.alert('Primero usa ' + ETIQUETA + ' → Configurar conexión.'); return; }
   var lock = LockService.getScriptLock();
   lock.waitLock(120000);
   try {
-    var porTabla = [];
-    var total = 0;
-    TABLAS.forEach(function (t) {
-      var sh = ss.getSheetByName(t.nombre);
-      if (!sh) return;
-      var last = sh.getLastRow();
-      var data = last >= 2 ? sh.getRange(2, 1, last - 1, t.cols.length).getValues() : [];
-      var nuevas = [];
-      data.forEach(function (fila, i) {
-        if (!idDe_(t, fila) && String(fila[col_(t, 'correoTitular')]).trim() !== '') nuevas.push(filaParaCargar_(t, fila, i + 2));
+    if (!asegurarFormato_(CLIENTES, shC)) { ui.alert('La pestaña «Clientes» no tiene el formato esperado. Usa Configurar conexión.'); return; }
+    var clientes = filasConDatos_(CLIENTES, shC);
+    var titulares = shT ? filasConDatos_(TITULARES, shT) : [];
+    var fechas = avisoFechas_([{ t: CLIENTES, nuevas: clientes }, { t: TITULARES, nuevas: titulares }]);
+    if (fechas) { ui.alert('No se aplicó nada', fechas, ui.ButtonSet.OK); return; }
+
+    ss.toast('Revisando ' + (clientes.length + titulares.length) + ' filas…', ETIQUETA, 60);
+    var pre = llamar_({ action: 'bulkPreview', clientes: clientes, titulares: titulares });
+    var s = pre.resumen;
+    var cambios = s.titularesNuevos + s.clientesNuevos + s.clientesActualizados + s.cuposLiberados + s.titularesActualizados;
+    var lineas = [
+      'El panel quedará igual a la hoja:',
+      '',
+      '• Titulares nuevos: ' + s.titularesNuevos,
+      '• Clientes nuevos: ' + s.clientesNuevos + ' · actualizados: ' + s.clientesActualizados + ' · sin cambios: ' + s.sinCambios,
+      '• Cupos que quedan libres (clientes que ya no están en la hoja): ' + s.cuposLiberados,
+      '• Titulares con fecha o tarjeta nueva: ' + s.titularesActualizados,
+    ];
+    if (pre.errores.length) lineas.push('• Filas con error (no se aplican; el motivo queda en Sync): ' + pre.errores.length);
+    if (s.ausentes) lineas.push('• Titulares del panel que no están en la hoja (no se tocan): ' + s.ausentes);
+    lineas.push('', cambios ? '¿Aplicar?' : 'No hay cambios. ¿Reordenar la hoja y ponerle los IDs igual?');
+    if (ui.alert('Aplicar cambios pegados', lineas.join('\n'), ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+    var errores = { Clientes: {}, Titulares: {} };
+    pre.errores.forEach(function (e) { errores[e.hoja][e.fila] = e.mensaje; });
+
+    if (cambios) {
+      ss.toast('Aplicando cambios…', ETIQUETA, 300);
+      var lotes = lotesPorTitular_(clientes, LOTE_FILAS);
+      lotes.forEach(function (l) { llamar_({ action: 'bulkLiberar', rows: l }); });
+      lotes.forEach(function (l) {
+        var r = llamar_({ action: 'bulkAplicar', rows: l });
+        (r.results || []).forEach(function (x) { if (!x.ok) errores.Clientes[x.fila] = x.mensaje; });
       });
-      porTabla.push({ t: t, sh: sh, nuevas: nuevas });
-      total += nuevas.length;
-    });
-    if (!total) { ss.toast('No hay filas nuevas: todas tienen ID.', ETIQUETA, 6); return; }
-    var fechas = avisoFechas_(porTabla);
-    if (fechas) {
-      var ui = SpreadsheetApp.getUi();
-      ui.alert('No se cargó nada', fechas, ui.ButtonSet.OK);
-      return;
+      for (var i = 0; i < titulares.length; i += LOTE_FILAS) {
+        var rt = llamar_({ action: 'bulkTitulares', rows: titulares.slice(i, i + LOTE_FILAS) });
+        (rt.results || []).forEach(function (x) { if (!x.ok) errores.Titulares[x.fila] = x.mensaje; });
+      }
     }
-    ss.toast('Cargando ' + total + ' filas al panel…', ETIQUETA, 120);
-    var ok = 0, mal = 0;
-    porTabla.forEach(function (p) {
-      if (!p.nuevas.length) return;
-      var r = cargarNuevas_(p.t, p.sh, p.nuevas);
-      ok += r.ok;
-      mal += r.mal;
-    });
-    recargarTodo_(ss); // las cargadas vuelven con su ID y en orden, en las dos pestañas
-    ss.toast('Cargadas: ' + ok + (mal ? ' · Con error: ' + mal + ' (mira la columna Sync)' : ''), ETIQUETA, 10);
+
+    var snap = llamar_({ action: 'snapshot' });
+    componer_(CLIENTES, shC, snap.rows || [], { errores: errores.Clientes, porContenido: true });
+    if (shT) componer_(TITULARES, shT, snap.titulares || [], { errores: errores.Titulares, porContenido: true });
+    var nErr = Object.keys(errores.Clientes).length + Object.keys(errores.Titulares).length;
+    ss.toast('Listo.' + (nErr ? ' Filas con error: ' + nErr + ' (mira la columna Sync).' : ''), ETIQUETA, 10);
   } finally {
     lock.releaseLock();
   }
 }
 
-/**
- * Manda las filas nuevas en lotes. Las que entraron se borran de su lugar (vuelven
- * con su ID en la recarga de después). Las que no, se quedan con el motivo en Sync.
- */
-function cargarNuevas_(t, sh, nuevas) {
-  var resultados = {};
-  var ok = 0, mal = 0;
-  for (var i = 0; i < nuevas.length; i += LOTE) {
-    var lote = nuevas.slice(i, i + LOTE);
-    try {
-      var resp = llamar_({ action: t.accionCargar, rows: lote });
-      (resp.results || []).forEach(function (r) {
-        resultados[r.fila] = r;
-        if (r.ok) ok++; else mal++;
-      });
-    } catch (err) {
-      lote.forEach(function (f) { resultados[f.fila] = { ok: false, mensaje: 'No se cargó: ' + mensaje_(err) }; mal++; });
-    }
-  }
+/** Filas con algo escrito, con su número de fila. */
+function filasConDatos_(t, sh) {
   var last = sh.getLastRow();
-  if (last >= 2) {
-    var rango = sh.getRange(2, 1, last - 1, t.cols.length);
-    var data = rango.getValues();
-    var colSync = col_(t, 'sync');
-    data.forEach(function (fila, k) {
-      var r = resultados[k + 2];
-      if (!r) return;
-      if (r.ok) data[k] = t.cols.map(function () { return ''; });
-      else fila[colSync] = '✗ ' + r.mensaje;
-    });
-    rango.setValues(data);
-  }
-  return { ok: ok, mal: mal };
+  if (last < 2) return [];
+  var data = sh.getRange(2, 1, last - 1, t.visibles).getValues();
+  var out = [];
+  data.forEach(function (fila, i) {
+    if (!fila.some(function (v) { return v !== ''; })) return;
+    var row = { fila: i + 2 };
+    for (var c = 0; c < t.visibles; c++) row[t.cols[c].key] = paraEnviar_(fila[c]);
+    out.push(row);
+  });
+  return out;
+}
+
+/** Lotes de ~n filas sin partir a ningún titular (liberar necesita ver todas sus filas juntas). */
+function lotesPorTitular_(rows, n) {
+  var grupos = {};
+  var orden = [];
+  rows.forEach(function (r) {
+    var k = claveTitular_(r.correoTitular);
+    if (!grupos[k]) { grupos[k] = []; orden.push(k); }
+    grupos[k].push(r);
+  });
+  var lotes = [];
+  var actual = [];
+  orden.forEach(function (k) {
+    if (actual.length && actual.length + grupos[k].length > n) { lotes.push(actual); actual = []; }
+    actual = actual.concat(grupos[k]);
+  });
+  if (actual.length) lotes.push(actual);
+  return lotes;
+}
+
+/** Correo del titular en minúsculas (sin etiquetas como « - YO»). */
+function claveTitular_(v) {
+  var m = String(v || '').match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+  return (m ? m[0] : String(v || '')).replace(/[.,;]+$/, '').toLowerCase().trim();
 }
 
 function idDe_(t, fila) {
@@ -411,15 +463,9 @@ function tieneDatos_(t, fila) {
   return fila.slice(0, t.visibles).some(function (v) { return v !== ''; });
 }
 
-function filaParaCargar_(t, fila, num) {
-  var row = { fila: num };
-  for (var c = 0; c < t.visibles; c++) row[t.cols[c].key] = paraEnviar_(fila[c]);
-  return row;
-}
-
 /**
  * Con la hoja en formato de EE.UU., «03/10/26» se lee como 10 de marzo. Si hay
- * fechas y el formato no es día/mes, no se carga nada y se explica cómo cambiarlo.
+ * fechas y el formato no es día/mes, no se aplica nada y se explica cómo cambiarlo.
  */
 function avisoFechas_(porTabla) {
   var locale = SpreadsheetApp.getActive().getSpreadsheetLocale() || '';
@@ -436,21 +482,31 @@ function avisoFechas_(porTabla) {
 // ---------------------------------------------------------------- Escribir lo que manda el panel
 
 /**
- * Escribe en la hoja las filas que manda el servidor. Solo toca las que
- * cambiaron (versión distinta) y, si es la respuesta a una edición, no pisa
- * las celdas que editaste mientras se guardaba.
+ * Cambios que llegan del panel (o la respuesta a una edición). Solo lee las
+ * columnas ID y versión, y solo escribe las filas que cambiaron: rápido aunque
+ * la pestaña tenga miles de filas. Los cupos nuevos van al final.
+ * Si hay filas pegadas sin aplicar, no se agregan filas (se ordenará todo al aplicar).
  */
 function aplicarFilas_(t, sh, rows, deleted, opts) {
   var n = t.cols.length;
   var colSync = col_(t, 'sync');
+  var colId = col_(t, 'id');
   var colVersion = col_(t, 'version');
   var last = sh.getLastRow();
-  var data = last >= 2 ? sh.getRange(2, 1, last - 1, n).getValues() : [];
+  var ids = last >= 2 ? sh.getRange(2, colId + 1, last - 1, 1).getValues() : [];
+  var versiones = last >= 2 ? sh.getRange(2, colVersion + 1, last - 1, 1).getValues() : [];
+  var syncs = last >= 2 ? sh.getRange(2, colSync + 1, last - 1, 1).getValues() : [];
   var indice = {};
-  data.forEach(function (r, i) { var id = idDe_(t, r); if (id) indice[id] = i + 2; });
+  var pendientes = false;
+  ids.forEach(function (r, i) {
+    var id = String(r[0] || '').trim();
+    if (/^\d+$/.test(id)) indice[id] = i + 2;
+    else if (String(syncs[i][0]).indexOf('Pegado') === 0) pendientes = true;
+  });
 
   var hora = hora_();
   var agregadas = [];
+  var cambios = [];
   rows.forEach(function (row) {
     var destino = filaDesdeServidor_(t, row);
     var marca = opts.marcas && opts.marcas[row.id];
@@ -460,20 +516,36 @@ function aplicarFilas_(t, sh, rows, deleted, opts) {
       agregadas.push(destino);
       return;
     }
-    var actual = data[num - 2];
-    if (!marca && actual[colVersion] === row.version) return;
-    var enviado = opts.enviados && opts.enviados[row.id];
+    if (!marca && versiones[num - 2][0] === row.version) return;
+    cambios.push({ num: num, destino: destino, marca: marca, enviado: opts.enviados && opts.enviados[row.id] });
+  });
+
+  function mezclar(actual, ch) {
     var salida = actual.slice();
     for (var c = 0; c < n; c++) {
       if (t.cols[c].local) continue;
-      if (enviado && serial_(actual[c]) !== serial_(enviado[c])) continue; // lo cambiaste mientras se guardaba
-      salida[c] = destino[c];
+      if (ch.enviado && serial_(actual[c]) !== serial_(ch.enviado[c])) continue; // lo cambiaste mientras se guardaba
+      salida[c] = ch.destino[c];
     }
-    salida[colSync] = marca || '↻ Panel ' + hora;
-    sh.getRange(num, 1, 1, n).setValues([salida]);
-  });
+    salida[colSync] = ch.marca || '↻ Panel ' + hora;
+    return salida;
+  }
+  if (cambios.length > 50) {
+    // Muchos cambios (p. ej. una acción en lote del panel): una lectura y una escritura del bloque.
+    var desdeFila = Math.min.apply(null, cambios.map(function (ch) { return ch.num; }));
+    var hastaFila = Math.max.apply(null, cambios.map(function (ch) { return ch.num; }));
+    var bloque = sh.getRange(desdeFila, 1, hastaFila - desdeFila + 1, n);
+    var datos = bloque.getValues();
+    cambios.forEach(function (ch) { datos[ch.num - desdeFila] = mezclar(datos[ch.num - desdeFila], ch); });
+    bloque.setValues(datos);
+  } else {
+    cambios.forEach(function (ch) {
+      var actual = sh.getRange(ch.num, 1, 1, n).getValues()[0];
+      sh.getRange(ch.num, 1, 1, n).setValues([mezclar(actual, ch)]);
+    });
+  }
 
-  if (agregadas.length) {
+  if (agregadas.length && !pendientes) {
     var desde = Math.max(sh.getLastRow(), 1) + 1;
     asegurarFilas_(sh, desde + agregadas.length - 1);
     sh.getRange(desde, 1, agregadas.length, n).setValues(agregadas);
@@ -490,7 +562,6 @@ function aplicarFilas_(t, sh, rows, deleted, opts) {
       if (!vueltas[id] && indice[id] && borrar.indexOf(indice[id]) < 0) sh.getRange(indice[id], colSync + 1).setValue(opts.marcas[id]);
     });
   }
-  if (agregadas.length) ordenar_(t, sh);
 }
 
 function recargarInventarioManual() {
@@ -525,48 +596,144 @@ function recargarTodo_(ss) {
     var sh = ss.getSheetByName(t.nombre);
     if (!sh) return;
     if (!asegurarFormato_(t, sh)) throw new Error('La pestaña «' + t.nombre + '» tiene el formato anterior: abre la hoja para actualizarla.');
-    escritas += recargarSinLock_(t, sh, resp[t.campoFilas] || []);
+    escritas += componer_(t, sh, resp[t.campoFilas] || [], {});
   });
   return escritas;
 }
 
-/** Reescribe la pestaña con las filas del panel. Las filas nuevas pendientes quedan al final, con su motivo. */
+/** Alias usado por doPost y versiones anteriores. */
 function recargarSinLock_(t, sh, rows) {
+  return componer_(t, sh, rows, {});
+}
+
+/**
+ * Reescribe la pestaña con las filas del panel SIN cambiar el orden que tiene:
+ *   · cada fila con ID se reemplaza en su lugar por la del panel;
+ *   · con porContenido (al aplicar lo pegado), las filas sin ID se reconocen por
+ *     su contenido (titular + correo cliente, o el correo en «Titulares»); las
+ *     filas de cupo vacío toman los cupos libres de su titular;
+ *   · las filas con error se quedan como están, con el motivo en Sync;
+ *   · lo del panel que no estaba en la hoja va debajo de las filas de su
+ *     titular, o al final si el titular no estaba.
+ * Si no hubo filas pegadas y ya estaba todo al día, no escribe nada.
+ */
+function componer_(t, sh, rows, opts) {
   var n = t.cols.length;
   var colSync = col_(t, 'sync');
+  var colId = col_(t, 'id');
   var colVersion = col_(t, 'version');
+  var errores = opts.errores || {};
+  var porContenido = !!opts.porContenido;
+  var hora = hora_();
+
   var last = sh.getLastRow();
   var data = last >= 2 ? sh.getRange(2, 1, last - 1, n).getValues() : [];
-  var actuales = {};
-  var sinId = [];
-  data.forEach(function (r) {
-    var id = idDe_(t, r);
-    if (id) actuales[id] = r;
-    else if (tieneDatos_(t, r)) sinId.push(r);
+
+  var byId = {};
+  var byKey = {};
+  var vaciosPorTitular = {};
+  rows.forEach(function (r) {
+    byId[r.id] = r;
+    var k = claveContenido_(t, r);
+    if (k) byKey[k] = r;
+    else if (t === CLIENTES) {
+      var kt = claveTitular_(r.correoTitular);
+      (vaciosPorTitular[kt] = vaciosPorTitular[kt] || []).push(r);
+    }
   });
 
-  var alDia = Object.keys(actuales).length === rows.length && data.length === rows.length + sinId.length &&
-    rows.every(function (row) { return actuales[row.id] && actuales[row.id][colVersion] === row.version; });
-  if (alDia) return 0;
+  if (!porContenido) {
+    var hayPegadas = data.some(function (f) { return !idDe_(t, f) && tieneDatos_(t, f); });
+    var alDia = !hayPegadas && data.filter(function (f) { return idDe_(t, f); }).length === rows.length &&
+      data.every(function (f) { var id = idDe_(t, f); return !id || (byId[id] && byId[id].version === f[colVersion]); });
+    if (alDia) return 0;
+    // Con filas pegadas sin aplicar, solo se actualizan en su lugar las que tienen ID.
+    if (hayPegadas) {
+      aplicarFilas_(t, sh, rows, [], {});
+      return 0;
+    }
+  }
 
-  var hora = hora_();
-  var salida = rows.map(function (row) {
-    var previa = actuales[row.id];
-    var f = filaDesdeServidor_(t, row);
-    f[colSync] = previa && previa[colVersion] === row.version ? previa[colSync] : '↻ Panel ' + hora;
-    return f;
+  var usados = {};
+  var salida = [];
+  var cuentas = []; // titular de cada fila de salida (para poner debajo lo que falte)
+  function emitir(r, previa) {
+    usados[r.id] = true;
+    var f = filaDesdeServidor_(t, r);
+    f[colSync] = previa && previa[colVersion] === r.version ? previa[colSync] : (porContenido ? '✓ Sincronizado ' : '↻ Panel ') + hora;
+    salida.push(f);
+    cuentas.push(claveTitular_(r.correoTitular));
+  }
+
+  data.forEach(function (f, i) {
+    if (!tieneDatos_(t, f) && !idDe_(t, f)) return; // filas vacías: se compactan
+    var num = i + 2;
+    if (errores[num]) {
+      var g = f.slice();
+      g[colId] = ''; g[colVersion] = ''; g[colSync] = '✗ ' + errores[num];
+      salida.push(g);
+      cuentas.push(claveTitular_(f[col_(t, 'correoTitular')]));
+      return;
+    }
+    var id = idDe_(t, f);
+    if (id && byId[id] && !usados[id]) { emitir(byId[id], f); return; }
+    if (id) return; // ya no existe en el panel
+    if (!porContenido) { // fila pegada sin aplicar: se queda donde está
+      var p = f.slice(); p[colSync] = MSG_PEGADO;
+      salida.push(p);
+      cuentas.push(claveTitular_(f[col_(t, 'correoTitular')]));
+      return;
+    }
+    var fila = {};
+    t.cols.forEach(function (c, ci) { fila[c.key] = f[ci]; });
+    var k = claveContenido_(t, fila);
+    if (k && byKey[k] && !usados[byKey[k].id]) { emitir(byKey[k], null); return; }
+    if (!k && t === CLIENTES) { // cupo vacío: el siguiente cupo libre de su titular
+      var libres = vaciosPorTitular[claveTitular_(fila.correoTitular)] || [];
+      while (libres.length && usados[libres[0].id]) libres.shift();
+      if (libres.length) emitir(libres.shift(), null);
+    }
   });
-  sinId.forEach(function (r) {
-    if (String(r[colSync]).indexOf('✗') !== 0) r[colSync] = MSG_PENDIENTE;
-    salida.push(r);
+
+  // Lo que el panel tiene y la hoja no: debajo de su titular, o al final.
+  var faltan = {};
+  var ordenFaltan = [];
+  rows.forEach(function (r) {
+    if (usados[r.id]) return;
+    var kt = claveTitular_(r.correoTitular);
+    if (!faltan[kt]) { faltan[kt] = []; ordenFaltan.push(kt); }
+    faltan[kt].push(r);
+  });
+  var ultimo = {};
+  cuentas.forEach(function (kt, i) { ultimo[kt] = i; });
+  var final = [];
+  salida.forEach(function (f, i) {
+    final.push(f);
+    var kt = cuentas[i];
+    if (ultimo[kt] === i && faltan[kt]) {
+      faltan[kt].forEach(function (r) { var g = filaDesdeServidor_(t, r); g[colSync] = '↻ Panel ' + hora; final.push(g); });
+      delete faltan[kt];
+    }
+  });
+  ordenFaltan.forEach(function (kt) {
+    (faltan[kt] || []).forEach(function (r) { var g = filaDesdeServidor_(t, r); g[colSync] = '↻ Panel ' + hora; final.push(g); });
   });
 
   if (last >= 2) sh.getRange(2, 1, last - 1, n).clearContent();
-  if (salida.length) {
-    asegurarFilas_(sh, salida.length + 1);
-    sh.getRange(2, 1, salida.length, n).setValues(salida);
+  if (final.length) {
+    asegurarFilas_(sh, final.length + 1);
+    sh.getRange(2, 1, final.length, n).setValues(final);
   }
-  return salida.length;
+  return final.length;
+}
+
+/** Cómo se reconoce una fila por su contenido. Cupo vacío de «Clientes» → '' (no tiene). */
+function claveContenido_(t, r) {
+  var kt = claveTitular_(r.correoTitular);
+  if (!kt) return '';
+  if (t === TITULARES) return kt;
+  var cm = String(r.correoMiembro || '').trim().toLowerCase();
+  return cm ? kt + '|' + cm : '';
 }
 
 function filaDesdeServidor_(t, row) {
@@ -577,26 +744,9 @@ function filaDesdeServidor_(t, row) {
   });
 }
 
-function marcarFilas_(t, sh, ids, texto) {
-  var last = sh.getLastRow();
-  if (last < 2) return;
-  var col = sh.getRange(2, col_(t, 'id') + 1, last - 1, 1).getValues();
-  col.forEach(function (r, i) {
-    if (ids.indexOf(String(r[0])) >= 0) sh.getRange(i + 2, col_(t, 'sync') + 1).setValue(texto);
-  });
-}
-
 function asegurarFilas_(sh, hasta) {
   var max = sh.getMaxRows();
   if (hasta > max) sh.insertRowsAfter(max, hasta - max + 50);
-}
-
-function ordenar_(t, sh) {
-  var last = sh.getLastRow();
-  if (last < 3) return;
-  sh.getRange(2, 1, last - 1, t.cols.length).sort(t.orden.map(function (k) {
-    return { column: col_(t, k) + 1, ascending: true };
-  }));
 }
 
 // ---------------------------------------------------------------- Utilidades

@@ -222,7 +222,9 @@ describe("flushSheetOutbox", () => {
     expect(JSON.parse(payload).deleted).toEqual([String(slots[4].id)]);
     expect(/^[\x00-\x7f]*$/.test(payload)).toBe(true); // tildes escapadas: la firma no depende del charset
     expect(JSON.parse(payload).rows[0].notasTitular).toBe("Año nuevo, José");
-    expect((await query("select count(*)::int as n from sheet_outbox")).rows[0].n).toBe(0);
+    expect((await query("select count(*)::int as n from sheet_outbox where pushed_at is null")).rows[0].n).toBe(0);
+    // Los enviados se guardan un rato (la tabla del panel pide «qué cambió desde X»).
+    expect((await query("select count(*)::int as n from sheet_outbox")).rows[0].n).toBeGreaterThan(0);
   });
 
   it("si la hoja falla, conserva la cola y espera antes de reintentar", async () => {

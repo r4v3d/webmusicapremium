@@ -162,8 +162,11 @@ export default function SlotsGrid() {
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
   const sentinelRef = useRef(null);
-  const stampRef = useRef(null);
-  const recheckRef = useRef(false);
+  // Marcas de cambios: se pide «desde la penúltima» para no perder un cambio que
+  // todavía se estaba guardando cuando llegó la última respuesta.
+  const lastStampRef = useRef(null);
+  const sinceRef = useRef(null);
+  const needFullRef = useRef(true);
   const savingRef = useRef(0);
   const genRef = useRef(0); // sube con cada guardado: una lectura que empezó antes llega vieja
   const touchRef = useRef(false);
@@ -174,11 +177,11 @@ export default function SlotsGrid() {
   const mergeRows = useCallback((fresh, deleted = []) => {
     const byId = new Map(fresh.map((r) => [r.id, r]));
     const gone = new Set(deleted.map(String));
-    // Cupos nuevos (p. ej. un titular recién creado): la próxima lectura trae el orden completo.
-    recheckRef.current = true;
     setRows((prev) => {
       if (!prev) return fresh;
       const known = new Set(prev.map((r) => r.id));
+      // Cupos nuevos (p. ej. un titular recién creado): la próxima lectura trae todo, en orden.
+      if (fresh.some((r) => !known.has(r.id))) needFullRef.current = true;
       const out = prev.filter((r) => !gone.has(r.id)).map((r) => byId.get(r.id) || r);
       return [...out, ...fresh.filter((r) => !known.has(r.id))];
     });
@@ -186,27 +189,29 @@ export default function SlotsGrid() {
 
   const load = useCallback(async ({ force = false } = {}) => {
     if (savingRef.current > 0 && !force) return;
-    const stamp = force || recheckRef.current ? null : stampRef.current;
+    const full = force || needFullRef.current || !sinceRef.current;
+    const since = full ? null : sinceRef.current;
     const gen = genRef.current;
     try {
-      const res = await fetch(`/api/admin/grid${stamp ? `?stamp=${stamp}` : ""}`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/grid${since ? `?since=${since}` : ""}`, { cache: "no-store" });
       if (res.status === 401) return;
       if (!res.ok) throw new Error();
       const data = await res.json();
       setConn((c) => (c === "offline" ? "live" : c));
-      if (data.unchanged) return;
-      if (gen !== genRef.current || savingRef.current > 0) {
-        recheckRef.current = true; // se guardó algo mientras tanto: pedir de nuevo
-        return;
+      // Se guardó algo mientras tanto: esta respuesta puede ser vieja; la próxima vuelta pide lo mismo.
+      if (gen !== genRef.current || savingRef.current > 0) return;
+      if (data.rows) {
+        needFullRef.current = false;
+        setRows(data.rows);
+      } else if (data.changes) {
+        mergeRows(data.changes.rows, data.changes.deleted);
       }
-      // La marca puede avanzar antes de que el cambio termine de guardarse: una vuelta más.
-      recheckRef.current = stamp !== null && !recheckRef.current;
-      stampRef.current = data.stamp;
-      setRows(data.rows);
+      sinceRef.current = full ? data.stamp : lastStampRef.current || data.stamp;
+      lastStampRef.current = data.stamp;
     } catch {
       setConn("offline");
     }
-  }, []);
+  }, [mergeRows]);
 
   useEffect(() => {
     const first = window.setTimeout(() => load({ force: true }), 0);
