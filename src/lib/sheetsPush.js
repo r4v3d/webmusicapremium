@@ -3,7 +3,7 @@
 // Escucha NOTIFY mpb_sheets para hacerlo en segundos, no al siguiente ciclo.
 import pg from "pg";
 import { query } from "./pg";
-import { buildInventoryRows } from "./sheetsSync";
+import { buildInventoryRows, buildTitularRows } from "./sheetsSync";
 import { sheetsPushConfigured, sheetsWebAppUrl, signSheets } from "./sheetsAuth";
 import { alertAdmin } from "./notify";
 
@@ -55,7 +55,9 @@ export async function flushSheetOutbox({ fetchImpl = fetch, now = Date.now() } =
   const deleted = slotIds.filter((id) => !found.has(id));
 
   try {
-    await postToSheet({ type: "rows", rows, deleted }, { fetchImpl, now });
+    // «Titulares» es chica (una fila por cuenta): va completa y la hoja solo reescribe si algo cambió.
+    const titulares = await buildTitularRows();
+    await postToSheet({ type: "rows", rows, deleted, titulares }, { fetchImpl, now });
   } catch (error) {
     state.failingSince ??= now;
     state.backoffMs = Math.min(Math.max(state.backoffMs * 2, 15_000), 5 * 60_000);
