@@ -85,6 +85,24 @@ function QrBox({ src, alt, variant = "" }) {
   );
 }
 
+// MercadoPago.js v2: crea el token de Yape en el navegador (el código de aprobación no pasa por nuestro servidor).
+let mpSdkPromise = null;
+function loadMercadoPagoSdk() {
+  if (typeof window === "undefined") return Promise.reject(new Error("sin navegador"));
+  if (window.MercadoPago) return Promise.resolve(window.MercadoPago);
+  if (!mpSdkPromise) {
+    mpSdkPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://sdk.mercadopago.com/js/v2";
+      script.async = true;
+      script.onload = () => (window.MercadoPago ? resolve(window.MercadoPago) : reject(new Error("sdk")));
+      script.onerror = () => { mpSdkPromise = null; reject(new Error("sdk")); };
+      document.head.appendChild(script);
+    });
+  }
+  return mpSdkPromise;
+}
+
 function CheckoutLoading() {
   return (
     <div className="checkout-loading">
@@ -114,6 +132,8 @@ function Checkout() {
   const [copied, setCopied] = useState("");
   const [reference, setReference] = useState("");
   const [binanceOrderId, setBinanceOrderId] = useState("");
+  const [yapePhone, setYapePhone] = useState("");
+  const [yapeOtp, setYapeOtp] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const autoStarted = useRef(false);
 
@@ -185,6 +205,11 @@ function Checkout() {
     return () => clearInterval(id);
   }, []);
 
+  const mpUi = view?.intent?.ui === "mp_yape";
+  useEffect(() => {
+    if (mpUi) loadMercadoPagoSdk().catch(() => {});
+  }, [mpUi]);
+
   const copy = (text, id) => {
     navigator.clipboard.writeText(String(text));
     setCopied(id);
@@ -206,6 +231,41 @@ function Checkout() {
       setNotice(data.message || "");
     } catch {
       setNotice("Error de red. Intenta de nuevo.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const payYape = async (e) => {
+    e.preventDefault();
+    if (!view?.intent) return;
+    const phoneNumber = yapePhone.replace(/\D/g, "");
+    const otp = yapeOtp.replace(/\D/g, "");
+    setBusy("yape");
+    setNotice("");
+    try {
+      let yapeToken;
+      try {
+        const MercadoPago = await loadMercadoPagoSdk();
+        const mp = new MercadoPago(view.intent.instructions?.publicKey, { locale: "es-PE" });
+        const created = await mp.yape({ otp, phoneNumber }).create();
+        yapeToken = created?.id || created;
+      } catch {
+        setNotice("No pudimos validar el código con Yape. Revisa el número y genera un código de aprobación nuevo.");
+        setYapeOtp("");
+        return;
+      }
+      const res = await fetch("/api/payments/mercadopago/yape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intentId: view.intent.id, t: token, yapeToken }),
+      });
+      const data = await res.json();
+      if (data.order) applyView(data);
+      setNotice(data.message || "");
+      if (!res.ok) setYapeOtp("");
+    } catch {
+      setNotice("Error de red. Si Yape te descontó, espera un minuto: lo confirmamos solos.");
     } finally {
       setBusy("");
     }
@@ -366,6 +426,53 @@ function Checkout() {
           </form>
           <p className="credentials-info-hint">
             ¿No encuentras el Order ID? En Binance ve a <strong>Pay → Historial</strong> y abre el pago. Se acreditan hasta 3 decimales; si el monto llega por debajo, te mostramos cuánto falta.
+          </p>
+        </div>
+      );
+    }
+
+    if (intent.ui === "mp_yape") {
+      const phoneOk = /^\d{9}$/.test(yapePhone.replace(/\D/g, ""));
+      const otpOk = /^\d{6}$/.test(yapeOtp.replace(/\D/g, ""));
+      return (
+        <div className="payment-type-block">
+          <h2>Pago con Yape</h2>
+          <p className="payment-description">
+            Pagas <strong>{money(toPay, "PEN")}</strong> desde tu Yape sin salir de esta página. La confirmación es automática: tus credenciales aparecen al instante.
+          </p>
+          <ol className="mp-yape-steps">
+            <li>Abre tu app de <strong>Yape</strong>, entra al menú y toca <strong>«Código de aprobación»</strong>.</li>
+            <li>Escribe aquí tu celular de Yape y ese código de <strong>6 dígitos</strong> (vence en pocos minutos).</li>
+          </ol>
+          <form className="mp-yape-form" onSubmit={payYape}>
+            <label className="form-label" htmlFor="yape-phone">Celular de Yape</label>
+            <input
+              id="yape-phone"
+              className="form-input"
+              inputMode="numeric"
+              autoComplete="tel-national"
+              placeholder="9 dígitos, ej. 987654321"
+              maxLength={11}
+              value={yapePhone}
+              onChange={(e) => setYapePhone(e.target.value.replace(/[^\d ]/g, ""))}
+            />
+            <label className="form-label" htmlFor="yape-otp">Código de aprobación</label>
+            <input
+              id="yape-otp"
+              className="form-input mp-yape-otp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="••••••"
+              maxLength={6}
+              value={yapeOtp}
+              onChange={(e) => setYapeOtp(e.target.value.replace(/\D/g, ""))}
+            />
+            <button type="submit" className="btn btn-primary checkout-btn" disabled={!!busy || !phoneOk || !otpOk}>
+              {busy === "yape" ? "Procesando con Yape…" : `Pagar ${money(toPay, "PEN")} con Yape`}
+            </button>
+          </form>
+          <p className="credentials-info-hint">
+            Pago procesado por Mercado Pago. Nunca te pediremos tu clave de Yape: solo el código de aprobación de un solo uso.
           </p>
         </div>
       );

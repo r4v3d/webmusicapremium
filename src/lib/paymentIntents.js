@@ -9,6 +9,7 @@ import { normalizeNote } from "./binanceAccount";
 import { createPayment as taypiCreatePayment } from "./taypi";
 import { payWithWallet } from "./settle";
 import { CONFIG } from "../data/config";
+import { mercadoPagoPublicKey } from "./mercadopago";
 
 const OPEN = ["created", "awaiting"];
 const ORDER_OPEN = ["pending", "awaiting_payment", "expired", "underpaid"];
@@ -42,6 +43,8 @@ export function intentUi(intent, order = null) {
       ? { payId: process.env.BINANCE_PAY_ID || payments.binancePay.payId, nickname: process.env.BINANCE_PAY_NICKNAME || payments.binancePay.nickname, qrImage: payments.binancePay.qrImage }
       : provider?.ui === "static_qr"
       ? { yape: payments.yape, plin: payments.plin, reviewHours: CONFIG.manualReviewHours }
+      : provider?.ui === "mp_yape"
+      ? { publicKey: mercadoPagoPublicKey() }
       : null,
   };
 }

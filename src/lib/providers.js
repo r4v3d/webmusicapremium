@@ -1,5 +1,8 @@
 // Registro de proveedores (§11.2). El checkout no conoce proveedores concretos:
 // dibuja según `ui`. Activar TAYPI es poner TAYPI_ENABLED=true y MANUAL_YAPE_ENABLED=false.
+// Yape automático con Mercado Pago: MERCADOPAGO_ENABLED=true (+ MP_PUBLIC_KEY y MP_ACCESS_TOKEN).
+// Al estar activo pasa a ser el Yape por defecto; el Yape manual queda como alternativa
+// (sirve para Plin) salvo que se apague con MANUAL_YAPE_ENABLED=false.
 
 function flag(name, defaultValue) {
   const raw = process.env[name];
@@ -22,6 +25,15 @@ export function getProviders(env = process.env) {
       label: "Yape / Plin",
       ui: "static_qr",
       intentTtlMinutes: 30,
+    },
+    mercadopago_yape: {
+      currency: "PEN",
+      // Sin claves no se ofrece aunque esté encendido: el checkout no podría crear el token.
+      enabled: on("MERCADOPAGO_ENABLED", false) && Boolean(env.MP_PUBLIC_KEY && env.MP_ACCESS_TOKEN),
+      autoConfirm: true,
+      label: "Yape (confirmación automática)",
+      ui: "mp_yape",
+      intentTtlMinutes: 15,
     },
     taypi: {
       currency: "PEN",
