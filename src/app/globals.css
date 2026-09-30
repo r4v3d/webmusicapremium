@@ -4283,6 +4283,10 @@ a {
   z-index: 30;
   align-items: center;
 }
+/* Fija arriba al desplazarse: fondo sólido para que lo de abajo no se vea a través. */
+.admin-tabs-nav.admin-tabs-sticky {
+  background: linear-gradient(var(--glass-bg), var(--glass-bg)), var(--bg-primary);
+}
 .tab-btn {
   display: inline-flex;
   align-items: center;
