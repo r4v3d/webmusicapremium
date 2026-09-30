@@ -163,8 +163,11 @@ export function parseDateField(value, label) {
   const v = text(value);
   if (!v) return null;
   const date = parseDateInput(v);
-  if (!date || Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())) {
-    throw new SheetError(`${label}: fecha no válida («${v}»). Usa el formato día/mes/año.`);
+  if (!date) {
+    const pareceFecha = /^\d{1,4}[/.-]\d{1,2}([/.-]\d{2,4})?$/.test(v);
+    throw new SheetError(pareceFecha
+      ? `${label}: «${v}» no existe (ese mes no tiene ese día). Corrige la fecha.`
+      : `${label}: fecha no válida («${v}»). Usa el formato día/mes/año.`);
   }
   return date;
 }

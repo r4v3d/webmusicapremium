@@ -660,7 +660,8 @@ function componer_(t, sh, rows, opts) {
   function emitir(r, previa) {
     usados[r.id] = true;
     var f = filaDesdeServidor_(t, r);
-    f[colSync] = previa && previa[colVersion] === r.version ? previa[colSync] : (porContenido ? '✓ Sincronizado ' : '↻ Panel ') + hora;
+    f[colSync] = porContenido ? '✓ Sincronizado ' + hora
+      : previa && previa[colVersion] === r.version ? previa[colSync] : '↻ Panel ' + hora;
     salida.push(f);
     cuentas.push(claveTitular_(r.correoTitular));
   }
@@ -670,9 +671,24 @@ function componer_(t, sh, rows, opts) {
     var num = i + 2;
     if (errores[num]) {
       var g = f.slice();
-      g[colId] = ''; g[colVersion] = ''; g[colSync] = '✗ ' + errores[num];
+      t.cols.forEach(function (c, ci) { if (c.fija) g[ci] = ''; });
+      g[colSync] = '✗ ' + errores[num];
       salida.push(g);
-      cuentas.push(claveTitular_(f[col_(t, 'correoTitular')]));
+      var ktErr = claveTitular_(f[col_(t, 'correoTitular')]);
+      cuentas.push(ktErr);
+      // La fila con error ocupa el lugar de lo que representa: el mismo cliente
+      // si ya estaba en el panel, o si no un cupo libre de su titular. Así no
+      // aparece repetido ni una fila de más (el titular sigue con sus 5 filas).
+      var filaErr = {};
+      t.cols.forEach(function (c, ci) { filaErr[c.key] = f[ci]; });
+      var kErr = claveContenido_(t, filaErr);
+      if (kErr && byKey[kErr] && !usados[byKey[kErr].id]) {
+        usados[byKey[kErr].id] = true;
+      } else if (t === CLIENTES) {
+        var libresErr = vaciosPorTitular[ktErr] || [];
+        while (libresErr.length && usados[libresErr[0].id]) libresErr.shift();
+        if (libresErr.length) usados[libresErr.shift().id] = true;
+      }
       return;
     }
     var id = idDe_(t, f);

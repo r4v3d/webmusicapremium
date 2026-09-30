@@ -1,4 +1,22 @@
+/** true si 'YYYY-MM-DD' es un día que existe (30/02 o 31/04 no existen). */
+export function isRealDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * Fecha escrita a mano → 'YYYY-MM-DD', o null si no se entiende o no existe
+ * (antes «30/02/27» pasaba y la base de datos la rechazaba al guardar).
+ */
 export function parseDateInput(str) {
+  const iso = parseDateLoose(str);
+  return iso && isRealDate(iso) ? iso : null;
+}
+
+function parseDateLoose(str) {
   if (!str) return null;
   const value = String(str).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
