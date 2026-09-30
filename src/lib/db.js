@@ -94,6 +94,7 @@ export function formatFamilyAccount(acc) {
     ownerRenewalDate: acc.owner_renewal_date,
     renewalCost: Number(acc.renewal_cost) || 0,
     renewalCurrency: acc.renewal_currency || "PEN",
+    renewalCard: acc.renewal_card || "",
   };
 }
 
@@ -385,10 +386,11 @@ export async function createFamilyAccount(accountData, { tx = null } = {}) {
   const run = async (t) => {
     const res = await t.query(
       `insert into platform_accounts(platform_code, account_email, account_password, notes,
-                                     owner_renewal_date, renewal_cost, renewal_currency)
-       values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+                                     owner_renewal_date, renewal_cost, renewal_currency, renewal_card)
+       values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
       [accountData.service, accountData.masterEmail, accountData.password, accountData.notes || "",
-       toDateStr(accountData.ownerRenewalDate), accountData.renewalCost || 0, accountData.renewalCurrency || "PEN"]
+       toDateStr(accountData.ownerRenewalDate), accountData.renewalCost || 0, accountData.renewalCurrency || "PEN",
+       accountData.renewalCard || ""]
     );
     const result = formatFamilyAccount(res.rows[0]);
     await logEvent("family_account", result.id, "create", null, result, "Family account created", { tx: t });
@@ -406,6 +408,7 @@ export async function updateFamilyAccount(id, updatedFields, { tx: outerTx = nul
     ownerRenewalDate: "owner_renewal_date",
     renewalCost: "renewal_cost",
     renewalCurrency: "renewal_currency",
+    renewalCard: "renewal_card",
   };
   const run = async (tx) => {
     const old = await tx.query("select * from platform_accounts where id = $1 for update", [id]);

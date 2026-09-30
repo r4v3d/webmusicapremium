@@ -2,8 +2,8 @@
 
 Una sola hoja de Google, pestaña **«Clientes»**, con el mismo formato que *Clientes → Tabla* del panel:
 
-| CORREO TITULAR | NOMBRE | CORREO CLIENTE | CONTRASEÑA | PAGÓ | RENOVACIÓN |
-|---|---|---|---|---|---|
+| CORREO TITULAR | NOMBRE | CORREO CLIENTE | CONTRASEÑA | PAGÓ | RENOVACIÓN | RENOVACIÓN TITULAR | TARJETA |
+|---|---|---|---|---|---|---|---|
 
 - Un cupo por fila, agrupados por titular (5 filas por cuenta).
 - Lo que edites en la hoja se guarda en el panel en 1–3 segundos.
@@ -119,6 +119,8 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 | CORREO CLIENTE / CONTRASEÑA | El acceso del cupo. |
 | PAGÓ | Lo que paga el cliente, en soles. Necesita NOMBRE. |
 | RENOVACIÓN | Día/mes/año (`08/11/26`). En rojo si ya venció, en naranja si vence en 3 días o menos. Necesita NOMBRE. |
+| RENOVACIÓN TITULAR | Cuándo renuevas tú la cuenta titular. Es del titular: escríbela en **cualquiera** de sus filas y se pone en las 5 (y en *Cobros → Renovaciones* del panel). |
+| TARJETA | Con qué tarjeta pagas esa renovación (p. ej. `4642`). Igual que la anterior: una fila basta. Si pegas valores distintos en filas del mismo titular, no se guarda ninguno y *Sync* lo explica. |
 | Sync | La pone el sistema: `✓ Guardado` ya está en el panel · `↻ Panel` cambió desde el panel · `✗` no se guardó, con el motivo (la celda vuelve sola al valor del panel). |
 
 - **Pegar muchas filas de golpe** (por ejemplo, copiadas de tus hojas antiguas): pégalas **debajo de la última fila**, en las columnas A–F, nunca encima de filas que ya existen. Puedes pegar todo junto o columna por columna: mientras pegas, nada se mueve y *Sync* dice «Fila nueva». Cuando termines, usa **MusicaPremium → Cargar filas nuevas**:
@@ -132,9 +134,10 @@ sudo systemctl restart musicapremium-web musicapremium-worker
   - **Una fila completa:** el cupo queda libre (se borran nombre, correo, contraseña, pagó y renovación). El titular se queda.
   - **Las 5 filas completas de un titular, a la vez:** se borra el titular del panel. El historial de pagos se conserva.
   - **Solo la columna del titular:** no se borra nada; el titular vuelve y *Sync* explica por qué.
-  - No uses *Eliminar fila* (clic derecho): el panel no se entera y la fila vuelve en la siguiente revisión. También puedes borrar titulares en el panel (*Clientes → Familias*).
+  - No uses *Eliminar fila* (clic derecho): el panel no se entera y la fila vuelve en la siguiente revisión. También puedes borrar un titular en el panel: *Clientes → Tabla*, elige una celda de sus filas y pulsa **Borrar titular**.
 - Puedes pegar varias celdas a la vez, ordenar y filtrar. No agregues columnas en medio; si necesitas más, agrégalas **a la derecha** de *Sync*.
 - Las columnas ocultas (ID, plataforma, cupo, versión) las usa el sistema: no las muestres ni las edites.
+- **Si tu hoja es de la versión anterior** (sin RENOVACIÓN TITULAR ni TARJETA): al abrirla con el código nuevo, las dos columnas se insertan solas después de RENOVACIÓN y lo demás se corre a la derecha, sin perder datos.
 
 ### En el panel: Clientes → Tabla
 

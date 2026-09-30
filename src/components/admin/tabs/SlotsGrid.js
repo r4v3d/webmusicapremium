@@ -5,6 +5,7 @@
 // Usa /api/admin/grid: mismas filas y validación que Google Sheets.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAdmin } from "../AdminContext";
+import { CONFIG } from "../../../data/config";
 
 const COLS = [
   { key: "correoTitular", label: "Correo titular", cls: "col-titular" },
@@ -13,7 +14,12 @@ const COLS = [
   { key: "claveMiembro", label: "Contraseña", cls: "col-clave" },
   { key: "precio", label: "Pagó", cls: "col-pago", kind: "money" },
   { key: "vence", label: "Renovación", cls: "col-renueva", kind: "date" },
+  { key: "renuevaTitular", label: "Renov. titular", cls: "col-rtit", kind: "date", account: true },
+  { key: "tarjetaTitular", label: "Tarjeta", cls: "col-tarjeta", account: true },
 ];
+const DATE_KEYS = new Set(COLS.filter((c) => c.kind === "date").map((c) => c.key));
+// Datos de la cuenta: se repiten en sus 5 filas y se atenúan fuera de la primera.
+const ACCOUNT_KEYS = new Set(["correoTitular", ...COLS.filter((c) => c.account).map((c) => c.key)]);
 const NCOLS = COLS.length;
 const STATUS_LABEL = { free: "Libre", active: "Activo", pending_payment: "Falta pago", expired: "Vencido" };
 const POLL_MS = 4000;
@@ -52,14 +58,14 @@ function parseDate(input, currentIso) {
 
 function displayOf(row, key) {
   const v = row[key];
-  if (key === "vence") return fmtDate(v);
+  if (DATE_KEYS.has(key)) return fmtDate(v);
   return v == null ? "" : String(v);
 }
 
 /** Valor a enviar al servidor y cómo se verá mientras se guarda. */
 function toServer(row, key, typed) {
-  if (key === "vence") {
-    const iso = parseDate(typed, row.vence);
+  if (DATE_KEYS.has(key)) {
+    const iso = parseDate(typed, row[key]);
     return { value: iso, shown: /^\d{4}-/.test(iso) ? iso : typed };
   }
   if (key === "precio") {
@@ -69,9 +75,10 @@ function toServer(row, key, typed) {
   return { value: typed.trim(), shown: typed.trim() };
 }
 
-function dueClass(row) {
-  if (!row.vence || !row.nombre) return "";
-  const days = Math.round((new Date(`${row.vence}T00:00:00`) - new Date(`${todayIso()}T00:00:00`)) / 86400000);
+function dueClass(row, key) {
+  // La renovación del cliente solo cuenta si el cupo está ocupado; la del titular, siempre.
+  if (!row[key] || (key === "vence" && !row.nombre)) return "";
+  const days = Math.round((new Date(`${row[key]}T00:00:00`) - new Date(`${todayIso()}T00:00:00`)) / 86400000);
   if (days < 0) return "due-past";
   if (days <= 3) return "due-soon";
   return "";
@@ -101,8 +108,8 @@ const GridRow = memo(function GridRow({ row, r, first, activeC, editor, selected
         if (active) cls += " is-active";
         if (busy?.[col.key]) cls += " is-saving";
         if (errorKeys?.includes(col.key)) cls += " is-error";
-        if (col.key === "correoTitular" && !first) cls += " is-repeat";
-        if (col.key === "vence") cls += ` ${dueClass(row)}`;
+        if (ACCOUNT_KEYS.has(col.key) && !first) cls += " is-repeat";
+        if (col.kind === "date") cls += ` ${dueClass(row, col.key)}`;
         return (
           <td key={col.key} className={cls} data-r={r} data-c={c} title={col.key === "nombre" && row.cliente && row.cliente !== shown ? row.cliente : undefined}>
             {active && editor ? (
@@ -490,6 +497,38 @@ export default function SlotsGrid() {
     if (cells.length) save(cells);
   };
 
+  // --- Borrar titular (el de la fila activa)
+
+  const activeRow = visible[active.r] || null;
+  const deleteTitular = async () => {
+    const row = activeRow;
+    if (!row) return;
+    const hermanos = (rows || []).filter((r) => r.cuenta === row.cuenta);
+    const ocupados = hermanos.filter((r) => r.nombre).length;
+    const ok = await askConfirm({
+      title: "Borrar titular",
+      message: `Se borra ${row.correoTitular} con sus ${hermanos.length} cupos` +
+        (ocupados ? `, incluidos ${ocupados} con cliente.` : ".") +
+        " El historial de pagos se conserva. No se puede deshacer.",
+      confirmLabel: "Borrar titular",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/admin/family-accounts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.cuenta }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || "No se pudo borrar el titular.");
+      showToast(`Titular ${row.correoTitular} borrado.`);
+      await load({ force: true });
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
   // --- Titular nuevo
 
   const [addForm, setAddForm] = useState({ email: "", service: "tidal", password: "" });
@@ -571,9 +610,21 @@ export default function SlotsGrid() {
           {stats.total} cupos · <strong>{stats.libres}</strong> libres
           {selectedSlotIds.length > 0 && <> · {selectedSlotIds.length} seleccionados</>}
         </span>
-        <button type="button" className="btn btn-secondary admin-btn-compact" onClick={() => setShowAdd((v) => !v)}>
-          + Titular
-        </button>
+        <div className="grid-bar-actions">
+          {activeRow && (
+            <button
+              type="button"
+              className="btn btn-secondary admin-btn-compact grid-del-titular"
+              onClick={deleteTitular}
+              title={`Borrar el titular ${activeRow.correoTitular} y sus cupos`}
+            >
+              Borrar titular
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary admin-btn-compact" onClick={() => setShowAdd((v) => !v)}>
+            + Titular
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -588,9 +639,9 @@ export default function SlotsGrid() {
             autoFocus
           />
           <select className="form-input form-select-input" value={addForm.service} onChange={(e) => setAddForm((f) => ({ ...f, service: e.target.value }))}>
-            <option value="tidal">Tidal</option>
-            <option value="deezer">Deezer</option>
-            <option value="qobuz">Qobuz</option>
+            {Object.values(CONFIG.services).map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
           <input
             type="text"
@@ -622,7 +673,7 @@ export default function SlotsGrid() {
           onCopy={onCopy}
           onPaste={onPaste}
           role="grid"
-          aria-label="Cupos: correo titular, nombre, correo cliente, contraseña, pagó y renovación"
+          aria-label="Cupos: correo titular, nombre, correo cliente, contraseña, pagó, renovación, renovación del titular y tarjeta"
         >
           <table className="slots-grid-table">
             <thead>
@@ -662,7 +713,7 @@ export default function SlotsGrid() {
       <p className="grid-help">
         <span className="only-desktop">Clic para elegir una celda y escribe encima · doble clic o Enter para corregir · Supr para borrar · Ctrl+V pega varias celdas desde Excel/Sheets.</span>
         <span className="only-touch">Toca una celda para editarla.</span>
-        {" "}Renovación: <code>dd/mm/aa</code> o <code>+1</code> (un mes más). Nombre vacío = cupo libre. El número del cupo selecciona la fila para acciones en lote.
+        {" "}Fechas: <code>dd/mm/aa</code> o <code>+1</code> (un mes más). Nombre vacío = cupo libre. Renov. titular y Tarjeta valen para las 5 filas del titular: escríbelas en cualquiera. El número del cupo selecciona la fila para acciones en lote.
       </p>
     </div>
   );

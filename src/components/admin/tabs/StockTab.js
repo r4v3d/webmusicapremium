@@ -72,7 +72,6 @@ export default function StockTab() {
     ["used", "Reservadas"],
     ["tidal", "Tidal"],
     ["deezer", "Deezer"],
-    ["qobuz", "Qobuz"],
   ];
 
   return (

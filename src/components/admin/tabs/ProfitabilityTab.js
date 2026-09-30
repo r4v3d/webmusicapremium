@@ -117,10 +117,9 @@ export default function ProfitabilityTab() {
           // Compute actual statistics for the selected month
           const statsTidal = getPlatformStats('tidal');
           const statsDeezer = getPlatformStats('deezer');
-          const statsQobuz = getPlatformStats('qobuz');
 
-          const overallRevenue = statsTidal.totalRevenue + statsDeezer.totalRevenue + statsQobuz.totalRevenue;
-          const overallCost = statsTidal.totalCost + statsDeezer.totalCost + statsQobuz.totalCost;
+          const overallRevenue = statsTidal.totalRevenue + statsDeezer.totalRevenue;
+          const overallCost = statsTidal.totalCost + statsDeezer.totalCost;
           const overallProfit = overallRevenue - overallCost;
           const overallMargin = overallRevenue > 0 ? (overallProfit / overallRevenue) * 100 : 0;
 
@@ -128,18 +127,16 @@ export default function ProfitabilityTab() {
           const simMult = 1 + (simClientIncrease / 100);
           const simTidal = getPlatformStats('tidal', simTidalCost, simUsdArs, simMult);
           const simDeezer = getPlatformStats('deezer', null, null, simMult);
-          const simQobuz = getPlatformStats('qobuz', null, null, simMult);
 
-          const simOverallRevenue = simTidal.totalRevenue + simDeezer.totalRevenue + simQobuz.totalRevenue;
-          const simOverallCost = simTidal.totalCost + simDeezer.totalCost + simQobuz.totalCost;
+          const simOverallRevenue = simTidal.totalRevenue + simDeezer.totalRevenue;
+          const simOverallCost = simTidal.totalCost + simDeezer.totalCost;
           const simOverallProfit = simOverallRevenue - simOverallCost;
           const simOverallMargin = simOverallRevenue > 0 ? (simOverallProfit / simOverallRevenue) * 100 : 0;
 
           // Donut Chart Math (angles and offsets)
           const profits = [
             { name: "Tidal", value: Math.max(0, statsTidal.profit), color: "#a855f7" },
-            { name: "Deezer", value: Math.max(0, statsDeezer.profit), color: "#eab308" },
-            { name: "Qobuz", value: Math.max(0, statsQobuz.profit), color: "#06b6d4" }
+            { name: "Deezer", value: Math.max(0, statsDeezer.profit), color: "#eab308" }
           ];
           const totalProfitForDonut = profits.reduce((sum, p) => sum + p.value, 0);
 
@@ -161,7 +158,6 @@ export default function ProfitabilityTab() {
           const maxVal = Math.max(
             statsTidal.totalRevenue, statsTidal.totalCost,
             statsDeezer.totalRevenue, statsDeezer.totalCost,
-            statsQobuz.totalRevenue, statsQobuz.totalCost,
             100 // fallback floor
           );
 
@@ -314,18 +310,6 @@ export default function ProfitabilityTab() {
                       <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fff' }}>Deezer</span>
                     </div>
 
-                    {/* Qobuz */}
-                    <div className="bar-group-platform">
-                      <div className="bars-dual-wrapper">
-                        <div className="bar-single-rect income" style={{ height: getBarHeight(statsQobuz.totalRevenue) }}>
-                          <span className="bar-tooltip-val">Cobros: S/. {statsQobuz.totalRevenue.toFixed(0)}</span>
-                        </div>
-                        <div className="bar-single-rect cost" style={{ height: getBarHeight(statsQobuz.totalCost) }}>
-                          <span className="bar-tooltip-val">Costo: S/. {statsQobuz.totalCost.toFixed(0)}</span>
-                        </div>
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#fff' }}>Qobuz</span>
-                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '0.7rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -476,25 +460,6 @@ export default function ProfitabilityTab() {
                           </td>
                           <td data-label="Margen ROI" className="text-right" style={{ color: statsDeezer.margin >= 40 ? '#4ade80' : statsDeezer.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
                             {statsDeezer.margin.toFixed(1)}%
-                          </td>
-                        </tr>
-
-                        {/* Qobuz */}
-                        <tr>
-                          <td className="cell-primary">
-                            <span className="badge-service badge-qobuz">Qobuz</span>
-                          </td>
-                          <td data-label="Titulares a vencer" className="text-center" style={{ fontWeight: 'bold', color: '#fff' }}>{statsQobuz.accountsCount}</td>
-                          <td data-label="Miembros a cobrar" className="text-center" style={{ color: 'var(--text-muted)' }}>
-                            <span style={{ color: '#fff', fontWeight: '600' }}>{statsQobuz.activeSlotsCount}</span>
-                          </td>
-                          <td data-label="Cobros proyectados" className="text-right" style={{ color: '#4ade80', fontWeight: 'bold' }}>S/. {statsQobuz.totalRevenue.toFixed(2)}</td>
-                          <td data-label="Costos de renovación" className="text-right" style={{ color: '#f87171' }}>S/. {statsQobuz.totalCost.toFixed(2)}</td>
-                          <td data-label="Utilidad neta" className="text-right" style={{ color: statsQobuz.profit >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>
-                            S/. {statsQobuz.profit.toFixed(2)}
-                          </td>
-                          <td data-label="Margen ROI" className="text-right" style={{ color: statsQobuz.margin >= 40 ? '#4ade80' : statsQobuz.margin >= 15 ? '#eab308' : '#f87171', fontWeight: 'bold' }}>
-                            {statsQobuz.margin.toFixed(1)}%
                           </td>
                         </tr>
                       </tbody>

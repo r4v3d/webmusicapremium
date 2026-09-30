@@ -118,7 +118,7 @@ export default function OrganizerTab() {
       )}
 
       <div className="platform-tabs-nav organizer-platforms">
-        {["tidal", "deezer", "qobuz"].map((plat) => (
+        {["tidal", "deezer"].map((plat) => (
           <button
             key={plat}
             type="button"

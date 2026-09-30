@@ -22,9 +22,9 @@ export const viewport = {
 };
 
 export const metadata = {
-  title: "Música Premium Barato | Cuentas Tidal, Deezer y Qobuz",
-  description: "Consigue tus cuentas premium de Tidal, Deezer y Qobuz al precio más barato. Activación inmediata, soporte y garantía completa.",
-  keywords: ["streaming", "musica premium", "cuentas baratas", "tidal barato", "deezer hifi", "qobuz hi-res", "peru", "yape", "plin", "binance pay"],
+  title: "Música Premium Barato | Cuentas Tidal y Deezer",
+  description: "Consigue tus cuentas premium de Tidal y Deezer al precio más barato. Activación inmediata, soporte y garantía completa.",
+  keywords: ["streaming", "musica premium", "cuentas baratas", "tidal barato", "deezer hifi", "peru", "yape", "plin", "binance pay"],
   authors: [{ name: "Música Premium Barato" }],
 };
 

@@ -36,16 +36,6 @@ function DeezerIcon() {
   );
 }
 
-function QobuzIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"></circle>
-      <circle cx="12" cy="12" r="6"></circle>
-      <circle cx="12" cy="12" r="2"></circle>
-    </svg>
-  );
-}
-
 export default function OrderPage() {
   const { service } = useParams();
   const router = useRouter();
@@ -137,7 +127,6 @@ export default function OrderPage() {
     switch (serviceData.id) {
       case "tidal": return <TidalIcon />;
       case "deezer": return <DeezerIcon />;
-      case "qobuz": return <QobuzIcon />;
       default: return null;
     }
   };

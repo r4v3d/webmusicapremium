@@ -147,7 +147,7 @@ function Sparkline({ series, currency, color }) {
 export function AdminKpis({ stats, onGoImport }) {
   if (!stats) return null;
   const stock = stats.activeStock || {};
-  const services = ["tidal", "deezer", "qobuz"];
+  const services = ["tidal", "deezer"];
   const lowStock = services.some((service) => (stock[service] ?? 0) <= LOW_STOCK);
   return (
     <section className="stats-grid stats-grid-compact admin-kpis animate-fade-in" aria-label="Resumen">

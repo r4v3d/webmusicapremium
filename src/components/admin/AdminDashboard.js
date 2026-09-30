@@ -146,8 +146,7 @@ export default function AdminDashboardPage() {
   const [exchangeRateUsdToPen, setExchangeRateUsdToPen] = useState(3.75);
   const [platformCosts, setPlatformCosts] = useState({
     tidal: { cost: 2000, currency: "ARS" },
-    deezer: { cost: 1500, currency: "ARS" },
-    qobuz: { cost: 5.99, currency: "USD" }
+    deezer: { cost: 1500, currency: "ARS" }
   });
   const [simClientIncrease, setSimClientIncrease] = useState(0);
   const [simTidalCost, setSimTidalCost] = useState(2000);
@@ -365,6 +364,7 @@ export default function AdminDashboardPage() {
           ownerRenewalDate: acc.ownerRenewalDate || null,
           renewalCost: acc.renewalCost || 0,
           renewalCurrency: acc.renewalCurrency || "PEN",
+          renewalCard: acc.renewalCard || "",
           notes: acc.notes || ""
         })
       });
@@ -1503,7 +1503,7 @@ export default function AdminDashboardPage() {
             title: "Añadir cuenta familiar",
             keywords: "nueva titular familia",
             run: () => {
-              setWorkspace("clientes", "familyAccounts");
+              setWorkspace("clientes", "tableList");
               setShowAddFamilyModal(true);
             },
           },
@@ -1649,7 +1649,6 @@ export default function AdminDashboardPage() {
                   >
                     <option value="tidal">Tidal</option>
                     <option value="deezer">Deezer</option>
-                    <option value="qobuz">Qobuz</option>
                   </select>
                 </div>
                 <div className="form-group">

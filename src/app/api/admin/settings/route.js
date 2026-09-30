@@ -17,7 +17,6 @@ function normalizePayload(raw = {}) {
     platformCosts: {
       tidal: platformCosts.tidal || { cost: 0, currency: "ARS" },
       deezer: platformCosts.deezer || { cost: 0, currency: "ARS" },
-      qobuz: platformCosts.qobuz || { cost: 0, currency: "USD" },
     },
   };
 }

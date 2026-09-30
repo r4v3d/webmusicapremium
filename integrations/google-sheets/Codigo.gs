@@ -5,7 +5,8 @@
  * Instrucciones paso a paso: integrations/google-sheets/README.md
  *
  * Crea UNA pestaña, «Clientes», con el mismo formato que la tabla del panel:
- *   CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN
+ *   CORREO TITULAR · NOMBRE · CORREO CLIENTE · CONTRASEÑA · PAGÓ · RENOVACIÓN ·
+ *   RENOVACIÓN TITULAR · TARJETA
  * Un cupo por fila. Lo que edites aquí se guarda en el panel en segundos, y lo
  * que cambie en el panel (ventas, renovaciones, ediciones) aparece aquí solo.
  * Las filas que pegues abajo sin ID se cargan al panel con el menú «Cargar filas nuevas».
@@ -26,6 +27,8 @@ var COLS = [
   { key: 'claveMiembro', titulo: 'CONTRASEÑA', ancho: 140, texto: true },
   { key: 'precio', titulo: 'PAGÓ', ancho: 70, numero: true },
   { key: 'vence', titulo: 'RENOVACIÓN', ancho: 110, fecha: true },
+  { key: 'renuevaTitular', titulo: 'RENOVACIÓN TITULAR', ancho: 130, fecha: true },
+  { key: 'tarjetaTitular', titulo: 'TARJETA', ancho: 80, texto: true },
   { key: 'sync', titulo: 'Sync', ancho: 230, fija: true, local: true, texto: true },
   { key: 'id', titulo: 'ID', ancho: 60, fija: true, oculta: true, texto: true },
   { key: 'plataforma', titulo: 'Plataforma', ancho: 80, fija: true, oculta: true },
@@ -35,7 +38,7 @@ var COLS = [
 var COL_ID = indice_('id');
 var COL_SYNC = indice_('sync');
 var COL_VERSION = indice_('version');
-var N_VISIBLES = 6; // CORREO TITULAR … RENOVACIÓN
+var N_VISIBLES = 8; // CORREO TITULAR … TARJETA
 
 function indice_(key) {
   for (var i = 0; i < COLS.length; i++) if (COLS[i].key === key) return i;
@@ -45,6 +48,7 @@ function indice_(key) {
 // ---------------------------------------------------------------- Menú
 
 function onOpen() {
+  try { asegurarFormato_(SpreadsheetApp.getActive().getSheetByName(HOJA)); } catch (e) { console.error(mensaje_(e)); }
   SpreadsheetApp.getUi()
     .createMenu(ETIQUETA)
     .addItem('Cargar filas nuevas', 'cargarFilasNuevas')
@@ -85,6 +89,8 @@ function configurar() {
     ui.alert('No se pudo conectar', mensaje_(err), ui.ButtonSet.OK);
     return;
   }
+  var previa = ss.getSheetByName(HOJA);
+  if (previa) asegurarFormato_(previa); // hoja de la versión anterior: primero se corren las columnas
   prepararHoja_();
   instalarActivadores_();
   recargarInventario();
@@ -179,6 +185,9 @@ function doPost(e) {
     lock.waitLock(120000);
     try {
       var sh = SpreadsheetApp.openById(props.getProperty('SS_ID')).getSheetByName(HOJA);
+      if (sh && !formatoAlDia_(sh)) {
+        return salida_({ ok: false, error: 'La hoja tiene el formato anterior: ábrela una vez para actualizarla (se agregan RENOVACIÓN TITULAR y TARJETA).' });
+      }
       if (sh && msg.type === 'rows') aplicarFilas_(sh, msg.rows || [], msg.deleted || [], {});
     } finally {
       lock.releaseLock();
@@ -219,6 +228,7 @@ function alEditar(e) {
   if (!e || !e.range) return;
   var sh = e.range.getSheet();
   if (sh.getName() !== HOJA) return;
+  if (!asegurarFormato_(sh)) return;
 
   var r0 = Math.max(e.range.getRow(), 2);
   var r1 = e.range.getLastRow();
@@ -351,7 +361,7 @@ function tieneDatos_(fila) {
 
 function filaParaCargar_(fila, num) {
   var row = { fila: num };
-  ['correoTitular', 'nombre', 'correoMiembro', 'claveMiembro', 'precio', 'vence'].forEach(function (k) {
+  ['correoTitular', 'nombre', 'correoMiembro', 'claveMiembro', 'precio', 'vence', 'renuevaTitular', 'tarjetaTitular'].forEach(function (k) {
     row[k] = paraEnviar_(fila[indice_(k)]);
   });
   return row;
@@ -364,7 +374,7 @@ function filaParaCargar_(fila, num) {
 function avisoFechas_(nuevas) {
   var locale = SpreadsheetApp.getActive().getSpreadsheetLocale() || '';
   if (!/^en/i.test(locale)) return '';
-  if (!nuevas.some(function (f) { return f.vence !== ''; })) return '';
+  if (!nuevas.some(function (f) { return f.vence !== '' || f.renuevaTitular !== ''; })) return '';
   return 'La hoja lee las fechas como mes/día (configuración regional ' + locale + '). ' +
     'Cámbiala en File → Settings → Locale → Peru, guarda y vuelve a pegar las filas.';
 }
@@ -453,6 +463,7 @@ function recargarInventario(lanzarErrores) {
 
 /** Reescribe la pestaña con el panel. Las filas nuevas que no se cargaron quedan al final, con su motivo. */
 function recargarSinLock_(sh) {
+  if (!asegurarFormato_(sh)) throw new Error('La hoja tiene el formato anterior: ábrela para actualizarla.');
   var resp = llamar_({ action: 'snapshot' });
   var rows = resp.rows || [];
 
@@ -552,9 +563,33 @@ function instalarActivadores_() {
   ScriptApp.newTrigger('recargarInventario').timeBased().everyMinutes(15).create();
 }
 
-function prepararHoja_() {
+/** true si la fila de títulos coincide con COLS. */
+function formatoAlDia_(sh) {
+  var titulos = sh.getRange(1, 1, 1, COLS.length).getValues()[0];
+  return COLS.every(function (c, i) { return titulos[i] === c.titulo; });
+}
+
+/**
+ * La versión anterior tenía 6 columnas de datos y «Sync» en la G. Se insertan
+ * RENOVACIÓN TITULAR y TARJETA después de RENOVACIÓN: los datos, el ID y Sync
+ * se corren a la derecha sin perder nada. Devuelve si la hoja quedó al día.
+ */
+function asegurarFormato_(sh) {
+  if (!sh) return false;
+  if (formatoAlDia_(sh)) return true;
+  var g = sh.getRange(1, 7).getValue();
+  var h = sh.getRange(1, 8).getValue();
+  if (g === 'Sync' && h === 'ID') {
+    sh.insertColumnsAfter(6, 2);
+    prepararHoja_(sh);
+    return formatoAlDia_(sh);
+  }
+  return false;
+}
+
+function prepararHoja_(hoja) {
   var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(HOJA) || ss.insertSheet(HOJA, 0);
+  var sh = hoja || ss.getSheetByName(HOJA) || ss.insertSheet(HOJA, 0);
 
   if (sh.getMaxColumns() < COLS.length) sh.insertColumnsAfter(sh.getMaxColumns(), COLS.length - sh.getMaxColumns());
   sh.getRange(1, 1, 1, COLS.length)
@@ -596,7 +631,7 @@ function prepararHoja_() {
 function reglas_(sh) {
   var L = function (key) { return String.fromCharCode(65 + indice_(key)); };
   var tit = L('correoTitular'), nom = L('nombre'), ren = L('vence');
-  var datos = sh.getRange('A2:' + ren);
+  var datos = sh.getRange('A2:' + L('tarjetaTitular'));
   var nombre = sh.getRange(nom + '2:' + nom);
   var renueva = sh.getRange(ren + '2:' + ren);
   var sync = sh.getRange(L('sync') + '2:' + L('sync'));

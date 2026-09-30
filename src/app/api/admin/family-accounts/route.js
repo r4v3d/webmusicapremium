@@ -127,7 +127,7 @@ export async function PUT(req) {
     }
 
     const body = await req.json();
-    const { id, service, masterEmail, password, notes, ownerRenewalDate, renewalCost, renewalCurrency } = body;
+    const { id, service, masterEmail, password, notes, ownerRenewalDate, renewalCost, renewalCurrency, renewalCard } = body;
 
     if (!id) {
       return NextResponse.json({ message: "ID de cuenta familiar requerido." }, { status: 400 });
@@ -140,7 +140,8 @@ export async function PUT(req) {
       notes,
       ownerRenewalDate,
       renewalCost,
-      renewalCurrency
+      renewalCurrency,
+      renewalCard: renewalCard === undefined ? undefined : String(renewalCard).trim().slice(0, 40)
     });
 
     if (!updated) {

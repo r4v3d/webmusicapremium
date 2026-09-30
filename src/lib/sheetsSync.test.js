@@ -450,3 +450,40 @@ describe("cambiar el CORREO TITULAR en filas existentes", () => {
     expect(r.results.every((x) => !x.ok && /ya existe/.test(x.error))).toBe(true);
   });
 });
+
+describe("RENOVACIÓN TITULAR y TARJETA", () => {
+  it("escritas en una fila se guardan en la cuenta y aparecen en sus 5 filas", async () => {
+    const { slots } = await seedAccount({ members: 2 });
+    const id = String(slots[2].id);
+    const r = await applySheetEdits([{ id, changes: { renuevaTitular: "30/09/2026", tarjetaTitular: "0053" } }]);
+    expect(r.results[0]).toEqual({ id, ok: true });
+    expect(r.rows).toHaveLength(5);
+    expect(r.rows.every((x) => x.renuevaTitular === "2026-09-30" && x.tarjetaTitular === "0053")).toBe(true);
+  });
+
+  it("el mismo valor en las 5 filas no es conflicto; valores distintos sí", async () => {
+    const { slots } = await seedAccount({ members: 1 });
+    let r = await applySheetEdits(slots.map((s) => ({ id: String(s.id), changes: { tarjetaTitular: "4642" } })));
+    expect(r.results.every((x) => x.ok)).toBe(true);
+
+    r = await applySheetEdits(slots.map((s, i) => ({ id: String(s.id), changes: { tarjetaTitular: i ? "8212" : "6053" } })));
+    expect(r.results.every((x) => !x.ok && /TARJETA.*valores distintos/.test(x.error))).toBe(true);
+    expect(r.rows.every((x) => x.tarjetaTitular === "4642")).toBe(true);
+
+    // Misma fecha escrita en formatos distintos = mismo valor.
+    r = await applySheetEdits([
+      { id: String(slots[0].id), changes: { renuevaTitular: "14/10/2026" } },
+      { id: String(slots[1].id), changes: { renuevaTitular: "2026-10-14" } },
+    ]);
+    expect(r.results.every((x) => x.ok)).toBe(true);
+  });
+
+  it("las filas nuevas cargan la renovación y la tarjeta del titular", async () => {
+    vi.stubEnv("DEFAULT_TITULAR_PASSWORD", "clave-de-siempre");
+    const r = await importSheetRows([
+      { fila: 2, correoTitular: "get.m.ushroom41.91@gmail.com", renuevaTitular: "30/09/2026", tarjetaTitular: "6053", correoMiembro: "a@x.com", claveMiembro: "1" },
+    ]);
+    expect(r.results[0].ok).toBe(true);
+    expect(r.rows[0]).toMatchObject({ renuevaTitular: "2026-09-30", tarjetaTitular: "6053" });
+  });
+});

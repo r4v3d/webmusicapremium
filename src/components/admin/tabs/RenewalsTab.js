@@ -192,7 +192,7 @@ export default function RenewalsTab() {
                     <div style={{ marginTop: '10px' }}>
                       {renewalsPlatform === "all" ? (
                         <>
-                          {["tidal", "deezer", "qobuz"].map(plat => (
+                          {["tidal", "deezer"].map(plat => (
                             <div key={plat} style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
                               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '60px', textTransform: 'capitalize' }}>{plat}:</span>
                               <input 
@@ -220,7 +220,7 @@ export default function RenewalsTab() {
                               style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '4px' }}
                               onClick={() => {
                                 const newCosts = { ...platformCosts };
-                                ["tidal", "deezer", "qobuz"].forEach(plat => {
+                                ["tidal", "deezer"].forEach(plat => {
                                   const cost = parseFloat(document.getElementById(`cost_${plat}`).value) || 0;
                                   const currency = document.getElementById(`curr_${plat}`).value;
                                   newCosts[plat] = { cost, currency };
@@ -298,7 +298,7 @@ export default function RenewalsTab() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '6px' }}>
                       {renewalsPlatform === "all" ? (
                         <>
-                          {["tidal", "deezer", "qobuz"].map(plat => {
+                          {["tidal", "deezer"].map(plat => {
                             const pCost = platformCosts[plat] || { cost: 0, currency: "PEN" };
                             const costInPen = getCostInPen(pCost.cost, pCost.currency, plat);
                             return (
@@ -425,7 +425,7 @@ export default function RenewalsTab() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
                   {/* Platform Filters */}
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {["all", "tidal", "deezer", "qobuz"].map(plat => (
+                    {["all", "tidal", "deezer"].map(plat => (
                       <button
                         key={plat}
                         onClick={() => {
@@ -465,6 +465,7 @@ export default function RenewalsTab() {
                         <th>Plataforma</th>
                         <th>Correo Titular</th>
                         <th style={{ width: '160px' }}>Vencimiento Dueño</th>
+                        <th style={{ width: '110px' }}>Tarjeta</th>
                         <th>Notas</th>
                         <th style={{ width: '100px', textAlign: 'center' }}>Acción</th>
                       </tr>
@@ -472,7 +473,7 @@ export default function RenewalsTab() {
                     <tbody>
                       {paginatedRenewals.length === 0 ? (
                         <tr className="admin-table-empty">
-                          <td colSpan={5} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                             No se encontraron cuentas titulares que coincidan con los filtros.
                           </td>
                         </tr>
@@ -495,6 +496,18 @@ export default function RenewalsTab() {
                                 style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff' }}
                                 value={acc.ownerRenewalDate || ""}
                                 onChange={(e) => handleFamilyAccountChange(acc.id, "ownerRenewalDate", e.target.value)}
+                              />
+                            </td>
+                            <td data-label="Tarjeta" className="cell-block cell-half">
+                              <input
+                                type="text"
+                                aria-label="Tarjeta"
+                                className="form-input"
+                                style={{ padding: '6px 8px', fontSize: '0.85rem', marginBottom: 0, width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', fontFamily: 'ui-monospace, monospace' }}
+                                placeholder="4642"
+                                inputMode="numeric"
+                                value={acc.renewalCard || ""}
+                                onChange={(e) => handleFamilyAccountChange(acc.id, "renewalCard", e.target.value)}
                               />
                             </td>
                             <td data-label="Notas" className="cell-block cell-half">
