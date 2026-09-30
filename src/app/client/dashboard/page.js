@@ -290,8 +290,6 @@ export default function ClientDashboard() {
         return "border-cyan";
       case "deezer":
         return "border-purple";
-      case "qobuz":
-        return "border-gold";
       default:
         return "border-purple";
     }
@@ -303,8 +301,6 @@ export default function ClientDashboard() {
         return "#00e5ff";
       case "deezer":
         return "#ff007f";
-      case "qobuz":
-        return "#d4af37";
       default:
         return "#a855f7";
     }

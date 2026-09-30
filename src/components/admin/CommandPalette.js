@@ -51,8 +51,8 @@ export default function CommandPalette({ open, onClose, onGo, onConfirmOrder, on
         list.push({
           id: `fam-${acc.id || acc._id}`,
           title: `${(acc.service || "").toUpperCase()} · ${acc.masterEmail}`,
-          hint: "Familias",
-          run: () => onGo("clientes", "familyAccounts"),
+          hint: "Tabla",
+          run: () => onGo("clientes", "tableList"),
         });
       }
       (acc.profiles || []).forEach((p) => {

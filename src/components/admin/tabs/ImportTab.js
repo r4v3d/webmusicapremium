@@ -63,7 +63,6 @@ export default function ImportTab() {
                 >
                   <option value="tidal">Tidal</option>
                   <option value="deezer">Deezer</option>
-                  <option value="qobuz">Qobuz</option>
                 </select>
               </div>
 

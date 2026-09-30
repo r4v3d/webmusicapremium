@@ -84,7 +84,6 @@ export default function HoyTab() {
         <span>Stock libre</span>
         <strong>Tidal {stock.tidal ?? 0}</strong>
         <strong>Deezer {stock.deezer ?? 0}</strong>
-        <strong>Qobuz {stock.qobuz ?? 0}</strong>
       </div>
 
       <div className="hoy-lists">

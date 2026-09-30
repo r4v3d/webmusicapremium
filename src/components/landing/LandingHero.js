@@ -42,16 +42,6 @@ function DeezerIcon() {
   );
 }
 
-function QobuzIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="service-logo-svg">
-      <circle cx="12" cy="12" r="10"></circle>
-      <circle cx="12" cy="12" r="6"></circle>
-      <circle cx="12" cy="12" r="2"></circle>
-    </svg>
-  );
-}
-
 export default function LandingHero() {
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoSrc, setVideoSrc] = useState("");
@@ -147,7 +137,7 @@ export default function LandingHero() {
               Tu música favorita en la <span>máxima calidad</span> y sin interrupciones.
             </h1>
             <p className="hero-subtitle">
-              Ofrecemos cuentas 100% estables de <strong>Tidal</strong>, <strong>Deezer</strong> y <strong>Qobuz</strong> con garantía total. Activa tu cuenta hoy mismo de forma fácil y segura.
+              Ofrecemos cuentas 100% estables de <strong>Tidal</strong> y <strong>Deezer</strong> con garantía total. Activa tu cuenta hoy mismo de forma fácil y segura.
             </p>
             <div className="hero-actions">
               <a href="#servicios" className="btn btn-primary" onClick={pauseVideo}>Ver Planes Disponibles</a>
@@ -177,13 +167,6 @@ export default function LandingHero() {
                   <div className="track-details">
                     <span className="track-name">Flow Personalizado</span>
                     <span className="track-desc">Deezer HiFi - FLAC 16-bit</span>
-                  </div>
-                </div>
-                <div className="streaming-track-bar">
-                  <div className="service-icon-wrap gold"><QobuzIcon /></div>
-                  <div className="track-details">
-                    <span className="track-name">Estudio de Grabación</span>
-                    <span className="track-desc">Qobuz Hi-Res - Sonido Puro</span>
                   </div>
                 </div>
               </div>

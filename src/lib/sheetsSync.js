@@ -32,9 +32,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const INVENTORY_KEYS = [
   "id", "plataforma", "correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular",
   "cupo", "estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence",
-  "notasTitular", "actualizado", "cuenta", "nombre",
+  "notasTitular", "actualizado", "cuenta", "nombre", "tarjetaTitular",
 ];
-const ACCOUNT_KEYS = ["correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular", "notasTitular"];
+const ACCOUNT_KEYS = ["correoTitular", "claveTitular", "renuevaTitular", "costoTitular", "monedaTitular", "notasTitular", "tarjetaTitular"];
+// Datos de la cuenta que se pueden escribir desde cualquiera de sus filas.
+const SHARED_ACCOUNT_KEYS = ["renuevaTitular", "tarjetaTitular"];
 const SLOT_KEYS = ["estado", "correoMiembro", "claveMiembro", "tipoCorreo", "cliente", "whatsapp", "precio", "vence", "nombre"];
 // NOMBRE (formato de tabla): un número se toma como WhatsApp; cualquier otra cosa (p. ej. @usuario), como nombre.
 const PHONE_RE = /^\+?[\d\s().-]+$/;
@@ -71,7 +73,7 @@ export async function buildInventoryRows(slotIds = null) {
   if (slotIds && slotIds.length === 0) return [];
   const { rows } = await query(
     `select s.id::text as id, s.platform_account_id::text as cuenta, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
-            pa.renewal_cost, pa.renewal_currency, pa.notes, s.slot_number, s.status,
+            pa.renewal_cost, pa.renewal_currency, pa.renewal_card, pa.notes, s.slot_number, s.status,
             (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
             s.member_email, s.member_password, s.email_type, c.display_name,
             (select cc.contact_value from customer_contacts cc
@@ -107,6 +109,7 @@ function toSheetRow(r) {
     renuevaTitular: toDateStr(r.owner_renewal_date) || "",
     costoTitular: money(r.renewal_cost),
     monedaTitular: r.renewal_currency || "PEN",
+    tarjetaTitular: r.renewal_card || "",
     cupo: r.slot_number ?? "",
     estado: STATUS_LABELS[status] || status,
     correoMiembro: r.member_email || "",
@@ -207,7 +210,7 @@ function nombreToChanges(changes, cur) {
 async function applyOneEdit(tx, slotId, changes) {
   const cur = (await tx.query(
     `select s.*, pa.platform_code, pa.account_email, pa.account_password, pa.owner_renewal_date,
-            pa.renewal_cost, pa.renewal_currency, pa.notes as account_notes,
+            pa.renewal_cost, pa.renewal_currency, pa.renewal_card, pa.notes as account_notes,
             (s.status = 'reserved' and s.reserved_until > now()) as reserved_live,
             c.display_name,
             (select cc.contact_value from customer_contacts cc
@@ -263,6 +266,11 @@ async function applyOneEdit(tx, slotId, changes) {
   if (has("notasTitular")) {
     const notes = text(changes.notasTitular);
     if (notes !== (cur.account_notes || "")) acc.notes = notes;
+  }
+  if (has("tarjetaTitular")) {
+    const card = text(changes.tarjetaTitular);
+    if (card.length > 40) throw new SheetError("Tarjeta: máximo 40 caracteres.");
+    if (card !== (cur.renewal_card || "")) acc.renewalCard = card;
   }
   if (Object.keys(acc).length) {
     await updateFamilyAccount(cur.platform_account_id, acc, { tx });
@@ -338,12 +346,49 @@ async function applyOneEdit(tx, slotId, changes) {
  * error no impide las demás. Devuelve el resultado por cupo y las filas frescas
  * de todo lo afectado (y del cupo con error, para que la hoja deshaga el cambio).
  */
+/**
+ * RENOVACIÓN TITULAR y TARJETA son de la cuenta: basta escribirlas en una fila.
+ * Si en un mismo pegado dos filas de la misma cuenta traen valores distintos,
+ * no se adivina cuál vale: esas filas no se guardan y se explica por qué.
+ */
+async function sharedAccountConflicts(edits) {
+  const conflicts = new Map();
+  const withShared = (edits || []).filter((e) => e?.id && e.changes && SHARED_ACCOUNT_KEYS.some((k) => k in e.changes));
+  if (withShared.length < 2) return conflicts;
+  const { rows } = await query(
+    "select id::text as id, platform_account_id::text as cuenta from account_slots where id::text = any($1::text[])",
+    [withShared.map((e) => text(e.id))]
+  );
+  const accountOf = new Map(rows.map((r) => [r.id, r.cuenta]));
+  const norm = (k, v) => (k === "renuevaTitular" ? parseDateInput(text(v)) || text(v) : text(v));
+  const byAccount = new Map();
+  for (const e of withShared) {
+    const cuenta = accountOf.get(text(e.id));
+    if (!cuenta) continue;
+    if (!byAccount.has(cuenta)) byAccount.set(cuenta, []);
+    byAccount.get(cuenta).push(e);
+  }
+  for (const group of byAccount.values()) {
+    for (const k of SHARED_ACCOUNT_KEYS) {
+      const values = new Set(group.filter((e) => k in e.changes).map((e) => norm(k, e.changes[k])));
+      if (values.size > 1) {
+        const label = k === "renuevaTitular" ? "RENOVACIÓN TITULAR" : "TARJETA";
+        for (const e of group) {
+          conflicts.set(text(e.id), `${label}: las filas de este titular traen valores distintos (${[...values].join(" / ")}). Deja uno solo.`);
+        }
+      }
+    }
+  }
+  return conflicts;
+}
+
 export async function applySheetEdits(edits) {
   const results = [];
   const touchedSlots = new Set();
   const touchedAccounts = new Set();
   const clearedByAccount = new Map(); // cuenta → cupos donde se vació el titular
   const renameByAccount = new Map(); // cuenta → { cupos, correos nuevos pedidos }
+  const conflicts = await sharedAccountConflicts(edits);
 
   for (const edit of edits || []) {
     const id = text(edit?.id);
@@ -351,6 +396,10 @@ export async function applySheetEdits(edits) {
     if (!id) continue;
     touchedSlots.add(id);
     try {
+      if (conflicts.has(id)) {
+        results.push({ id, ok: false, error: conflicts.get(id) });
+        continue;
+      }
       const known = Object.keys(changes).filter((k) => ACCOUNT_KEYS.includes(k) || SLOT_KEYS.includes(k));
       if (!known.length) {
         results.push({ id, ok: false, error: "Esa columna no se edita desde la hoja." });
@@ -496,6 +545,7 @@ async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desd
   const masterEmail = parseEmailField(row.correoTitular, "Correo titular", { required: true });
   const masterPassword = text(row.claveTitular);
   const renewal = parseDateField(row.renuevaTitular, "Renueva titular");
+  const card = text(row.tarjetaTitular);
   const cost = text(row.costoTitular) ? parseMoneyField(row.costoTitular, "Costo titular") : null;
   const memberEmail = parseEmailField(row.correoMiembro, "Correo miembro");
   const memberPassword = text(row.claveMiembro);
@@ -503,7 +553,7 @@ async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desd
   if (!memberEmail && memberPassword) throw new SheetError("Falta el correo del miembro.");
 
   const found = (await tx.query(
-    `select id, platform_code, account_password, owner_renewal_date, renewal_cost from platform_accounts
+    `select id, platform_code, account_password, owner_renewal_date, renewal_cost, renewal_card from platform_accounts
       where lower(account_email) = lower($1) order by id limit 1 for update`,
     [masterEmail]
   )).rows[0];
@@ -519,6 +569,7 @@ async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desd
     if (masterPassword && masterPassword !== found.account_password) acc.password = masterPassword;
     if (renewal && renewal !== toDateStr(found.owner_renewal_date)) acc.ownerRenewalDate = renewal;
     if (cost != null && cost !== (Number(found.renewal_cost) || 0)) acc.renewalCost = cost;
+    if (card && card !== (found.renewal_card || "")) acc.renewalCard = card;
     if (Object.keys(acc).length) {
       await updateFamilyAccount(accountId, acc, { tx });
       parts.push("titular actualizado");
@@ -527,7 +578,7 @@ async function loadOneRow(tx, row, { defaultPassword = "", notes = "Cargada desd
     const password = masterPassword || defaultPassword;
     if (!password) throw new SheetError("Falta la clave del titular (es una cuenta nueva).");
     const created = await createFamilyAccount({
-      service, masterEmail, password, ownerRenewalDate: renewal || plus30(), renewalCost: cost || 0, notes,
+      service, masterEmail, password, ownerRenewalDate: renewal || plus30(), renewalCost: cost || 0, notes, renewalCard: card,
     }, { tx });
     accountId = created.id;
     await tx.query(
@@ -600,6 +651,8 @@ async function importOneRow(tx, row) {
   const loaded = await loadOneRow(tx, {
     plataforma: row.plataforma || "tidal",
     correoTitular: email,
+    renuevaTitular: row.renuevaTitular,
+    tarjetaTitular: row.tarjetaTitular,
     correoMiembro: row.correoMiembro,
     claveMiembro: row.claveMiembro,
   }, { defaultPassword: text(process.env.DEFAULT_TITULAR_PASSWORD), notes: label });

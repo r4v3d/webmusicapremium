@@ -23,16 +23,6 @@ function DeezerIcon() {
   );
 }
 
-function QobuzIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="service-logo-svg">
-      <circle cx="12" cy="12" r="10"></circle>
-      <circle cx="12" cy="12" r="6"></circle>
-      <circle cx="12" cy="12" r="2"></circle>
-    </svg>
-  );
-}
-
 function WaveLogo() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="logo-icon">
@@ -54,13 +44,11 @@ function StarIcon() {
 const SERVICE_ICONS = {
   tidal: TidalIcon,
   deezer: DeezerIcon,
-  qobuz: QobuzIcon,
 };
 
 const SERVICE_BADGES = {
   tidal: { className: "badge badge-cyan", label: "Audio HiFi" },
   deezer: { className: "badge badge-magenta", label: "Flow & HiFi" },
-  qobuz: { className: "badge badge-gold", label: "Studio Hi-Res" },
 };
 
 function getStartingPrice(serviceKey) {
@@ -219,7 +207,7 @@ export default function Home() {
               <div className="step-row">
                 <div className="step-num">1</div>
                 <div className="step-txt">
-                  <strong>Elige tu cuenta:</strong> Escoge Tidal, Deezer o Qobuz y haz clic en &ldquo;Realizar Pedido&rdquo;.
+                  <strong>Elige tu cuenta:</strong> Escoge Tidal o Deezer y haz clic en &ldquo;Realizar Pedido&rdquo;.
                 </div>
               </div>
               <div className="step-row">

@@ -1,7 +1,7 @@
 export const CONFIG = {
   appName: "Música Premium Barato",
   tagline: "Disfruta de la mejor calidad de sonido sin pagar de más",
-  description: "Cuentas premium de Tidal, Deezer y Qobuz al mejor precio del mercado. Soporte garantizado y activación inmediata.",
+  description: "Cuentas premium de Tidal y Deezer al mejor precio del mercado. Soporte garantizado y activación inmediata.",
   checkoutTimeoutMinutes: 15,
   // Mientras Yape se verifique a mano, el cliente ve en qué horario se confirma (§23).
   manualReviewHours: "Todos los días de 9:00 a 23:00 (hora de Perú)",
@@ -71,24 +71,6 @@ export const CONFIG = {
         { id: "deezer-6m", months: 6, duration: "6 Meses", pricePen: 25, priceUsdt: 7.29, popular: false },
         { id: "deezer-12m", months: 12, duration: "12 Meses", pricePen: 45, priceUsdt: 13.29, popular: true }
       ]
-    },
-    qobuz: {
-      id: "qobuz",
-      name: "Qobuz",
-      tagline: "La calidad suprema para verdaderos melómanos",
-      description: "La plataforma de streaming definitiva para la reproducción con calidad de estudio de grabación. Folletos digitales de álbumes y artículos de expertos.",
-      accentColor: "#d4af37", // Dorado
-      bgGradient: "linear-gradient(135deg, rgba(212, 175, 55, 0.1) 0%, rgba(0, 0, 0, 0.4) 100%)",
-      features: [
-        "Calidad Hi-Res real (hasta 24-bit / 192 kHz FLAC)",
-        "Acceso a folletos digitales completos en PDF",
-        "Artículos editoriales, reseñas e información detallada",
-        "Ideal para sistemas de audio de alta gama y DACs",
-        "Garantía completa durante todo el periodo adquirido"
-      ],
-      plans: [
-        { id: "qobuz-1m", months: 1, duration: "1 Mes", pricePen: 9, priceUsdt: 2.69, popular: true },
-      ]
     }
   },
   testimonials: [
@@ -104,9 +86,9 @@ export const CONFIG = {
     {
       id: 2,
       name: "Andrea Rivas",
-      service: "Qobuz",
+      service: "Tidal",
       rating: 5,
-      comment: "Excelente atención por WhatsApp, la activación de Qobuz fue en menos de 10 minutos. Lo recomiendo al 100%.",
+      comment: "Excelente atención por WhatsApp, la activación de Tidal fue en menos de 10 minutos. Lo recomiendo al 100%.",
       date: "Hace 1 mes",
       image: "/images/testimonio-2.png"
     },

@@ -46,8 +46,8 @@ export const WORKSPACES = {
   },
   clientes: {
     label: "Clientes",
-    defaultSub: "familyAccounts",
-    subs: { familyAccounts: "Familias", tableList: "Tabla", directory: "Directorio" },
+    defaultSub: "tableList",
+    subs: { tableList: "Tabla", directory: "Directorio" },
   },
   inventario: {
     label: "Inventario",
@@ -68,7 +68,7 @@ export const WORKSPACES = {
 
 const LEGACY_TAB_MAP = {
   orders: { tab: "hoy", sub: "pedidos" },
-  families: { tab: "clientes", sub: "familyAccounts" },
+  families: { tab: "clientes", sub: "tableList" },
   stock: { tab: "inventario", sub: "stock" },
   import: { tab: "inventario", sub: "import" },
   organizer: { tab: "inventario", sub: "organizer" },

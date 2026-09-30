@@ -92,7 +92,7 @@ describe("db sobre PostgreSQL", () => {
     await createMemberProfile({ familyAccountId: acc.id, slotNumber: 9, status: "free" });
     await query("update account_slots set status = 'reserved', reserved_until = now() - interval '1 minute' where id = $1", [slots[1].id]);
     await query("update account_slots set status = 'reserved', reserved_until = now() + interval '10 minutes' where id = $1", [slots[2].id]);
-    expect(await getFreeSlotsStock()).toEqual({ tidal: 2, deezer: 1, qobuz: 0 });
+    expect(await getFreeSlotsStock()).toEqual({ tidal: 2, deezer: 1 });
   });
 
   it("borrar una cuenta familiar conserva las suscripciones sin referencia", async () => {
