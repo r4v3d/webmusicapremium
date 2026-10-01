@@ -28,6 +28,7 @@ export const PROVIDER_LABELS = {
   manual_yape: "Yape/Plin (verificado)",
   taypi: "Yape/Plin · TAYPI",
   mercadopago_yape: "Yape · Mercado Pago",
+  flow_qr: "QR · Flow",
   binance_account: "USDT · Binance",
   wallet_pen: "Saldo S/",
   wallet_usdt: "Saldo USDT",

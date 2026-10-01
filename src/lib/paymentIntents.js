@@ -10,6 +10,7 @@ import { createPayment as taypiCreatePayment } from "./taypi";
 import { payWithWallet } from "./settle";
 import { CONFIG } from "../data/config";
 import { mercadoPagoPublicKey } from "./mercadopago";
+import { checkoutUrlFrom as flowCheckoutUrl, createFlowPayment } from "./flow";
 
 const OPEN = ["created", "awaiting"];
 const ORDER_OPEN = ["pending", "awaiting_payment", "expired", "underpaid"];
@@ -156,7 +157,7 @@ export async function createIntent({ orderId, providerId, customerReference = nu
        idempotencyKey(), ttlSeconds, JSON.stringify({ providerId, customerReference })]
     );
     const intent = ins.rows[0];
-    if (provider.id === "taypi") {
+    if (provider.id === "taypi" || provider.id === "flow_qr") {
       await tx.query("update payment_intents set status = 'created' where id = $1", [intent.id]);
       intent.status = "created";
     }
@@ -168,6 +169,33 @@ export async function createIntent({ orderId, providerId, customerReference = nu
     );
     return { ok: true, status: "created", intent, order };
   });
+
+  if (outcome.ok && provider.id === "flow_qr" && outcome.status === "created") {
+    // Flow: el pago se crea fuera de la transacción; commerceOrder «intent-N» lo ata a este intento.
+    try {
+      const data = await createFlowPayment({
+        intentId: outcome.intent.id,
+        amount: Number(outcome.intent.amount_expected),
+        subject: `${CONFIG.appName} ${orderId}`,
+        email: outcome.order.email || `pedido-${orderId}@cheapmusic.best`,
+        timeoutSeconds: ttlSeconds,
+      });
+      const upd = await query(
+        `update payment_intents
+            set provider_ref = $2, checkout_url = $3, status = 'awaiting', raw_response = $4, updated_at = now()
+          where id = $1 returning *`,
+        [outcome.intent.id, data.token, flowCheckoutUrl(data), JSON.stringify({ flowOrder: data.flowOrder })]
+      );
+      return { ...outcome, intent: upd.rows[0] };
+    } catch (error) {
+      console.error("[flow] crear pago:", error.status || "", error.message, error.payload ? JSON.stringify(error.payload) : "");
+      await query(
+        "update payment_intents set status = 'failed', raw_response = $2, updated_at = now() where id = $1",
+        [outcome.intent.id, JSON.stringify({ error: error.message, payload: error.payload ?? null })]
+      );
+      return { ok: false, status: "provider_error", error: error.message };
+    }
+  }
 
   if (!outcome.ok || provider.id !== "taypi" || outcome.status !== "created") return outcome;
 

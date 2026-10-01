@@ -3,6 +3,8 @@
 // Yape automático con Mercado Pago: MERCADOPAGO_ENABLED=true (+ MP_PUBLIC_KEY y MP_ACCESS_TOKEN).
 // Al estar activo pasa a ser el Yape por defecto; el Yape manual queda como alternativa
 // (sirve para Plin) salvo que se apague con MANUAL_YAPE_ENABLED=false.
+// QR interoperable de Flow (Yape, Plin y bancos): FLOW_ENABLED=true (+ FLOW_API_KEY y FLOW_SECRET_KEY).
+// Cada uno se enciende o apaga solo con su variable: se pueden tener ambos o uno.
 
 function flag(name, defaultValue) {
   const raw = process.env[name];
@@ -33,6 +35,14 @@ export function getProviders(env = process.env) {
       autoConfirm: true,
       label: "Yape (confirmación automática)",
       ui: "mp_yape",
+      intentTtlMinutes: 15,
+    },
+    flow_qr: {
+      currency: "PEN",
+      enabled: on("FLOW_ENABLED", false) && Boolean(env.FLOW_API_KEY && env.FLOW_SECRET_KEY),
+      autoConfirm: true,
+      label: "QR · Yape, Plin y bancos",
+      ui: "redirect",
       intentTtlMinutes: 15,
     },
     taypi: {
