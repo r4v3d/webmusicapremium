@@ -391,6 +391,18 @@ function Checkout() {
 
   const renderInstructions = () => {
     if (!intentOpen) {
+      if (intent?.status === "failed") {
+        // El proveedor no pudo crear el pago (p. ej. Flow no respondió): no dejar al cliente esperando.
+        return (
+          <div className="payment-type-block">
+            <h2>No pudimos preparar este pago</h2>
+            <p className="payment-description">No se te cobró nada. Vuelve a intentarlo o elige otro método de pago arriba.</p>
+            <button type="button" className="btn btn-primary checkout-btn mp-flow-btn" disabled={!!busy} onClick={() => startIntent(intent.provider)}>
+              {busy ? "Preparando…" : "Reintentar"}
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="payment-type-block">
           <h2>Preparando tu pago…</h2>
@@ -474,6 +486,27 @@ function Checkout() {
           <p className="credentials-info-hint">
             Pago procesado por Mercado Pago. Nunca te pediremos tu clave de Yape: solo el código de aprobación de un solo uso.
           </p>
+        </div>
+      );
+    }
+
+    if (intent.ui === "redirect") {
+      return (
+        <div className="payment-type-block">
+          <h2>Pago con QR</h2>
+          <p className="payment-description">
+            Pagas <strong>{money(toPay, "PEN")}</strong> escaneando un QR con <strong>Yape, Plin o la app de tu banco</strong>. La confirmación es automática: al terminar vuelves aquí y tus credenciales aparecen solas.
+          </p>
+          <ol className="mp-yape-steps">
+            <li>Pulsa <strong>Pagar con QR</strong>: se abre la página segura de pago (Flow) con tu QR.</li>
+            <li>Escanéalo desde tu app y confirma el pago. Si estás en el celular, también puedes abrir el pago desde ahí.</li>
+          </ol>
+          {intent.checkoutUrl ? (
+            <a href={intent.checkoutUrl} className="btn btn-primary checkout-btn mp-flow-btn">Pagar {money(toPay, "PEN")} con QR</a>
+          ) : (
+            <p className="checkout-notice">No pudimos generar el QR. Elige el método otra vez o escríbenos por WhatsApp.</p>
+          )}
+          <p className="credentials-info-hint">Pago procesado por Flow. No necesitas enviar capturas.</p>
         </div>
       );
     }

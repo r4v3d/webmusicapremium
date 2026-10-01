@@ -6,7 +6,7 @@ import { expireStaleIntents } from "./paymentIntents";
 import { deliverOrder, MAX_DELIVERY_ATTEMPTS } from "./delivery";
 import { alertAdmin } from "./notify";
 import { binanceConfigured } from "./binanceAccount";
-import { hasOpenBinanceIntents, pollMercadoPago, pollTaypi, syncBinance } from "./providerSync";
+import { hasOpenBinanceIntents, pollFlow, pollMercadoPago, pollTaypi, syncBinance } from "./providerSync";
 import { findWalletMismatches } from "./wallet";
 import { purgeRateLimits } from "./rateLimitDb";
 import { getProvider } from "./providers";
@@ -144,6 +144,12 @@ export async function runReconciliation({ state = createWorkerState(), now = Dat
   if (getProvider("mercadopago_yape")?.enabled) {
     const mp = await pollMercadoPago();
     if (mp.length) summary.mercadopago = mp;
+  }
+
+  if (getProvider("flow_qr")?.enabled) {
+    // Solo interesa lo que cambió: los pendientes se vuelven a consultar en la próxima vuelta.
+    const flow = (await pollFlow()).filter((r) => r.status !== "pending");
+    if (flow.length) summary.flow = flow;
   }
 
   const binance = await binanceStep(state, now);

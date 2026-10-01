@@ -15,6 +15,7 @@ import {
   searchPaymentsByReference as mpSearchPaymentsByReference,
 } from "./mercadopago";
 import { CONFIG } from "../data/config";
+import { FLOW_STATUS, getFlowStatus as flowGetStatus, intentIdFromCommerceOrder as flowIntentIdFromCommerceOrder } from "./flow";
 
 const CONFIG_APP_NAME = () => CONFIG.appName;
 
@@ -406,6 +407,82 @@ export async function pollMercadoPago({ search = mpSearchPaymentsByReference, in
         if (ev.duplicate && mpAlreadyApplied(ev.previousResult)) continue;
         results.push({ intentId: intent.id, ...(await handleMercadoPagoPayment(payment, { eventRowId: ev.eventRowId })) });
       }
+    } catch (error) {
+      results.push({ intentId: intent.id, status: "error", error: error.message });
+    }
+  }
+  return results;
+}
+
+// --- Flow · QR interoperable ---
+
+const FLOW_PROVIDER = "flow_qr";
+
+/**
+ * Estado de Flow ya consultado con payment/getStatus (nunca el aviso en sí).
+ * 2 = pagada → se liquida el intento de su commerceOrder («intent-N») con el
+ * monto que informa Flow. 3/4 = rechazada/anulada → el intento se cierra y el
+ * cliente puede pedir un QR nuevo.
+ */
+export async function handleFlowStatus(status, { eventRowId = null } = {}) {
+  const intentId = flowIntentIdFromCommerceOrder(status?.commerceOrder);
+  const intentRes = intentId
+    ? await query("select * from payment_intents where id = $1 and provider = $2", [intentId, FLOW_PROVIDER])
+    : { rows: [] };
+  const intent = intentRes.rows[0];
+  if (!intent) {
+    await markEvent(eventRowId, "mismatch", { detail: `sin intento para ${status?.commerceOrder || "(sin commerceOrder)"}` });
+    return { ok: false, status: "not_found" };
+  }
+  const code = Number(status.status);
+  if (code === FLOW_STATUS.PAID) {
+    const paid = status.paymentData || {};
+    const r = await applyPayment({
+      intentId: intent.id, provider: FLOW_PROVIDER, providerTxnId: String(status.flowOrder),
+      amount: Number(paid.amount ?? status.amount),
+      currency: String(paid.currency || status.currency || "PEN").toUpperCase(),
+    });
+    await markEvent(eventRowId, r.status, { intentId: intent.id });
+    return r;
+  }
+  if (code === FLOW_STATUS.REJECTED || code === FLOW_STATUS.CANCELLED) {
+    await query(
+      `update payment_intents set status = $2, updated_at = now()
+        where id = $1 and status in ('created','awaiting')`,
+      [intent.id, code === FLOW_STATUS.CANCELLED ? "cancelled" : "failed"]
+    );
+    await markEvent(eventRowId, "ignored", { detail: code === FLOW_STATUS.CANCELLED ? "anulada" : "rechazada", intentId: intent.id });
+    return { ok: true, status: "closed" };
+  }
+  await markEvent(eventRowId, "ignored", { detail: "pendiente", intentId: intent.id });
+  return { ok: true, status: "pending" };
+}
+
+/** Consulta a Flow un intento y lo procesa (webhook, regreso del cliente, respaldo). */
+export async function syncFlowIntentByToken(token, { getStatus = flowGetStatus, eventType = "poll" } = {}) {
+  const status = await getStatus(token);
+  const ev = await recordEvent({
+    provider: "flow", eventId: `${status.flowOrder}:${status.status}`, eventType,
+    payload: status, signatureValid: true,
+  });
+  if (ev.duplicate && mpAlreadyApplied(ev.previousResult)) return { ok: true, status: "duplicate" };
+  return handleFlowStatus(status, { eventRowId: ev.eventRowId });
+}
+
+/** Respaldo: intentos de Flow abiertos de las últimas 24 h. */
+export async function pollFlow({ getStatus = flowGetStatus, intentId = null } = {}) {
+  const open = await query(
+    `select * from payment_intents
+      where provider = $1 and provider_ref is not null and status in ('created','awaiting','underpaid')
+        and created_at > now() - interval '24 hours'
+        and ($2::bigint is null or id = $2::bigint)
+      order by id limit 40`,
+    [FLOW_PROVIDER, intentId]
+  );
+  const results = [];
+  for (const intent of open.rows) {
+    try {
+      results.push({ intentId: intent.id, ...(await syncFlowIntentByToken(intent.provider_ref, { getStatus })) });
     } catch (error) {
       results.push({ intentId: intent.id, status: "error", error: error.message });
     }
