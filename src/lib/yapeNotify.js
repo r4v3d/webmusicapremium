@@ -1,12 +1,12 @@
 // Yape directo al número del negocio, validado con las notificaciones del celular.
 //
 // Cómo se sabe qué pedido pagó cada yapeo (las tres cosas a la vez):
-//   1. Monto único: cada intento abierto tiene un monto exacto distinto
-//      (S/ 6.00, S/ 5.99, S/ 5.98…). La notificación «te envió un pago por S/ 5.99»
-//      apunta a un solo pedido.
+//   1. Monto exacto: el precio de la tabla, sin descuentos (S/ 6.00, S/ 9.00…).
+//      Opcional: YAPE_NOTIFY_MAX_CENTS>0 da a cada pedido un monto único (6.00, 5.99…).
 //   2. Código de seguridad (obligatorio): Yape pone 3 dígitos en la notificación y
 //      en la constancia del cliente. El cliente los escribe en el checkout y deben
-//      coincidir. Con YAPE_NOTIFY_REQUIRE_CODE=false bastaría el monto.
+//      coincidir. Es lo que distingue a varios clientes que pagan el mismo monto.
+//      Si dos pedidos del mismo monto escriben el mismo código: revisión manual.
 //   3. Ventana de tiempo: el pago tiene que llegar después de pedir el pago y
 //      antes de que venza (con un margen para pagos tardíos).
 // Ante cualquier duda (código distinto, monto distinto, aviso repetido, pago sin
@@ -20,7 +20,8 @@
 //     consumed_provider_txns. Un código ya usado no sirve para otro pedido.
 //   - El código del cliente nunca confirma por sí solo: además debe existir un
 //     aviso real con el monto exacto de su pedido, llegado después de pedirlo.
-//   - Un monto recién pagado no se reasigna enseguida a otro pedido.
+//   - Escribir un código que ya pagó otro pedido avisa al admin (posible fraude).
+//   - Máximo 3 intentos de código por pedido y hora.
 import crypto from "node:crypto";
 import { query, withTransaction } from "./pg";
 import { applyPayment } from "./settle";
@@ -29,6 +30,7 @@ import { alertAdmin, notifyCustomer } from "./notify";
 import { editTelegramMessage, sendTelegramMessage, tgEscape } from "./telegram";
 import { formatMoney, round2 } from "./ledger";
 import { CONFIG } from "../data/config";
+import { rateLimitDb } from "./rateLimitDb";
 
 export const PROVIDER = "yape_notify";
 const OPEN = ["created", "awaiting"];
@@ -42,8 +44,9 @@ function num(name, def) {
 export function yapeNotifyConfig() {
   return {
     secret: process.env.YAPE_NOTIFY_SECRET || "",
-    // Hasta cuántos céntimos de descuento se usan para hacer único el monto.
-    maxCents: Math.min(99, num("YAPE_NOTIFY_MAX_CENTS", 30)),
+    // Céntimos de descuento para hacer único el monto. 0 (por defecto) = el cliente
+    // paga el precio exacto de la tabla y el pago se identifica por el código.
+    maxCents: Math.min(99, num("YAPE_NOTIFY_MAX_CENTS", 0)),
     // Margen tras el vencimiento en el que un pago tardío todavía se reconoce.
     graceMinutes: num("YAPE_NOTIFY_GRACE_MINUTES", 60),
     // Si el teléfono manda «ping» periódico: minutos sin señal antes de avisar (0 = no se vigila).
@@ -133,8 +136,10 @@ function contentKey(parsed) {
  * pedidos simultáneos no reciban el mismo monto.
  */
 export async function allocateUniqueAmount(tx, base) {
-  const { maxCents, graceMinutes } = yapeNotifyConfig();
+  const { maxCents, graceMinutes, requireCode } = yapeNotifyConfig();
   const price = round2(base);
+  // Precio exacto: con código obligatorio, varios pedidos pueden esperar el mismo monto.
+  if (maxCents === 0 && requireCode) return price;
   await tx.query("insert into yape_device(id) values (1) on conflict do nothing");
   await tx.query("select id from yape_device where id = 1 for update");
   const used = await tx.query(
@@ -268,15 +273,14 @@ export async function matchNotification(notifId, { preferIntentId = null } = {})
     if (requireCode && !notif.security_code) return { status: "unmatched", reason: "no_code", notifId };
 
     let candidates = await candidateIntents(tx, notif);
-    if (preferIntentId) {
-      const preferred = candidates.filter((c) => String(c.id) === String(preferIntentId));
-      if (preferred.length) candidates = preferred;
-    }
     if (requireCode) {
       // Monto exacto + código que escribió el cliente: las dos cosas deben coincidir.
+      // Si dos pedidos del mismo monto escribieron el mismo código, no se adivina: revisión.
       const withCode = candidates.filter((c) => c.payer_code === notif.security_code);
       if (withCode.length === 0) return { status: "unmatched", reason: candidates.length ? "awaiting_code" : "no_order", notifId };
       candidates = withCode;
+    } else if (preferIntentId && candidates.some((c) => String(c.id) === String(preferIntentId))) {
+      candidates = candidates.filter((c) => String(c.id) === String(preferIntentId));
     } else if (candidates.length > 1 && notif.security_code) {
       const byCode = candidates.filter((c) => c.payer_code === notif.security_code);
       if (byCode.length === 1) candidates = byCode;
@@ -300,7 +304,9 @@ export async function matchNotification(notifId, { preferIntentId = null } = {})
       return { status: "unmatched", notifId };
     }
     if (candidates.length > 1) {
-      await setReview(notif.id, `${candidates.length} pedidos esperan ${formatMoney(notif.amount, "PEN")}`, tx);
+      await setReview(notif.id, requireCode
+        ? `${candidates.length} pedidos de ${formatMoney(notif.amount, "PEN")} escribieron el mismo código ${notif.security_code}`
+        : `${candidates.length} pedidos esperan ${formatMoney(notif.amount, "PEN")}`, tx);
       return { status: "review", notifId };
     }
     const intent = candidates[0];
@@ -403,16 +409,24 @@ export async function claimYapeIntent({ intentId, code = null }) {
     }
   }
   if (intent.payer_code) {
-    // Llegó un Yape con el monto exacto de este pedido pero otro código: el cliente se equivocó al escribirlo.
-    const sameAmount = await query(
-      `select 1 from yape_notifications
-        where status = 'unmatched' and security_code is not null and security_code <> $2
-          and round(amount, 2) = round($1::numeric, 2)
-          and received_at >= $3::timestamptz and received_at <= $4::timestamptz + ($5::int * interval '1 minute')
+    // ¿Ese código ya pagó otro pedido? Puede ser un intento de fraude o un error: lo ve el admin.
+    const used = await query(
+      `select n.id, i.order_id from yape_notifications n join payment_intents i on i.id = n.intent_id
+        where n.status = 'matched' and n.security_code = $1 and n.intent_id <> $2
+          and round(n.amount, 2) = round($3::numeric, 2) and n.received_at > now() - interval '6 hours'
         limit 1`,
-      [intent.amount_expected, intent.payer_code, intent.created_at, intent.expires_at, graceMinutes]
+      [intent.payer_code, intent.id, intent.amount_expected]
     );
-    if (sameAmount.rows[0]) return { status: "code_mismatch" };
+    if (used.rows[0]) {
+      const once = await rateLimitDb(`yape-code-used:${intent.id}`, { limit: 1, windowMs: 60 * 60 * 1000 });
+      if (once.ok) {
+        await alertAdmin(`Código de Yape ya usado: ${intent.order_id || `recarga #${intent.id}`}`, [
+          `El cliente escribió el código ${intent.payer_code}, que ya pagó ${used.rows[0].order_id || "otra recarga"}.`,
+          "Puede ser un error o un intento de fraude. Revisa en tu app de Yape antes de aprobar nada.",
+        ], { level: "warn" });
+      }
+      return { status: "code_used" };
+    }
     // Mismo código, otro monto: lo decide el admin.
     const other = await query(
       `select id from yape_notifications
