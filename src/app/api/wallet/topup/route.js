@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCustomerSession } from "../../../../lib/libClientAuth";
 import { createTopupIntent, getOrCreateBinanceTopupIntent, intentUi } from "../../../../lib/paymentIntents";
-import { defaultProvider, walletEnabled } from "../../../../lib/providers";
+import { topupProvider, walletEnabled } from "../../../../lib/providers";
 import { CONFIG } from "../../../../data/config";
 import { rateLimitDb } from "../../../../lib/rateLimitDb";
 import { rateLimitedJson } from "../../../../lib/rateLimit";
@@ -41,7 +41,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "Ingresa un monto válido." }, { status: 400 });
     }
 
-    const provider = defaultProvider("PEN");
+    const provider = topupProvider();
     if (!provider) return NextResponse.json({ error: "No hay métodos de recarga en soles disponibles." }, { status: 503 });
 
     const result = await createTopupIntent({
@@ -51,7 +51,12 @@ export async function POST(req) {
       customerReference: reference ? String(reference).trim().slice(0, 80) : null,
       salesChannel: "web",
     });
-    if (!result.ok) return NextResponse.json({ error: "No se pudo iniciar la recarga.", code: result.status }, { status: 400 });
+    if (!result.ok) {
+      const error = result.status === "amount_required" ? "Escribe el monto que vas a yapear."
+        : result.status === "busy" ? "Hay muchos pagos en curso. Intenta en un minuto."
+        : "No se pudo iniciar la recarga.";
+      return NextResponse.json({ error, code: result.status }, { status: 400 });
+    }
 
     return NextResponse.json({ currency: "PEN", intent: intentUi(result.intent) });
   } catch (error) {

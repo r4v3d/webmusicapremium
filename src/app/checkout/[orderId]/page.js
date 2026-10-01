@@ -134,6 +134,7 @@ function Checkout() {
   const [binanceOrderId, setBinanceOrderId] = useState("");
   const [yapePhone, setYapePhone] = useState("");
   const [yapeOtp, setYapeOtp] = useState("");
+  const [yapeCode, setYapeCode] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const autoStarted = useRef(false);
 
@@ -224,7 +225,7 @@ function Checkout() {
       const res = await fetch(`/api/payments/intents/${view.intent.id}/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ t: token, customerReference: reference || undefined }),
+        body: JSON.stringify({ t: token, customerReference: reference || undefined, securityCode: yapeCode || undefined }),
       });
       const data = await res.json();
       if (data.order) applyView(data);
@@ -490,6 +491,60 @@ function Checkout() {
       );
     }
 
+    if (intent.ui === "yape_notify") {
+      const ins = intent.instructions || {};
+      const discount = currency === "PEN" && Number(amount) > Number(toPay) ? Number(amount) - Number(toPay) : 0;
+      const codeOk = yapeCode === "" || /^\d{3}$/.test(yapeCode);
+      return (
+        <div className="payment-type-block">
+          <h2>Pago con Yape</h2>
+          <p className="payment-description">
+            Yapea <strong>exactamente {money(toPay, "PEN")}</strong> al número o QR de abajo. La confirmación es automática: tus credenciales aparecen aquí solas en cuanto llega tu Yape.
+          </p>
+          {discount > 0 && (
+            <p className="yape-exact-hint">
+              Te descontamos {Math.round(discount * 100)} céntimo{Math.round(discount * 100) === 1 ? "" : "s"} para reconocer tu pago al instante. Yapea el monto <strong>con los céntimos</strong>.
+            </p>
+          )}
+          <div className="qrs-showcase-grid yape-single">
+            <div className="qr-card">
+              <QrBox src={ins.yape?.qrImage} alt="Yape" variant="purple" />
+              <span className="qr-name">YAPE</span>
+              <span className="qr-phone-number">{ins.yape?.number}</span>
+            </div>
+          </div>
+          <div className="payment-fields-list">
+            {ins.yape?.name && <div className="payment-field-item"><span className="field-label">Titular:</span><div className="field-value-wrap"><strong className="field-text">{ins.yape.name}</strong></div></div>}
+            <CopyField label="Número Yape:" value={ins.yape?.number} copyValue={String(ins.yape?.number || "").replace(/\s+/g, "")} id="phone" copied={copied} onCopy={copy} />
+            <CopyField label="Monto exacto:" value={money(toPay, "PEN")} copyValue={Number(toPay).toFixed(2)} id="amount" copied={copied} onCopy={copy} big />
+          </div>
+          <form className="yape-claim-form" onSubmit={(e) => { e.preventDefault(); refresh(); }}>
+            <label className="form-label" htmlFor="yape-code">¿Ya yapeaste? Código de seguridad de tu constancia (opcional)</label>
+            <div className="checkout-inline-form">
+              <input
+                id="yape-code"
+                className="form-input yape-code-input"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="3 dígitos"
+                maxLength={3}
+                value={yapeCode}
+                onChange={(e) => setYapeCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              />
+              <button type="submit" className="btn btn-primary" disabled={!!busy || !codeOk}>
+                {busy === "refresh" ? "Buscando tu pago…" : "Ya pagué"}
+              </button>
+            </div>
+          </form>
+          <p className="credentials-info-hint">
+            {intent.payerClaimed
+              ? "Estamos buscando tu Yape. Si no aparece solo en 2 minutos, lo revisamos a mano y te confirmamos aquí mismo."
+              : "El código de seguridad son los 3 dígitos que Yape muestra en tu constancia. No envíes capturas ni compartas tu clave."}
+          </p>
+        </div>
+      );
+    }
+
     if (intent.ui === "redirect") {
       return (
         <div className="payment-type-block">
@@ -615,7 +670,7 @@ function Checkout() {
           <div className="summary-row"><span>Duración del plan:</span><strong>{order.duration}</strong></div>
           <div className="summary-row"><span>Método de pago:</span><strong className="payment-label-value">{intent?.label || "—"}</strong></div>
           <div className="summary-row"><span>Correo:</span><strong>{order.email}</strong></div>
-          <div className="summary-total-row"><span>Total:</span><strong>{money(amount, currency)}</strong></div>
+          <div className="summary-total-row"><span>Total:</span><strong>{money(intent?.ui === "yape_notify" && intentOpen ? intent.amountExpected : amount, currency)}</strong></div>
         </div>
 
         <div className="checkout-action-buttons">

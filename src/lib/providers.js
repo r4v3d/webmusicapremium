@@ -5,6 +5,8 @@
 // (sirve para Plin) salvo que se apague con MANUAL_YAPE_ENABLED=false.
 // QR interoperable de Flow (Yape, Plin y bancos): FLOW_ENABLED=true (+ FLOW_API_KEY y FLOW_SECRET_KEY).
 // Cada uno se enciende o apaga solo con su variable: se pueden tener ambos o uno.
+// Yape directo (sin comisión) validado con las notificaciones del celular:
+// YAPE_NOTIFY_ENABLED=true (+ YAPE_NOTIFY_SECRET). Si está activo es el método por defecto.
 
 function flag(name, defaultValue) {
   const raw = process.env[name];
@@ -27,6 +29,15 @@ export function getProviders(env = process.env) {
       label: "Yape / Plin",
       ui: "static_qr",
       intentTtlMinutes: 30,
+    },
+    yape_notify: {
+      currency: "PEN",
+      // Sin secreto no hay forma segura de recibir los avisos del teléfono.
+      enabled: on("YAPE_NOTIFY_ENABLED", false) && Boolean(env.YAPE_NOTIFY_SECRET),
+      autoConfirm: true,
+      label: "Yape (QR o número)",
+      ui: "yape_notify",
+      intentTtlMinutes: 20,
     },
     mercadopago_yape: {
       currency: "PEN",
@@ -83,6 +94,15 @@ export function availableProviders(currency, env = process.env) {
 export function defaultProvider(currency, env = process.env) {
   const list = availableProviders(currency, env).filter((p) => p.ui !== "wallet");
   return list.find((p) => p.autoConfirm) || list[0] || null;
+}
+
+/**
+ * Proveedor para recargas de saldo en soles (monto libre). Flow y Mercado Pago
+ * no las soportan: se usa Yape directo, TAYPI o Yape manual.
+ */
+export function topupProvider(env = process.env) {
+  const list = availableProviders("PEN", env);
+  return ["yape_notify", "taypi", "manual_yape"].map((id) => list.find((p) => p.id === id)).find(Boolean) || null;
 }
 
 export function isWalletProvider(id) {

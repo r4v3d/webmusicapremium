@@ -19,7 +19,9 @@ export async function listManualQueue() {
        from payment_intents i
        left join orders o on o.order_id = i.order_id
        left join customers c on c.id = coalesce(i.customer_id, o.customer_id)
-      where i.provider = 'manual_yape'
+      where (i.provider = 'manual_yape'
+             -- Yape directo: solo si el cliente dijo «Ya pagué» y el aviso no apareció solo.
+             or (i.provider = 'yape_notify' and (i.payer_claimed_at is not null or i.status = 'underpaid')))
         and (i.status in ('awaiting','created','underpaid')
              or (i.status = 'expired' and i.expires_at > now() - interval '24 hours'
                  and coalesce(o.status, 'expired') not in ('paid','delivered','refunded')))
@@ -29,12 +31,13 @@ export async function listManualQueue() {
   return rows.map((i) => ({
     intentId: i.id,
     orderId: i.order_id,
+    provider: i.provider,
     purpose: i.purpose,
     status: i.status,
     orderStatus: i.order_status,
     amountExpected: i.amount_expected == null ? null : Number(i.amount_expected),
     amountReceived: Number(i.amount_received) || 0,
-    customerReference: i.customer_reference || "",
+    customerReference: [i.customer_reference, i.payer_code ? `Cód. de seguridad: ${i.payer_code}` : null].filter(Boolean).join(" · "),
     name: i.full_name || i.display_name || "",
     customerCode: i.customer_code || "",
     whatsapp: i.whatsapp || "",

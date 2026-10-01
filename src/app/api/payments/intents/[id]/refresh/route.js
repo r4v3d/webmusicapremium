@@ -10,6 +10,7 @@ import { deliverOrder } from "../../../../../../lib/delivery";
 import { alertAdmin } from "../../../../../../lib/notify";
 import { rateLimitDb } from "../../../../../../lib/rateLimitDb";
 import { rateLimitedJson } from "../../../../../../lib/rateLimit";
+import { claimYapeIntent, cleanCode } from "../../../../../../lib/yapeNotify";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req, { params }) {
   try {
     const { id } = await params;
-    const { t, customerReference } = await req.json().catch(() => ({}));
+    const { t, customerReference, securityCode } = await req.json().catch(() => ({}));
     const intent = await getIntentById(id);
     if (!intent?.order_id) return NextResponse.json({ message: "No encontrado." }, { status: 404 });
 
@@ -45,6 +46,21 @@ export async function POST(req, { params }) {
         ]));
       }
       message = "Tu pago está en verificación. Normalmente tarda pocos minutos.";
+    } else if (intent.provider === "yape_notify") {
+      // El código solo ayuda a encontrar el aviso de Yape: nunca confirma un pago por sí solo.
+      const code = cleanCode(securityCode);
+      if (code) {
+        const tries = await rateLimitDb(`yape-code:${intent.id}`, { limit: 6, windowMs: 60 * 60 * 1000 });
+        if (!tries.ok) return rateLimitedJson(tries.retryAfterMs, "Demasiados intentos con el código. Ya avisamos para revisar tu pago a mano.");
+      }
+      const r = await claimYapeIntent({ intentId: intent.id, code });
+      message = ["settled", "paid", "needs_manual"].includes(r.status)
+        ? "¡Pago encontrado!"
+        : r.status === "underpaid"
+        ? "Recibimos tu Yape, pero el monto es menor al del pedido."
+        : code
+        ? "Aún no vemos tu Yape. Suele llegar en segundos; si no aparece en 2 minutos lo revisamos a mano y te confirmamos aquí."
+        : "Aún no vemos tu Yape. Escribe el código de seguridad de 3 dígitos de tu constancia para encontrarlo más rápido.";
     } else if (intent.provider === "binance_account" && binanceConfigured()) {
       const since = Math.max(Date.now() - 2 * 60 * 60 * 1000, new Date(intent.created_at).getTime() - 5 * 60 * 1000);
       const results = await syncBinance({ lookbackMs: Date.now() - since });

@@ -16,6 +16,7 @@ const MESSAGES = {
   no_price: "Este pedido no tiene precio en esa moneda.",
   provider_error: "El proveedor de pago no respondió. Intenta con otro método o en un minuto.",
   forbidden: "Este pedido pertenece a otro cliente.",
+  busy: "Hay muchos pagos con Yape en curso. Intenta en un minuto o elige otro método.",
 };
 
 export async function POST(req) {

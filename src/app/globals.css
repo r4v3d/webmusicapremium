@@ -6358,3 +6358,9 @@ a {
 .mp-yape-otp { letter-spacing: 0.4em; font-variant-numeric: tabular-nums; text-align: center; font-size: 1.2rem !important; }
 .mp-yape-form .checkout-btn { margin-top: 6px; }
 .mp-flow-btn { display: inline-flex; justify-content: center; max-width: 360px; width: 100%; margin: 6px 0 4px; }
+
+/* Yape directo: validado con las notificaciones del celular */
+.qrs-showcase-grid.yape-single { grid-template-columns: minmax(0, 260px); justify-content: center; }
+.yape-exact-hint { margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: rgba(116, 38, 165, 0.14); border: 1px solid rgba(160, 90, 220, 0.35); font-size: 0.85rem; color: var(--text-main); }
+.yape-claim-form { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.yape-code-input { max-width: 130px; letter-spacing: 0.4em; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px; }
