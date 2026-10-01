@@ -48,7 +48,7 @@ export function intentUi(intent, order = null) {
       : provider?.ui === "mp_yape"
       ? { publicKey: mercadoPagoPublicKey() }
       : provider?.ui === "yape_notify"
-      ? { yape: { ...payments.yape, number: yapeNumber() } }
+      ? { yape: { ...payments.yape, number: yapeNumber().replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3") } }
       : null,
     // Yape directo: el cliente ya pulsó «Ya pagué» (y con qué código).
     payerClaimed: Boolean(intent.payer_claimed_at),

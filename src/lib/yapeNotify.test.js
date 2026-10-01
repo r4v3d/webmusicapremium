@@ -9,6 +9,7 @@ import {
 } from "./yapeNotify";
 import { query } from "./pg";
 import { POST as webhook } from "../app/api/webhooks/yape-notify/route";
+import { handleTelegramUpdate } from "./telegramBot";
 
 let db;
 beforeAll(async () => { db = await createTestDb(); });
@@ -184,6 +185,17 @@ describe("Yape directo", () => {
     const otra = await handleYapeAdminCallback({ data: `yn:ok:${b.intent.id}:${notifId}`, chatId: 777, messageId: 6, from: { id: 1 } });
     expect(otra.text).toContain("ya pagó otro pedido");
     expect(await estado(b.orderId)).toBe("awaiting_payment");
+  });
+
+  it("el bot de Telegram atiende los botones del admin (también en un grupo)", async () => {
+    const p = await pedido();
+    vi.stubEnv("TELEGRAM_ADMIN_CHAT_ID", "-100777");
+    await handleTelegramUpdate({
+      update_id: 1,
+      callback_query: { id: "cb1", from: { id: 5, username: "dueño" }, data: `yn:fz2:${p.intent.id}`, message: { message_id: 9, chat: { id: -100777, type: "supergroup" } } },
+    });
+    expect(await estado(p.orderId)).toBe("paid");
+    expect(telegram.some((m) => m.method === "answerCallbackQuery")).toBe(true);
   });
 
   it("aprobar sin aviso funciona una sola vez", async () => {
