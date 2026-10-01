@@ -50,7 +50,7 @@ export async function POST(req, { params }) {
       // El código solo ayuda a encontrar el aviso de Yape: nunca confirma un pago por sí solo.
       const code = cleanCode(securityCode);
       if (code) {
-        const tries = await rateLimitDb(`yape-code:${intent.id}`, { limit: 6, windowMs: 60 * 60 * 1000 });
+        const tries = await rateLimitDb(`yape-code:${intent.id}`, { limit: 3, windowMs: 60 * 60 * 1000 });
         if (!tries.ok) return rateLimitedJson(tries.retryAfterMs, "Demasiados intentos con el código. Ya avisamos para revisar tu pago a mano.");
       }
       if (!code && otherApp !== true) {
@@ -63,11 +63,11 @@ export async function POST(req, { params }) {
         ? "¡Pago encontrado!"
         : r.status === "underpaid"
         ? "Recibimos tu Yape, pero el monto es menor al del pedido."
-        : r.status === "code_mismatch"
-        ? "Recibimos un Yape por el monto de tu pedido, pero con otro código de seguridad. Revisa los 3 dígitos en tu constancia de Yape y escríbelos de nuevo."
+        : r.status === "code_used"
+        ? "Ese código ya se usó en otro pago. Revisa los 3 dígitos de tu constancia; si son correctos, lo revisamos a mano y te confirmamos aquí."
         : r.status === "waiting_manual"
         ? "Lo revisamos a mano en unos minutos y te confirmamos aquí mismo."
-        : "Aún no vemos tu Yape con ese código. Suele llegar en segundos; si no aparece en 2 minutos lo revisamos a mano y te confirmamos aquí.";
+        : "Aún no vemos un Yape de tu monto con ese código. Revisa que los 3 dígitos sean los de tu constancia. Suele llegar en segundos; si no aparece en 2 minutos lo revisamos a mano y te confirmamos aquí.";
     } else if (intent.provider === "binance_account" && binanceConfigured()) {
       const since = Math.max(Date.now() - 2 * 60 * 60 * 1000, new Date(intent.created_at).getTime() - 5 * 60 * 1000);
       const results = await syncBinance({ lookbackMs: Date.now() - since });

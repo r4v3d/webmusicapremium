@@ -241,7 +241,6 @@ async function topupPenCreate(chat, customerId, text) {
     return {
       text: [
         `Yapea <b>exactamente ${formatPen(exact)}</b> al <code>${e(yapeNumber())}</code> (${e(yape.name)}).`,
-        exact !== amount ? "Los céntimos de diferencia sirven para reconocer tu pago: yapea el monto exacto." : null,
         "",
         "Cuando yapees, escribe aquí el <b>código de seguridad</b> (3 dígitos) que aparece en tu constancia de Yape. Se acredita al instante.",
         `Tienes ${provider.intentTtlMinutes} minutos para hacerlo.`,
@@ -268,15 +267,15 @@ async function topupYapeCode(chat, customerId, state, text) {
   if (!own.rows[0]) { await setState(chat.chat_id, {}); return { text: "No encontré esa recarga. Empieza de nuevo desde 💰 Recargar saldo." }; }
   const code = cleanCode(text);
   if (!code) return { text: "Escribe solo los 3 dígitos del código de seguridad, por ejemplo <code>805</code>." };
-  const limited = await rateLimitDb(`yape-code:${state.intentId}`, { limit: 6, windowMs: 60 * 60 * 1000 });
+  const limited = await rateLimitDb(`yape-code:${state.intentId}`, { limit: 3, windowMs: 60 * 60 * 1000 });
   if (!limited.ok) { await setState(chat.chat_id, {}); return { text: "Demasiados intentos. Lo revisamos a mano y te aviso por aquí." }; }
   const r = await claimYapeIntent({ intentId: state.intentId, code });
   if (r.status === "credited" || r.status === "paid") {
     await setState(chat.chat_id, {});
     return { text: `✅ ¡Recarga acreditada!\n${balanceLine(await getBalances(customerId))}`, keyboard: [[{ text: "🛒 Tienda", callback_data: "shop" }]] };
   }
-  if (r.status === "code_mismatch") return { text: "Recibí un Yape por ese monto, pero con otro código. Revisa los 3 dígitos de tu constancia y escríbelos de nuevo." };
-  return { text: "Aún no veo tu Yape con ese código. Suele llegar en segundos: vuelve a escribirlo en un momento. Si no aparece, lo revisamos a mano." };
+  if (r.status === "code_used") return { text: "Ese código ya se usó en otro pago. Si es correcto, lo revisamos a mano y te aviso por aquí." };
+  return { text: "Aún no veo un Yape de ese monto con ese código. Revisa los 3 dígitos de tu constancia y vuelve a escribirlo en un momento. Si no aparece, lo revisamos a mano." };
 }
 
 async function topupPenReference(chat, state, text) {

@@ -96,24 +96,28 @@ describe("Yape directo", () => {
     expect(getProvider("yape_notify").enabled).toBe(false);
   });
 
-  it("da un monto único a cada pedido pendiente del mismo precio", async () => {
+  it("cobra el precio exacto de la tabla a todos, sin descontar céntimos", async () => {
     const a = await pedido();
     const b = await pedido();
-    const c = await pedido();
-    expect([a, b, c].map((p) => Number(p.intent.amount_expected))).toEqual([6, 5.99, 5.98]);
-    // Volver a abrir el checkout reutiliza el mismo monto.
-    const again = await createIntent({ orderId: b.orderId, providerId: "yape_notify" });
-    expect(Number(again.intent.amount_expected)).toBe(5.99);
+    const c = await pedido({ precio: 25 });
+    expect([a, b, c].map((p) => Number(p.intent.amount_expected))).toEqual([6, 6, 25]);
   });
 
-  it("varios yapeos a la vez: cada uno paga su pedido por monto exacto + código", async () => {
+  it("con YAPE_NOTIFY_MAX_CENTS se puede volver al monto único", async () => {
+    vi.stubEnv("YAPE_NOTIFY_MAX_CENTS", "30");
+    const a = await pedido();
+    const b = await pedido();
+    expect([a, b].map((p) => Number(p.intent.amount_expected))).toEqual([6, 5.99]);
+  });
+
+  it("varios yapeos del mismo monto a la vez: cada uno paga su pedido por su código", async () => {
     const a = await pedido();
     const b = await pedido();
     const c = await pedido();
-    // Los tres pagan casi al mismo tiempo, cada uno su monto, y escriben su código.
-    await ingestNotification(aviso("5.98", { nombre: "Carla Q*", codigo: "333" }));
+    // Los tres pagan S/ 6 casi al mismo tiempo; cada uno escribe el código de su constancia.
+    await ingestNotification(aviso("6", { nombre: "Carla Q*", codigo: "333" }));
     await ingestNotification(aviso("6", { nombre: "Ana M*", codigo: "111" }));
-    await ingestNotification(aviso("5.99", { nombre: "Beto R*", codigo: "222" }));
+    await ingestNotification(aviso("6", { nombre: "Beto R*", codigo: "222" }));
     expect((await claimYapeIntent({ intentId: b.intent.id, code: "222" })).status).toBe("settled");
     expect((await claimYapeIntent({ intentId: a.intent.id, code: "111" })).status).toBe("settled");
     expect((await claimYapeIntent({ intentId: c.intent.id, code: "333" })).status).toBe("settled");
@@ -144,10 +148,10 @@ describe("Yape directo", () => {
     expect(r).toMatchObject({ status: "settled", orderId: p.orderId });
   });
 
-  it("código equivocado: no paga y le avisa al cliente que revise los 3 dígitos", async () => {
+  it("código equivocado: no paga; al corregirlo se confirma", async () => {
     const p = await pedido();
     await ingestNotification(aviso("6", { codigo: "222" }));
-    expect((await claimYapeIntent({ intentId: p.intent.id, code: "111" })).status).toBe("code_mismatch");
+    expect((await claimYapeIntent({ intentId: p.intent.id, code: "111" })).status).toBe("waiting");
     expect(await estado(p.orderId)).toBe("awaiting_payment");
     // Lo corrige y se confirma.
     expect((await claimYapeIntent({ intentId: p.intent.id, code: "222" })).status).toBe("settled");
@@ -158,9 +162,10 @@ describe("Yape directo", () => {
     await ingestNotification(aviso("6", { codigo: "805" }));
     expect((await claimYapeIntent({ intentId: a.intent.id, code: "805" })).status).toBe("settled");
     const b = await pedido();
-    // El cliente intenta reutilizar el código 805 en otro pedido.
-    expect((await claimYapeIntent({ intentId: b.intent.id, code: "805" })).status).toBe("waiting");
+    // Otro pedido del mismo precio intenta reutilizar el código 805: no paga y se avisa al admin.
+    expect((await claimYapeIntent({ intentId: b.intent.id, code: "805" })).status).toBe("code_used");
     expect(await estado(b.orderId)).toBe("awaiting_payment");
+    expect(telegram.some((m) => m.method === "sendMessage" && m.body.text.includes("Código de Yape ya usado"))).toBe(true);
     const usados = await query("select count(*)::int as n from consumed_provider_txns where provider = 'yape_notify'");
     expect(usados.rows[0].n).toBe(1);
   });
@@ -171,8 +176,7 @@ describe("Yape directo", () => {
     expect((await ingestNotification(aviso("6"))).status).toBe("settled");
     await atrasar(5);
     const nuevo = await pedido();
-    // El monto 6.00 se acaba de pagar: no se reasigna enseguida.
-    expect(Number(nuevo.intent.amount_expected)).toBe(5.99);
+    await claimYapeIntent({ intentId: nuevo.intent.id, code: "123" });
     const r = await ingestNotification({ ...aviso("6"), notificationId: "otro-envio" });
     expect(r.status).toBe("review");
     await yapeNotifyStep();
@@ -181,13 +185,23 @@ describe("Yape directo", () => {
     expect(await estado(nuevo.orderId)).toBe("awaiting_payment");
   });
 
-  it("mismo código por casualidad en dos pedidos: decide el monto exacto", async () => {
+  it("dos pedidos del mismo monto escriben el mismo código: no se adivina, va a revisión", async () => {
     const a = await pedido();
-    const b = await pedido(); // 5.99
+    const b = await pedido();
     await claimYapeIntent({ intentId: a.intent.id, code: "444" });
     await claimYapeIntent({ intentId: b.intent.id, code: "444" });
-    expect((await ingestNotification(aviso("6", { codigo: "444" }))).orderId).toBe(a.orderId);
+    expect((await ingestNotification(aviso("6", { codigo: "444" }))).status).toBe("review");
+    expect(await estado(a.orderId)).toBe("awaiting_payment");
     expect(await estado(b.orderId)).toBe("awaiting_payment");
+  });
+
+  it("mismo código en pedidos de distinto precio: decide el monto", async () => {
+    const a = await pedido();
+    const b = await pedido({ precio: 9 });
+    await claimYapeIntent({ intentId: a.intent.id, code: "444" });
+    await claimYapeIntent({ intentId: b.intent.id, code: "444" });
+    expect((await ingestNotification(aviso("9", { codigo: "444" }))).orderId).toBe(b.orderId);
+    expect(await estado(a.orderId)).toBe("awaiting_payment");
   });
 
   it("un yapeo anterior al pedido no lo paga", async () => {
@@ -280,7 +294,7 @@ describe("Yape directo", () => {
     expect(pagos.rows[0].n).toBe(1);
   });
 
-  it("recarga de saldo: monto único + código y se acredita", async () => {
+  it("recarga de saldo: monto exacto + código y se acredita", async () => {
     const client = await createClient({ nickname: "Bea" });
     const r = await createTopupIntent({ customerId: client.id, providerId: "yape_notify", declaredAmount: 20 });
     expect(Number(r.intent.amount_expected)).toBe(20);

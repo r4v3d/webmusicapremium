@@ -24,15 +24,15 @@ export async function POST(req) {
 
     const code = cleanCode(securityCode);
     if (!code && otherApp !== true) return NextResponse.json({ error: "Escribe el código de seguridad de 3 dígitos de tu constancia de Yape." }, { status: 400 });
-    const limited = await rateLimitDb(`yape-code:${intentId}`, { limit: 6, windowMs: 60 * 60 * 1000 });
+    const limited = await rateLimitDb(`yape-code:${intentId}`, { limit: 3, windowMs: 60 * 60 * 1000 });
     if (!limited.ok) return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos. Lo revisamos a mano y se acredita en cuanto lo confirmemos.");
 
     const r = await claimYapeIntent({ intentId, code });
     const ok = ["credited", "paid"].includes(r.status);
     const message = ok ? "¡Recarga acreditada!"
-      : r.status === "code_mismatch" ? "Recibimos un Yape por ese monto, pero con otro código. Revisa los 3 dígitos de tu constancia."
+      : r.status === "code_used" ? "Ese código ya se usó en otro pago. Si es correcto, lo revisamos a mano."
       : r.status === "waiting_manual" ? "Lo revisamos a mano y se acredita en cuanto lo confirmemos."
-      : "Aún no vemos tu Yape con ese código. Suele llegar en segundos: vuelve a intentarlo en un momento.";
+      : "Aún no vemos un Yape de ese monto con ese código. Revisa los 3 dígitos de tu constancia y vuelve a intentarlo en un momento.";
     return NextResponse.json({ ok, status: r.status, message, balances: await getBalances(customerId) });
   } catch (error) {
     console.error("Wallet topup yape error:", error);
