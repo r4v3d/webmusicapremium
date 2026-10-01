@@ -217,7 +217,7 @@ function Checkout() {
     setTimeout(() => setCopied(""), 2000);
   };
 
-  const refresh = async () => {
+  const refresh = async ({ otherApp = false } = {}) => {
     if (!view?.intent) return;
     setBusy("refresh");
     setNotice("");
@@ -225,7 +225,7 @@ function Checkout() {
       const res = await fetch(`/api/payments/intents/${view.intent.id}/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ t: token, customerReference: reference || undefined, securityCode: yapeCode || undefined }),
+        body: JSON.stringify({ t: token, customerReference: reference || undefined, securityCode: yapeCode || undefined, otherApp: otherApp || undefined }),
       });
       const data = await res.json();
       if (data.order) applyView(data);
@@ -494,16 +494,18 @@ function Checkout() {
     if (intent.ui === "yape_notify") {
       const ins = intent.instructions || {};
       const discount = currency === "PEN" && Number(amount) > Number(toPay) ? Number(amount) - Number(toPay) : 0;
-      const codeOk = yapeCode === "" || /^\d{3}$/.test(yapeCode);
+      const codeOk = /^\d{3}$/.test(yapeCode);
+      const requireCode = ins.requireCode !== false;
       return (
         <div className="payment-type-block">
           <h2>Pago con Yape</h2>
-          <p className="payment-description">
-            Yapea <strong>exactamente {money(toPay, "PEN")}</strong> al número o QR de abajo. La confirmación es automática: tus credenciales aparecen aquí solas en cuanto llega tu Yape.
-          </p>
+          <ol className="mp-yape-steps yape-steps">
+            <li>Yapea <strong>exactamente {money(toPay, "PEN")}</strong> al número o QR de abajo.</li>
+            <li>Escribe aquí el <strong>código de seguridad</strong> (3 dígitos) que aparece en tu constancia de Yape y pulsa <strong>Ya pagué</strong>.</li>
+          </ol>
           {discount > 0 && (
             <p className="yape-exact-hint">
-              Te descontamos {Math.round(discount * 100)} céntimo{Math.round(discount * 100) === 1 ? "" : "s"} para reconocer tu pago al instante. Yapea el monto <strong>con los céntimos</strong>.
+              Te descontamos {Math.round(discount * 100)} céntimo{Math.round(discount * 100) === 1 ? "" : "s"} para reconocer tu pago. Yapea el monto <strong>con los céntimos</strong>.
             </p>
           )}
           <div className="qrs-showcase-grid yape-single">
@@ -518,15 +520,15 @@ function Checkout() {
             <CopyField label="Número Yape:" value={ins.yape?.number} copyValue={String(ins.yape?.number || "").replace(/\s+/g, "")} id="phone" copied={copied} onCopy={copy} />
             <CopyField label="Monto exacto:" value={money(toPay, "PEN")} copyValue={Number(toPay).toFixed(2)} id="amount" copied={copied} onCopy={copy} big />
           </div>
-          <form className="yape-claim-form" onSubmit={(e) => { e.preventDefault(); refresh(); }}>
-            <label className="form-label" htmlFor="yape-code">¿Ya yapeaste? Código de seguridad de tu constancia (opcional)</label>
+          <form className="yape-claim-form" onSubmit={(e) => { e.preventDefault(); if (codeOk) refresh(); }}>
+            <label className="form-label" htmlFor="yape-code">Código de seguridad de tu constancia de Yape{requireCode ? "" : " (opcional)"}</label>
             <div className="checkout-inline-form">
               <input
                 id="yape-code"
                 className="form-input yape-code-input"
                 inputMode="numeric"
                 autoComplete="off"
-                placeholder="3 dígitos"
+                placeholder="000"
                 maxLength={3}
                 value={yapeCode}
                 onChange={(e) => setYapeCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
@@ -535,12 +537,18 @@ function Checkout() {
                 {busy === "refresh" ? "Buscando tu pago…" : "Ya pagué"}
               </button>
             </div>
+            {notice && <p className="checkout-notice">{notice}</p>}
           </form>
           <p className="credentials-info-hint">
-            {intent.payerClaimed
-              ? "Estamos buscando tu Yape. Si no aparece solo en 2 minutos, lo revisamos a mano y te confirmamos aquí mismo."
-              : "El código de seguridad son los 3 dígitos que Yape muestra en tu constancia. No envíes capturas ni compartas tu clave."}
+            {intent.payerClaimed && intent.payerCode
+              ? `Estamos buscando tu Yape con el código ${intent.payerCode}. Si no aparece solo en 2 minutos, lo revisamos a mano y te confirmamos aquí mismo.`
+              : "En tu constancia de Yape aparece como «Código de seguridad». No envíes capturas ni compartas tu clave."}
           </p>
+          {requireCode && (
+            <button type="button" className="btn-link yape-other-app" disabled={!!busy} onClick={() => refresh({ otherApp: true })}>
+              Pagué desde Plin u otro banco y no tengo código
+            </button>
+          )}
         </div>
       );
     }
@@ -674,12 +682,12 @@ function Checkout() {
         </div>
 
         <div className="checkout-action-buttons">
-          {intentOpen && (
-            <button type="button" className="btn btn-primary checkout-btn" disabled={!!busy} onClick={refresh}>
+          {intentOpen && intent.ui !== "yape_notify" && (
+            <button type="button" className="btn btn-primary checkout-btn" disabled={!!busy} onClick={() => refresh()}>
               {busy === "refresh" ? "Revisando…" : "Ya pagué y no aparece"}
             </button>
           )}
-          {notice && <p className="checkout-notice">{notice}</p>}
+          {notice && intent?.ui !== "yape_notify" && <p className="checkout-notice">{notice}</p>}
           <p className="credentials-info-hint">Cuando confirmemos tu pago, esta página se actualizará sola con tus credenciales.</p>
           <a href={supportLink} target="_blank" rel="noopener noreferrer" className="btn btn-whatsapp checkout-btn"><WhatsAppIcon /><span>¿Dudas? Soporte por WhatsApp</span></a>
         </div>

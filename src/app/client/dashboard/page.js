@@ -83,6 +83,7 @@ export default function ClientDashboard() {
   const [topupAmount, setTopupAmount] = useState("");
   const [topupReference, setTopupReference] = useState("");
   const [topupIntent, setTopupIntent] = useState(null);
+  const [topupCode, setTopupCode] = useState("");
   const [usdtOrderId, setUsdtOrderId] = useState("");
 
   // PIN change state
@@ -178,6 +179,38 @@ export default function ClientDashboard() {
     }
   };
 
+  // Recarga en soles por Yape directo: código de seguridad de la constancia.
+  const handleTopupCode = async (e, { otherApp = false } = {}) => {
+    e?.preventDefault?.();
+    if (!topupIntent) return;
+    setActionLoading(true);
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await fetch("/api/wallet/topup/yape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intentId: topupIntent.id, securityCode: topupCode, otherApp: otherApp || undefined }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSuccessMsg(data.message);
+        setTopupIntent(null);
+        setTopupCode("");
+        if (data.balances) setWallet((w) => (w ? { ...w, balances: data.balances } : w));
+        fetchDashboardData();
+      } else if (res.ok) {
+        setSuccessMsg(data.message);
+      } else {
+        setError(data.message || data.error || "No se pudo verificar la recarga.");
+      }
+    } catch (err) {
+      setError("Error de red. Verifica tu conexión.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Recarga USDT: pagó al Pay ID y pega el Order ID que le muestra Binance.
   const handleClaimUsdt = async (e) => {
     e.preventDefault();
@@ -223,7 +256,7 @@ export default function ClientDashboard() {
       }
       setTopupIntent(data.intent);
       setSuccessMsg(data.intent?.ui === "yape_notify"
-        ? "Recarga lista. Yapea el monto exacto y se suma sola a tu saldo."
+        ? "Recarga lista. Yapea el monto exacto y escribe el código de tu constancia."
         : "Recarga registrada. Cuando verifiquemos tu Yape se sumará a tu saldo.");
     } catch (err) {
       setError("Error de red. Verifica tu conexión.");
@@ -524,7 +557,12 @@ export default function ClientDashboard() {
                     {topupIntent.ui === "yape_notify" ? (
                       <>
                         <span>Yapea <strong>exactamente S/ {Number(topupIntent.amountExpected).toFixed(2)}</strong> al <code style={{ color: "var(--accent-cyan)" }}>{topupIntent.instructions?.yape?.number}</code> ({topupIntent.instructions?.yape?.name}).</span>
-                        <span style={{ color: "var(--text-muted)" }}>Los céntimos identifican tu recarga: se suma sola a tu saldo en cuanto llega (tienes 20 minutos).</span>
+                        <span style={{ color: "var(--text-muted)" }}>Luego escribe el código de seguridad (3 dígitos) de tu constancia de Yape. Tienes 20 minutos.</span>
+                        <form onSubmit={handleTopupCode} style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <input className="form-input" inputMode="numeric" maxLength={3} placeholder="000" value={topupCode} onChange={(e) => setTopupCode(e.target.value.replace(/\D/g, "").slice(0, 3))} style={{ padding: "8px 12px", fontSize: "16px", maxWidth: "110px", textAlign: "center", letterSpacing: "0.3em" }} />
+                          <button type="submit" className="btn btn-primary" disabled={actionLoading || topupCode.length !== 3} style={{ padding: "8px 14px", fontSize: "0.8rem" }}>Ya pagué</button>
+                        </form>
+                        <button type="button" onClick={(e) => handleTopupCode(e, { otherApp: true })} disabled={actionLoading} style={{ background: "none", border: "none", padding: 0, color: "var(--text-muted)", textDecoration: "underline", fontSize: "0.75rem", cursor: "pointer", textAlign: "left" }}>Pagué desde Plin u otro banco y no tengo código</button>
                       </>
                     ) : (
                       <>

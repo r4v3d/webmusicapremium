@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req, { params }) {
   try {
     const { id } = await params;
-    const { t, customerReference, securityCode } = await req.json().catch(() => ({}));
+    const { t, customerReference, securityCode, otherApp } = await req.json().catch(() => ({}));
     const intent = await getIntentById(id);
     if (!intent?.order_id) return NextResponse.json({ message: "No encontrado." }, { status: 404 });
 
@@ -53,14 +53,21 @@ export async function POST(req, { params }) {
         const tries = await rateLimitDb(`yape-code:${intent.id}`, { limit: 6, windowMs: 60 * 60 * 1000 });
         if (!tries.ok) return rateLimitedJson(tries.retryAfterMs, "Demasiados intentos con el código. Ya avisamos para revisar tu pago a mano.");
       }
+      if (!code && otherApp !== true) {
+        const fresh = await loadOrderRow(intent.order_id);
+        const view = await buildCheckoutView(fresh, { access: "full", sessionCustomerId: auth.sessionCustomerId });
+        return NextResponse.json({ ...view, message: "Escribe el código de seguridad de 3 dígitos que aparece en tu constancia de Yape." });
+      }
       const r = await claimYapeIntent({ intentId: intent.id, code });
       message = ["settled", "paid", "needs_manual"].includes(r.status)
         ? "¡Pago encontrado!"
         : r.status === "underpaid"
         ? "Recibimos tu Yape, pero el monto es menor al del pedido."
-        : code
-        ? "Aún no vemos tu Yape. Suele llegar en segundos; si no aparece en 2 minutos lo revisamos a mano y te confirmamos aquí."
-        : "Aún no vemos tu Yape. Escribe el código de seguridad de 3 dígitos de tu constancia para encontrarlo más rápido.";
+        : r.status === "code_mismatch"
+        ? "Recibimos un Yape por el monto de tu pedido, pero con otro código de seguridad. Revisa los 3 dígitos en tu constancia de Yape y escríbelos de nuevo."
+        : r.status === "waiting_manual"
+        ? "Lo revisamos a mano en unos minutos y te confirmamos aquí mismo."
+        : "Aún no vemos tu Yape con ese código. Suele llegar en segundos; si no aparece en 2 minutos lo revisamos a mano y te confirmamos aquí.";
     } else if (intent.provider === "binance_account" && binanceConfigured()) {
       const since = Math.max(Date.now() - 2 * 60 * 60 * 1000, new Date(intent.created_at).getTime() - 5 * 60 * 1000);
       const results = await syncBinance({ lookbackMs: Date.now() - since });

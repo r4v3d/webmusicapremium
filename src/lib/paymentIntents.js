@@ -11,7 +11,7 @@ import { payWithWallet } from "./settle";
 import { CONFIG } from "../data/config";
 import { mercadoPagoPublicKey } from "./mercadopago";
 import { checkoutUrlFrom as flowCheckoutUrl, createFlowPayment } from "./flow";
-import { allocateUniqueAmount, yapeNumber } from "./yapeNotify";
+import { allocateUniqueAmount, yapeNotifyConfig, yapeNumber } from "./yapeNotify";
 
 const OPEN = ["created", "awaiting"];
 const ORDER_OPEN = ["pending", "awaiting_payment", "expired", "underpaid"];
@@ -48,7 +48,7 @@ export function intentUi(intent, order = null) {
       : provider?.ui === "mp_yape"
       ? { publicKey: mercadoPagoPublicKey() }
       : provider?.ui === "yape_notify"
-      ? { yape: { ...payments.yape, number: yapeNumber().replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3") } }
+      ? { requireCode: yapeNotifyConfig().requireCode, yape: { ...payments.yape, number: yapeNumber().replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3") } }
       : null,
     // Yape directo: el cliente ya pulsó «Ya pagué» (y con qué código).
     payerClaimed: Boolean(intent.payer_claimed_at),
