@@ -6364,3 +6364,7 @@ a {
 .yape-exact-hint { margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: rgba(116, 38, 165, 0.14); border: 1px solid rgba(160, 90, 220, 0.35); font-size: 0.85rem; color: var(--text-main); }
 .yape-claim-form { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
 .yape-code-input { max-width: 130px; letter-spacing: 0.4em; text-align: center; font-variant-numeric: tabular-nums; font-size: 16px; }
+.yape-steps { margin-bottom: 14px; }
+.yape-other-app { background: none; border: none; padding: 4px 0; color: var(--text-muted); text-decoration: underline; font-size: 0.8rem; cursor: pointer; text-align: left; }
+.yape-other-app:hover { color: var(--text-main); }
+.yape-claim-form .checkout-notice { margin: 6px 0 0; }

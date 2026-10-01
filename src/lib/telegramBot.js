@@ -20,7 +20,7 @@ import { sendOTPEmail } from "./email";
 import { alertAdmin, announceToChannel } from "./notify";
 import { resolveSlotCredentials } from "./credentials";
 import { answerCallback, editTelegramMessage, sendTelegramMessage, tgEscape } from "./telegram";
-import { handleYapeAdminCallback, yapeNumber } from "./yapeNotify";
+import { claimYapeIntent, cleanCode, handleYapeAdminCallback, yapeNumber } from "./yapeNotify";
 import { CONFIG } from "../data/config";
 
 const e = tgEscape;
@@ -235,15 +235,15 @@ async function topupPenCreate(chat, customerId, text) {
   if (!r.ok) return { text: "No se pudo iniciar la recarga. Intenta más tarde." };
   const yape = CONFIG.payments.yape;
   if (provider.id === "yape_notify") {
-    // Yape directo: el monto exacto (con céntimos) identifica la recarga y se acredita sola.
-    await setState(chat.chat_id, {});
+    // Yape directo: monto exacto (con céntimos) + código de seguridad de la constancia.
+    await setState(chat.chat_id, { await: "yape_code", intentId: r.intent.id });
     const exact = Number(r.intent.amount_expected);
     return {
       text: [
         `Yapea <b>exactamente ${formatPen(exact)}</b> al <code>${e(yapeNumber())}</code> (${e(yape.name)}).`,
         exact !== amount ? "Los céntimos de diferencia sirven para reconocer tu pago: yapea el monto exacto." : null,
         "",
-        "Se acredita sola a tu saldo en cuanto llega. Te aviso por aquí.",
+        "Cuando yapees, escribe aquí el <b>código de seguridad</b> (3 dígitos) que aparece en tu constancia de Yape. Se acredita al instante.",
         `Tienes ${provider.intentTtlMinutes} minutos para hacerlo.`,
       ].filter((l) => l !== null).join("\n"),
       keyboard: [[{ text: "⬅️ Menú", callback_data: "menu" }]],
@@ -258,6 +258,25 @@ async function topupPenCreate(chat, customerId, text) {
       `Lo verificamos en nuestra app y se acredita a tu saldo. Horario: ${e(CONFIG.manualReviewHours || "")}`,
     ].join("\n"),
   };
+}
+
+async function topupYapeCode(chat, customerId, state, text) {
+  const own = await query(
+    "select id from payment_intents where id = $1 and customer_id = $2 and provider = 'yape_notify' and purpose = 'wallet_topup'",
+    [state.intentId, customerId]
+  );
+  if (!own.rows[0]) { await setState(chat.chat_id, {}); return { text: "No encontré esa recarga. Empieza de nuevo desde 💰 Recargar saldo." }; }
+  const code = cleanCode(text);
+  if (!code) return { text: "Escribe solo los 3 dígitos del código de seguridad, por ejemplo <code>805</code>." };
+  const limited = await rateLimitDb(`yape-code:${state.intentId}`, { limit: 6, windowMs: 60 * 60 * 1000 });
+  if (!limited.ok) { await setState(chat.chat_id, {}); return { text: "Demasiados intentos. Lo revisamos a mano y te aviso por aquí." }; }
+  const r = await claimYapeIntent({ intentId: state.intentId, code });
+  if (r.status === "credited" || r.status === "paid") {
+    await setState(chat.chat_id, {});
+    return { text: `✅ ¡Recarga acreditada!\n${balanceLine(await getBalances(customerId))}`, keyboard: [[{ text: "🛒 Tienda", callback_data: "shop" }]] };
+  }
+  if (r.status === "code_mismatch") return { text: "Recibí un Yape por ese monto, pero con otro código. Revisa los 3 dígitos de tu constancia y escríbelos de nuevo." };
+  return { text: "Aún no veo tu Yape con ese código. Suele llegar en segundos: vuelve a escribirlo en un momento. Si no aparece, lo revisamos a mano." };
 }
 
 async function topupPenReference(chat, state, text) {
@@ -429,6 +448,7 @@ export async function handleTelegramUpdate(update) {
   if (state.await === "binance_order_id") screen = await claimBinance(chat, customerId, text);
   else if (state.await === "topup_pen_amount") screen = await topupPenCreate(chat, customerId, text);
   else if (state.await === "topup_pen_ref") screen = await topupPenReference(chat, state, text);
+  else if (state.await === "yape_code") screen = await topupYapeCode(chat, customerId, state, text);
   else if (state.await === "link_phone") screen = await linkPhone(chat, text);
   else if (state.await === "link_otp") screen = await linkOtp(chat, state, text);
   else if (/^\d{15,22}$/.test(text)) screen = await claimBinance(chat, customerId, text);

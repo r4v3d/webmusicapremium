@@ -1,23 +1,25 @@
 // Yape directo al número del negocio, validado con las notificaciones del celular.
 //
-// Cómo se sabe qué pedido pagó cada yapeo:
+// Cómo se sabe qué pedido pagó cada yapeo (las tres cosas a la vez):
 //   1. Monto único: cada intento abierto tiene un monto exacto distinto
 //      (S/ 6.00, S/ 5.99, S/ 5.98…). La notificación «te envió un pago por S/ 5.99»
 //      apunta a un solo pedido.
-//   2. Código de seguridad: Yape pone 3 dígitos en la notificación y en la
-//      constancia del cliente. Si el cliente lo escribe, debe coincidir.
+//   2. Código de seguridad (obligatorio): Yape pone 3 dígitos en la notificación y
+//      en la constancia del cliente. El cliente los escribe en el checkout y deben
+//      coincidir. Con YAPE_NOTIFY_REQUIRE_CODE=false bastaría el monto.
 //   3. Ventana de tiempo: el pago tiene que llegar después de pedir el pago y
 //      antes de que venza (con un margen para pagos tardíos).
-// Ante cualquier duda (dos candidatos, código distinto, monto distinto, aviso
-// repetido) no se adivina: se manda a revisión en Telegram con botones.
+// Ante cualquier duda (código distinto, monto distinto, aviso repetido, pago sin
+// código desde Plin u otro banco) no se adivina: se manda a revisión en Telegram.
 //
 // Contra pagos duplicados y fraude:
 //   - El endpoint del teléfono exige un secreto (YAPE_NOTIFY_SECRET).
-//   - Un aviso repetido (reintento del teléfono) no se guarda dos veces, y el
-//     mismo pago reenviado más tarde se marca como duplicado.
+//   - Un aviso repetido (reintento del teléfono) no se guarda dos veces; si llega
+//     otro con el mismo nombre, monto y código, va a revisión: nunca paga solo.
 //   - Cada notificación paga como máximo un intento: «yn:<id>» en
-//     consumed_provider_txns, igual que los demás proveedores.
-//   - El cliente nunca confirma nada: su código solo ayuda a encontrar el aviso.
+//     consumed_provider_txns. Un código ya usado no sirve para otro pedido.
+//   - El código del cliente nunca confirma por sí solo: además debe existir un
+//     aviso real con el monto exacto de su pedido, llegado después de pedirlo.
 //   - Un monto recién pagado no se reasigna enseguida a otro pedido.
 import crypto from "node:crypto";
 import { query, withTransaction } from "./pg";
@@ -48,6 +50,11 @@ export function yapeNotifyConfig() {
     heartbeatMinutes: num("YAPE_NOTIFY_HEARTBEAT_MINUTES", 0),
     // Minutos tras «Ya pagué» sin encontrar el aviso antes de pedir revisión manual.
     reviewAfterMinutes: num("YAPE_NOTIFY_REVIEW_MINUTES", 2),
+    // Código de seguridad obligatorio: el pago solo se confirma solo si el cliente
+    // escribió los 3 dígitos de su constancia y coinciden con los del aviso.
+    requireCode: process.env.YAPE_NOTIFY_REQUIRE_CODE !== "false",
+    // Minutos que un aviso espera a que el cliente escriba su código antes de ir a revisión.
+    codeWaitMinutes: num("YAPE_NOTIFY_CODE_WAIT_MINUTES", 10),
   };
 }
 
@@ -250,24 +257,27 @@ export async function matchNotification(notifId, { preferIntentId = null } = {})
       [notif.content_key, notif.id, notif.received_at]
     );
     if (twin.rows[0]) {
-      if (notif.security_code) {
-        await tx.query(
-          "update yape_notifications set status = 'duplicate', note = $2, resolved_at = now(), resolved_by = 'system' where id = $1",
-          [notif.id, `Mismo pago que el aviso #${twin.rows[0].id}`]
-        );
-        return { status: "duplicate", notifId };
-      }
-      // Sin código no se puede distinguir un reenvío de un segundo pago real.
-      await setReview(notif.id, `Igual al aviso #${twin.rows[0].id} (mismo monto y nombre): ¿pago repetido o segundo pago?`, tx);
+      // Mismo nombre, monto y código: casi seguro el celular reenvió el aviso, pero
+      // podría ser un segundo pago real. Nunca paga solo ni se descarta en silencio.
+      await setReview(notif.id, `Igual al aviso #${twin.rows[0].id} (mismo nombre, monto y código): revisa en tu Yape si hay uno o dos pagos`, tx);
       return { status: "review", notifId };
     }
+
+    const { requireCode } = yapeNotifyConfig();
+    // Sin código (p. ej. pagado desde Plin u otro banco) no se puede confirmar solo.
+    if (requireCode && !notif.security_code) return { status: "unmatched", reason: "no_code", notifId };
 
     let candidates = await candidateIntents(tx, notif);
     if (preferIntentId) {
       const preferred = candidates.filter((c) => String(c.id) === String(preferIntentId));
       if (preferred.length) candidates = preferred;
     }
-    if (candidates.length > 1 && notif.security_code) {
+    if (requireCode) {
+      // Monto exacto + código que escribió el cliente: las dos cosas deben coincidir.
+      const withCode = candidates.filter((c) => c.payer_code === notif.security_code);
+      if (withCode.length === 0) return { status: "unmatched", reason: candidates.length ? "awaiting_code" : "no_order", notifId };
+      candidates = withCode;
+    } else if (candidates.length > 1 && notif.security_code) {
       const byCode = candidates.filter((c) => c.payer_code === notif.security_code);
       if (byCode.length === 1) candidates = byCode;
     }
@@ -373,7 +383,9 @@ export async function claimYapeIntent({ intentId, code = null }) {
   if (!intent) return { status: "not_found" };
   if (["paid", "overpaid"].includes(intent.status)) return { status: "paid" };
 
-  const { graceMinutes } = yapeNotifyConfig();
+  const { graceMinutes, requireCode } = yapeNotifyConfig();
+  // Sin código (pagó desde Plin u otro banco): queda para revisión manual.
+  if (requireCode && !intent.payer_code) return { status: "waiting_manual" };
   const pending = await query(
     `select id, amount, security_code from yape_notifications
       where status = 'unmatched'
@@ -391,6 +403,16 @@ export async function claimYapeIntent({ intentId, code = null }) {
     }
   }
   if (intent.payer_code) {
+    // Llegó un Yape con el monto exacto de este pedido pero otro código: el cliente se equivocó al escribirlo.
+    const sameAmount = await query(
+      `select 1 from yape_notifications
+        where status = 'unmatched' and security_code is not null and security_code <> $2
+          and round(amount, 2) = round($1::numeric, 2)
+          and received_at >= $3::timestamptz and received_at <= $4::timestamptz + ($5::int * interval '1 minute')
+        limit 1`,
+      [intent.amount_expected, intent.payer_code, intent.created_at, intent.expires_at, graceMinutes]
+    );
+    if (sameAmount.rows[0]) return { status: "code_mismatch" };
     // Mismo código, otro monto: lo decide el admin.
     const other = await query(
       `select id from yape_notifications
@@ -629,7 +651,7 @@ export async function adminForceApprove({ intentId, by = "admin" }) {
  */
 export async function yapeNotifyStep() {
   const out = {};
-  const { reviewAfterMinutes, heartbeatMinutes, graceMinutes } = yapeNotifyConfig();
+  const { reviewAfterMinutes, heartbeatMinutes, graceMinutes, requireCode, codeWaitMinutes } = yapeNotifyConfig();
 
   // 1. Avisos sin asignar recientes (p. ej. llegaron segundos antes que el intento).
   const loose = await query(
@@ -651,13 +673,14 @@ export async function yapeNotifyStep() {
   // 3. Avisos sin dueño mientras hay pedidos esperando: puede ser un monto mal pagado.
   const strays = await query(
     `update yape_notifications n set alerted_at = now()
-      where n.status = 'unmatched' and n.alerted_at is null and n.received_at < now() - interval '1 minute'
+      where n.status = 'unmatched' and n.alerted_at is null and n.received_at < now() - ($3::int * interval '1 minute')
         and exists (select 1 from payment_intents i
                      where i.provider = $1 and i.status in ('created','awaiting','expired','underpaid')
                        and i.created_at <= n.received_at
                        and i.expires_at + ($2::int * interval '1 minute') >= n.received_at)
       returning id`,
-    [PROVIDER, graceMinutes]
+    // Con código obligatorio se da tiempo a que el cliente lo escriba antes de molestar al admin.
+    [PROVIDER, graceMinutes, requireCode ? codeWaitMinutes : 1]
   );
   for (const n of strays.rows) await sendNotificationReview(n.id);
   if (strays.rows.length) out.strayReviews = strays.rows.length;
