@@ -12,6 +12,9 @@
 //   MP_ACCESS_TOKEN    (secreta, solo servidor)
 //   MP_WEBHOOK_SECRET  (clave secreta de Webhooks en «Tus integraciones»)
 //   SITE_URL           (p. ej. https://cheapmusic.best, para la URL de notificaciones)
+//   MP_TEST_PAYER_EMAIL  (solo pruebas: correo de un comprador de prueba, p. ej.
+//                         test_user_123@testuser.com; con credenciales de prueba
+//                         Mercado Pago rechaza correos reales y el del vendedor)
 import crypto from "node:crypto";
 
 const API = "https://api.mercadopago.com";
@@ -123,6 +126,39 @@ export function verifyWebhookSignature({ xSignature, xRequestId, dataId }, { sec
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(v1, "utf8");
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Correo del pagador. En pruebas (MP_TEST_PAYER_EMAIL) se usa el del comprador
+ * de prueba: Mercado Pago no acepta correos reales con credenciales de prueba.
+ */
+export function payerEmailFor(orderEmail) {
+  return text(process.env.MP_TEST_PAYER_EMAIL) || orderEmail;
+}
+
+function text(v) {
+  return v == null ? "" : String(v).trim();
+}
+
+/**
+ * Por qué Mercado Pago rechazó la petición (4xx), para el admin y el registro.
+ * { code, message, hint }: hint explica qué revisar en la configuración.
+ */
+export function describeApiError(error) {
+  const p = error?.payload || {};
+  const cause = Array.isArray(p.cause) ? p.cause[0] : null;
+  const code = String(cause?.code ?? p.code ?? p.error ?? error?.status ?? "");
+  const message = String(cause?.description || p.message || error?.message || "");
+  const hints = {
+    2034: "Credenciales y comprador de ambientes distintos. Con credenciales de PRUEBA usa un comprador de prueba (MP_TEST_PAYER_EMAIL=…@testuser.com); con credenciales de PRODUCCIÓN, un correo real distinto al tuyo.",
+    2198: "Con credenciales de prueba el correo del pagador debe ser de un usuario de prueba: pon MP_TEST_PAYER_EMAIL en el servidor.",
+    4390: "El pagador no puede ser el mismo vendedor: prueba con otro correo (o con un comprador de prueba).",
+    3003: "Token de Yape inválido o vencido: genera un código de aprobación nuevo.",
+    2006: "Token de Yape inválido o vencido: genera un código de aprobación nuevo.",
+    4033: "Monto inválido para Yape.",
+  };
+  const hint = hints[code] || (/token/i.test(message) ? "El token de Yape no sirve (vencido o de otra Public Key): revisa que MP_PUBLIC_KEY y MP_ACCESS_TOKEN sean del mismo ambiente." : "");
+  return { code, message, hint };
 }
 
 /** Motivo de rechazo en palabras del cliente. */
