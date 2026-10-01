@@ -9,7 +9,8 @@ import { getPayment as taypiGetPayment } from "./taypi";
 import { alertAdmin, notifyCustomer } from "./notify";
 import crypto from "node:crypto";
 import {
-  createYapePayment as mpCreateYapePayment, intentIdFromReference as mpIntentIdFromReference,
+  createYapePayment as mpCreateYapePayment, describeApiError as mpDescribeApiError, payerEmailFor as mpPayerEmailFor,
+  intentIdFromReference as mpIntentIdFromReference,
   intentReference as mpIntentReference, rejectionMessage as mpRejectionMessage,
   searchPaymentsByReference as mpSearchPaymentsByReference,
 } from "./mercadopago";
@@ -344,15 +345,24 @@ export async function payIntentWithYape({ intent, order, yapeToken }, { createPa
       token: yapeToken,
       amount,
       description: `${CONFIG_APP_NAME()} ${intent.order_id || "recarga"}`,
-      email: order?.email || `pedido-${intent.order_id || intent.id}@cheapmusic.best`,
+      email: mpPayerEmailFor(order?.email || `pedido-${intent.order_id || intent.id}@cheapmusic.best`),
       externalReference: mpIntentReference(intent.id),
       idempotencyKey: `yape-${intent.id}-${crypto.createHash("sha256").update(String(yapeToken)).digest("hex").slice(0, 32)}`,
       metadata: { intent_id: String(intent.id), order_id: intent.order_id || null },
     });
   } catch (error) {
-    // 4xx: token vencido o datos mal escritos. 5xx/timeout: la consulta de respaldo lo resuelve.
+    // 4xx: token vencido, datos mal escritos o configuración. 5xx/timeout: la consulta de respaldo lo resuelve.
     if (error.status && error.status < 500) {
-      return { ok: false, status: "rejected", message: "No se pudo procesar el pago con esos datos. Genera un código de aprobación nuevo en tu app de Yape e inténtalo otra vez." };
+      const detail = mpDescribeApiError(error);
+      console.error("[mercadopago] pago rechazado por la API:", error.status, detail.code, detail.message);
+      await query(
+        "update payment_intents set raw_response = coalesce(raw_response, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1",
+        [intent.id, JSON.stringify({ mpLastError: { at: new Date().toISOString(), status: error.status, ...detail } })]
+      );
+      return {
+        ok: false, status: "rejected", detail,
+        message: "No se pudo procesar el pago con esos datos. Genera un código de aprobación nuevo en tu app de Yape e inténtalo otra vez.",
+      };
     }
     console.error("[mercadopago] crear pago:", error.message);
     return { ok: false, status: "error", message: "Mercado Pago no respondió. Si Yape te descontó, espera un minuto: lo confirmamos solos." };

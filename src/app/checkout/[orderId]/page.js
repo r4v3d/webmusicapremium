@@ -262,7 +262,7 @@ function Checkout() {
       });
       const data = await res.json();
       if (data.order) applyView(data);
-      setNotice(data.message || "");
+      setNotice([data.message, data.adminDetail ? `Solo para ti (admin): ${data.adminDetail}` : null].filter(Boolean).join(" · "));
       if (!res.ok) setYapeOtp("");
     } catch {
       setNotice("Error de red. Si Yape te descontó, espera un minuto: lo confirmamos solos.");

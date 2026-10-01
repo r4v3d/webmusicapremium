@@ -5,7 +5,7 @@ import { createFamilyAccount, createMemberProfile, createOrder } from "./db";
 import { createIntent } from "./paymentIntents";
 import { defaultProvider, getProvider } from "./providers";
 import { handleMercadoPagoPayment, payIntentWithYape, pollMercadoPago } from "./providerSync";
-import { intentReference, rejectionMessage, verifyWebhookSignature } from "./mercadopago";
+import { describeApiError, intentReference, payerEmailFor, rejectionMessage, verifyWebhookSignature } from "./mercadopago";
 import { query } from "./pg";
 
 let db;
@@ -151,5 +151,37 @@ describe("firma de los webhooks", () => {
     const ts = String(Math.floor(now / 1000));
     const v1 = firmar("abc123", "r", ts);
     expect(verifyWebhookSignature({ xSignature: `ts=${ts},v1=${v1}`, xRequestId: "r", dataId: "ABC123" }, { secret, now })).toBe(true);
+  });
+});
+
+describe("diagnóstico de rechazos de la API", () => {
+  it("explica los códigos típicos de configuración (2034, 2198) y el de token", () => {
+    const err = (payload, status = 400) => Object.assign(new Error(payload.message || "x"), { status, payload });
+    expect(describeApiError(err({ message: "Invalid users involved", cause: [{ code: 2034, description: "Invalid users involved" }] })))
+      .toMatchObject({ code: "2034", message: "Invalid users involved", hint: expect.stringMatching(/MP_TEST_PAYER_EMAIL/) });
+    expect(describeApiError(err({ cause: [{ code: 2198, description: "Invalid test user email" }] })).hint).toMatch(/usuario de prueba/);
+    expect(describeApiError(err({ message: "invalid card token" })).hint).toMatch(/mismo ambiente/);
+  });
+
+  it("en pruebas, el correo del pagador es el del comprador de prueba", () => {
+    expect(payerEmailFor("ana@x.com")).toBe("ana@x.com");
+    vi.stubEnv("MP_TEST_PAYER_EMAIL", "test_user_123@testuser.com");
+    expect(payerEmailFor("ana@x.com")).toBe("test_user_123@testuser.com");
+  });
+
+  it("un 4xx guarda el motivo en el intento y lo devuelve para el admin", async () => {
+    const { intent, order } = await pedidoConStock();
+    vi.stubEnv("MP_TEST_PAYER_EMAIL", "test_user_9@testuser.com");
+    let enviado;
+    const r = await payIntentWithYape({ intent, order, yapeToken: "tok" }, {
+      createPayment: async (args) => {
+        enviado = args;
+        throw Object.assign(new Error("Invalid users involved"), { status: 400, payload: { cause: [{ code: 2034, description: "Invalid users involved" }] } });
+      },
+    });
+    expect(enviado.email).toBe("test_user_9@testuser.com");
+    expect(r).toMatchObject({ status: "rejected", detail: { code: "2034" } });
+    const raw = (await query("select raw_response from payment_intents where id = $1", [intent.id])).rows[0].raw_response;
+    expect(raw.mpLastError).toMatchObject({ status: 400, code: "2034", message: "Invalid users involved" });
   });
 });

@@ -77,6 +77,14 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 ## Parte C · Probar
 
 **Con credenciales de prueba** (las de A2):
+
+Mercado Pago **no acepta correos reales** (ni el tuyo) como pagador cuando usas credenciales de prueba: responde *«Invalid users involved»* (2034) o *«Invalid test user email»* (2198). Necesitas un **comprador de prueba**:
+
+1. En tu aplicación ve a **Cuentas de prueba → Crear cuenta de prueba**, elige **Perú** y el tipo **Comprador**.
+2. Copia su correo. Termina en `@testuser.com`.
+3. En el servidor agrega `MP_TEST_PAYER_EMAIL=ese-correo@testuser.com` en `/etc/musicapremium/env` y reinicia (B3).
+
+Luego:
 1. Haz un pedido en la tienda y elige **Yape (confirmación automática)**.
 2. Usa estos datos de prueba:
 
@@ -88,7 +96,9 @@ sudo systemctl restart musicapremium-web musicapremium-worker
 
 Con el aprobado, el pedido pasa a **pagado** y aparecen las credenciales. Con los rechazados, el checkout explica el motivo y deja reintentar.
 
-**En producción:** cambia en el servidor `MP_PUBLIC_KEY` y `MP_ACCESS_TOKEN` por las de producción (A4), reinicia (B3) y haz una compra real pequeña con tu propio Yape.
+**En producción:** cambia en el servidor `MP_PUBLIC_KEY` y `MP_ACCESS_TOKEN` por las de producción (A4), **borra la línea `MP_TEST_PAYER_EMAIL`**, reinicia (B3) y haz una compra real pequeña. Usa un pedido con un correo que **no** sea el de tu cuenta de Mercado Pago: el vendedor no puede pagarse a sí mismo.
+
+**Si un pago de prueba no pasa:** abre el checkout con la sesión del panel iniciada en el mismo navegador. Debajo del mensaje verás *«Solo para ti (admin)»* con el código y el motivo exacto que dio Mercado Pago, y qué revisar. El cliente solo ve el mensaje amable.
 
 ---
 

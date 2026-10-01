@@ -51,7 +51,11 @@ export async function POST(req) {
       : result.status === "underpaid" ? "Recibimos un pago parcial; falta completar el monto."
       : result.status === "needs_manual" ? "¡Pago aprobado! Estamos preparando tu cuenta y te la enviamos por correo."
       : "¡Pago aprobado!";
-    return NextResponse.json({ ...view, ok, message }, { status: ok || result.status === "pending" ? 200 : 402 });
+    // Solo el admin ve el motivo técnico (para configurar Mercado Pago); el cliente, el mensaje amable.
+    const adminDetail = auth.isAdmin && result.detail
+      ? `Mercado Pago ${result.detail.code ? `(${result.detail.code}) ` : ""}${result.detail.message}${result.detail.hint ? ` — ${result.detail.hint}` : ""}`
+      : null;
+    return NextResponse.json({ ...view, ok, message, adminDetail }, { status: ok || result.status === "pending" ? 200 : 402 });
   } catch (error) {
     console.error("[mercadopago] yape:", error);
     return NextResponse.json({ message: "Error interno al procesar el pago. Si Yape te descontó, espera un minuto: lo confirmamos solos." }, { status: 500 });
