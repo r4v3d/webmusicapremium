@@ -13,19 +13,29 @@ Si algo no cuadra, el servidor **no adivina**: te manda un mensaje al bot de Tel
 
 ## Cómo sabe qué pedido pagó cada yapeo
 
-- **Monto único.** Si dos clientes compran lo mismo a la vez, el primero paga S/ 6.00, el segundo S/ 5.99, el tercero S/ 5.98… Cada monto pendiente apunta a un solo pedido. El descuento máximo es de 30 céntimos (`YAPE_NOTIFY_MAX_CENTS`).
-- **Código de seguridad.** Yape pone 3 dígitos en tu notificación y en la constancia del cliente. Si el cliente lo escribe en el checkout, tiene que coincidir.
-- **Horario.** El yapeo tiene que llegar **después** de que el cliente pidió pagar y antes de que venza la reserva (más 60 minutos de margen para pagos tardíos).
+Un pago se confirma solo cuando coinciden **las tres** cosas:
+
+1. **Monto único.** Si dos clientes compran lo mismo a la vez, el primero paga S/ 6.00, el segundo S/ 5.99, el tercero S/ 5.98… Cada monto pendiente apunta a un solo pedido. El descuento máximo es de 30 céntimos (`YAPE_NOTIFY_MAX_CENTS`).
+2. **Código de seguridad (obligatorio).** Yape pone 3 dígitos en tu notificación y en la constancia del cliente. El cliente los escribe en el checkout y deben ser iguales.
+3. **Horario.** El yapeo tiene que llegar **después** de que el cliente pidió pagar y antes de que venza la reserva (más 60 minutos de margen para pagos tardíos).
+
+Si el aviso llega antes que el cliente escriba su código, espera. Si el código no coincide, se le pide revisar los 3 dígitos. Si en 10 minutos (`YAPE_NOTIFY_CODE_WAIT_MINUTES`) nadie reclama un yapeo mientras hay pedidos esperando, te llega a Telegram.
+
+Quien paga desde **Plin u otro banco** no tiene código de Yape: pulsa «Pagué desde Plin u otro banco» y el pago te llega a Telegram para aprobarlo a mano.
+
+Para volver al modo anterior (solo monto, sin pedir código) pon `YAPE_NOTIFY_REQUIRE_CODE=false`.
 
 ## Protecciones contra duplicados y fraude
 
 | Riesgo | Qué pasa |
 |---|---|
 | Alguien envía una notificación falsa a tu servidor | Se rechaza: sin tu clave secreta (`YAPE_NOTIFY_SECRET`) el servidor no acepta nada. |
-| El celular manda dos veces el mismo aviso | El segundo no se guarda. Si llega más tarde con el mismo nombre, monto y código, se marca **duplicado** y no paga nada. |
+| El celular manda dos veces el mismo aviso | El segundo no se guarda. Si llega otro con el mismo nombre, monto y código, nunca paga solo: te llega a Telegram para que revises en tu Yape si hubo uno o dos pagos. |
+| El cliente reutiliza un código ya usado | No sirve: cada yapeo (y su código) paga un solo pedido, y además tiene que ser el monto exacto del pedido nuevo y haber llegado después de pedirlo. |
+| Dos yapeos distintos con el mismo código (casualidad) | El código solo no decide: manda el monto exacto de cada pedido, que es único. |
 | Usar un yapeo para pagar dos pedidos | Imposible: cada notificación paga como máximo un pedido. |
 | El cliente manda una captura falsa | No sirve: solo cuentan los avisos que llegan a **tu** celular. |
-| El cliente escribe un código inventado | El código solo ayuda a encontrar el aviso, nunca confirma un pago. Si no coincide, va a revisión. Máximo 6 intentos por hora. |
+| El cliente escribe un código inventado | No paga: además del código debe existir un yapeo real con el monto exacto de su pedido. Máximo 6 intentos por hora. |
 | Un yapeo viejo (de antes del pedido) | No paga pedidos creados después. |
 | Paga de menos o un monto distinto | No se asigna solo: te llega a Telegram para decidir. |
 | Dos pedidos podrían ser el mismo pago | Va a revisión en Telegram. |
