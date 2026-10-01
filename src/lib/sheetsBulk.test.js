@@ -162,3 +162,16 @@ describe("cambios del inventario para la tabla del panel", () => {
     expect(d3.rows).toHaveLength(4);
   });
 });
+
+describe("fechas imposibles en la hoja", () => {
+  it("«30/02/27» sale como error claro en la vista previa y al aplicar, sin «Error interno»", async () => {
+    const clientes = [
+      fila(2, "t@gmail.com", "ok@x.com", "1", "911111111", "9", "03/10/26"),
+      fila(3, "t@gmail.com", "mala@x.com", "2", "@drea.ncm", "25", "30/02/27"),
+    ];
+    const r = await sincronizar(clientes);
+    expect(r.preview.errores).toEqual([{ hoja: "Clientes", fila: 3, mensaje: expect.stringMatching(/«30\/02\/27» no existe/) }]);
+    expect(r.apl.results.find((x) => x.fila === 3)).toMatchObject({ ok: false, mensaje: expect.stringMatching(/no existe/) });
+    expect(r.apl.results.find((x) => x.fila === 2)).toMatchObject({ ok: true });
+  });
+});

@@ -61,6 +61,9 @@ export function planClientes(rows) {
     g.keep.add(mk);
     try { parseEmailField(member, "Correo cliente"); } catch (e) { errors.push({ fila, mensaje: e.message }); continue; }
     if (!text(row.claveMiembro)) { errors.push({ fila, mensaje: "Falta la CONTRASEÑA." }); continue; }
+    if (text(row.vence)) {
+      try { parseDateField(row.vence, "RENOVACIÓN"); } catch (e) { errors.push({ fila, mensaje: e.message }); continue; }
+    }
     const prev = seen.get(mk);
     if (prev) {
       errors.push({

@@ -260,3 +260,54 @@ it("un cambio en lote desde el panel (300 cupos) se escribe en un solo bloque", 
   expect(C.grid.slice(1).filter((r) => r[3] === "nueva")).toHaveLength(300);
   expect(C.grid.slice(1).filter((r) => r[3] === "c")).toHaveLength(100);
 }, 60000);
+
+it("una fila con fecha imposible no agrega una sexta fila ni duplica al cliente", async () => {
+  const sheets = {};
+  const { api, alerts, setHandler } = loadScript(sheets);
+  sheets.Clientes = makeSheet("Clientes", 11);
+  sheets.Titulares = makeSheet("Titulares", 7);
+  api.prepararHoja_(api.CLIENTES);
+  api.prepararHoja_(api.TITULARES);
+  const C = sheets.Clientes;
+
+  // Tu caso: 5 filas para titular-0374, una con 30/02/27.
+  const pegado = [
+    ["titular-0374@cheapmusic.best", "@drea.ncm", "andreacahuana12@gmail.com", "Andrea??32", 25, "30/02/27"],
+    ["titular-0374@cheapmusic.best", "57 350 3341427", "albersi1926@gmail.com", "Estefa126", 15, "29/11/26"],
+    ["titular-0374@cheapmusic.best", "989134426", "ronalhaltamirano@gmail.com", "123456", 6, "09/06/27"],
+    ["titular-0374@cheapmusic.best", "Bryan Anthony Aguado", "cliente-1887@cheapmusic.best", "379676", 25, "08/03/27"],
+    ["titular-0374@cheapmusic.best", "@alenuzam", "alenuz@gmail.com", "Alito,1368+", 6, "14/05/27"],
+  ];
+  C.getRange(2, 1, pegado.length, 6).setValues(pegado);
+  await runSync(() => api.alEditar(ev(C, 2, 6, 1, 6)), setHandler);
+  await runSync(() => api.aplicarCambiosPegados(), setHandler);
+  expect(alerts[0]).toMatch(/Filas con error.*: 1/);
+
+  const filas = C.grid.slice(1, C.getLastRow());
+  expect(filas).toHaveLength(5); // no aparece una sexta fila vacía
+  const mala = filas.find((r) => r[2] === "andreacahuana12@gmail.com");
+  expect(mala[6]).toMatch(/^✗ RENOVACIÓN: «30\/02\/27» no existe/);
+  expect(mala[7]).toBe("");
+  expect(filas.filter((r) => /^✓ Sincronizado/.test(r[6]))).toHaveLength(4);
+
+  // Corriges la fecha y vuelves a aplicar: entra en el cupo que quedó libre.
+  const num = C.grid.findIndex((r) => r[2] === "andreacahuana12@gmail.com") + 1;
+  C.getRange(num, 6).setValue("28/02/27");
+  await runSync(() => api.alEditar(ev(C, num, num, 6, 6)), setHandler);
+  await runSync(() => api.aplicarCambiosPegados(), setHandler);
+  const despues = C.grid.slice(1, C.getLastRow());
+  expect(despues).toHaveLength(5);
+  expect(despues.every((r) => /^✓ Sincronizado/.test(r[6]) && /^\d+$/.test(String(r[7])))).toBe(true);
+  expect((await buildInventoryRows()).find((r) => r.correoMiembro === "andreacahuana12@gmail.com").vence).toBe("2027-02-28");
+
+  // Un cliente que ya existía y le pones una fecha imposible: su fila con error no lo duplica.
+  const num2 = C.grid.findIndex((r) => r[2] === "alenuz@gmail.com") + 1;
+  C.getRange(num2, 1, 1, 6).setValues([["titular-0374@cheapmusic.best", "@alenuzam", "alenuz@gmail.com", "Alito,1368+", 6, "31/04/27"]]);
+  await runSync(() => api.alEditar(ev(C, num2, num2 + 1, 1, 6)), setHandler); // pegar 2 filas → quedan «Pegado»
+  await runSync(() => api.aplicarCambiosPegados(), setHandler);
+  const fin = C.grid.slice(1, C.getLastRow());
+  expect(fin).toHaveLength(5);
+  expect(fin.filter((r) => r[2] === "alenuz@gmail.com")).toHaveLength(1);
+  expect(fin.find((r) => r[2] === "alenuz@gmail.com")[6]).toMatch(/«31\/04\/27» no existe/);
+  expect((await buildInventoryRows()).find((r) => r.correoMiembro === "alenuz@gmail.com").vence).toBe("2027-05-14");
+}, 120000);
