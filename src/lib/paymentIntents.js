@@ -11,6 +11,7 @@ import { payWithWallet } from "./settle";
 import { CONFIG } from "../data/config";
 import { mercadoPagoPublicKey } from "./mercadopago";
 import { checkoutUrlFrom as flowCheckoutUrl, createFlowPayment } from "./flow";
+import { allocateUniqueAmount, yapeNumber } from "./yapeNotify";
 
 const OPEN = ["created", "awaiting"];
 const ORDER_OPEN = ["pending", "awaiting_payment", "expired", "underpaid"];
@@ -46,7 +47,12 @@ export function intentUi(intent, order = null) {
       ? { yape: payments.yape, plin: payments.plin, reviewHours: CONFIG.manualReviewHours }
       : provider?.ui === "mp_yape"
       ? { publicKey: mercadoPagoPublicKey() }
+      : provider?.ui === "yape_notify"
+      ? { yape: { ...payments.yape, number: yapeNumber() } }
       : null,
+    // Yape directo: el cliente ya pulsó «Ya pagué» (y con qué código).
+    payerClaimed: Boolean(intent.payer_claimed_at),
+    payerCode: intent.payer_code || "",
   };
 }
 
@@ -120,6 +126,13 @@ export async function createIntent({ orderId, providerId, customerReference = nu
       }
       return { ok: true, status: "reused", intent: same, order };
     }
+    // Yape directo: monto único (unos céntimos menos si el precio ya está pendiente en otro pedido).
+    let expectedAmount = amount;
+    if (provider.id === "yape_notify") {
+      expectedAmount = await allocateUniqueAmount(tx, amount);
+      if (expectedAmount == null) return { ok: false, status: "busy" };
+    }
+
     if (open.rows.length) {
       await tx.query(
         "update payment_intents set status = 'cancelled', updated_at = now() where order_id = $1 and status = any($2::text[])",
@@ -153,7 +166,7 @@ export async function createIntent({ orderId, providerId, customerReference = nu
        values ($1,$2,$3,$4,$5,$6,$7,'awaiting',$8,$9,$10, now() + ($11::int * interval '1 second'), $12)
        returning *`,
       [orderId, order.customer_id, order.renew_subscription_id ? "renewal" : "order", providerId,
-       salesChannel || order.sales_channel, amount, provider.currency, noteCode, customerReference,
+       salesChannel || order.sales_channel, expectedAmount, provider.currency, noteCode, customerReference,
        idempotencyKey(), ttlSeconds, JSON.stringify({ providerId, customerReference })]
     );
     const intent = ins.rows[0];
@@ -235,7 +248,24 @@ export async function createTopupIntent({ customerId, providerId = "manual_yape"
     return { ok: false, status: "provider_disabled" };
   }
   const declared = Number(declaredAmount);
-  if (provider.id === "taypi" && !(declared > 0)) return { ok: false, status: "amount_required" };
+  if ((provider.id === "taypi" || provider.id === "yape_notify") && !(declared > 0)) return { ok: false, status: "amount_required" };
+
+  if (provider.id === "yape_notify") {
+    // Monto único también en recargas: la notificación de Yape la acredita sola.
+    return withTransaction(async (tx) => {
+      const exact = await allocateUniqueAmount(tx, declared);
+      if (exact == null) return { ok: false, status: "busy" };
+      const ins = await tx.query(
+        `insert into payment_intents(customer_id, purpose, provider, sales_channel, amount_expected, currency,
+                                     status, customer_reference, idempotency_key, expires_at, raw_request)
+         values ($1,'wallet_topup',$2,$3,$4,'PEN','awaiting',$5,$6, now() + ($7::int * interval '1 minute'), $8)
+         returning *`,
+        [customerId, providerId, salesChannel, exact, customerReference, idempotencyKey(), provider.intentTtlMinutes,
+         JSON.stringify({ declaredAmount: declared })]
+      );
+      return { ok: true, status: "created", intent: ins.rows[0] };
+    });
+  }
 
   const res = await query(
     `insert into payment_intents(customer_id, purpose, provider, sales_channel, amount_expected, currency,

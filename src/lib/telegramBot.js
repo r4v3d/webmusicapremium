@@ -10,7 +10,7 @@ import { deliverOrder, telegramDeliveryText } from "./delivery";
 import { createTopupIntent, getOrCreateBinanceTopupIntent } from "./paymentIntents";
 import { getBalances } from "./wallet";
 import { newAccessToken } from "./orderAccess";
-import { defaultProvider, walletEnabled } from "./providers";
+import { topupProvider, walletEnabled } from "./providers";
 import { binanceConfigured } from "./binanceAccount";
 import { claimBinanceByOrderId } from "./providerSync";
 import { claimMessage } from "./binanceClaimMessages";
@@ -20,6 +20,7 @@ import { sendOTPEmail } from "./email";
 import { alertAdmin, announceToChannel } from "./notify";
 import { resolveSlotCredentials } from "./credentials";
 import { answerCallback, editTelegramMessage, sendTelegramMessage, tgEscape } from "./telegram";
+import { handleYapeAdminCallback, yapeNumber } from "./yapeNotify";
 import { CONFIG } from "../data/config";
 
 const e = tgEscape;
@@ -220,7 +221,7 @@ async function topupUsdt(chat, customerId) {
 }
 
 async function topupPenAsk(chat) {
-  const provider = defaultProvider("PEN");
+  const provider = topupProvider();
   if (!provider) return { text: "Las recargas en soles no están disponibles ahora." };
   await setState(chat.chat_id, { await: "topup_pen_amount" });
   return { text: "💰 <b>Recargar soles</b> (monto libre)\n\nEscribe el monto que vas a yapear, por ejemplo <code>20</code>.", keyboard: [[{ text: "Cancelar", callback_data: "menu" }]] };
@@ -229,11 +230,26 @@ async function topupPenAsk(chat) {
 async function topupPenCreate(chat, customerId, text) {
   const amount = Number(String(text).replace(",", ".").replace(/[^\d.]/g, ""));
   if (!(amount > 0 && amount <= 5000)) return { text: "Escribe solo el monto, por ejemplo <code>20</code>." };
-  const provider = defaultProvider("PEN");
+  const provider = topupProvider();
   const r = await createTopupIntent({ customerId, providerId: provider.id, declaredAmount: amount, salesChannel: "telegram" });
   if (!r.ok) return { text: "No se pudo iniciar la recarga. Intenta más tarde." };
-  await setState(chat.chat_id, { await: "topup_pen_ref", intentId: r.intent.id });
   const yape = CONFIG.payments.yape;
+  if (provider.id === "yape_notify") {
+    // Yape directo: el monto exacto (con céntimos) identifica la recarga y se acredita sola.
+    await setState(chat.chat_id, {});
+    const exact = Number(r.intent.amount_expected);
+    return {
+      text: [
+        `Yapea <b>exactamente ${formatPen(exact)}</b> al <code>${e(yapeNumber())}</code> (${e(yape.name)}).`,
+        exact !== amount ? "Los céntimos de diferencia sirven para reconocer tu pago: yapea el monto exacto." : null,
+        "",
+        "Se acredita sola a tu saldo en cuanto llega. Te aviso por aquí.",
+        `Tienes ${provider.intentTtlMinutes} minutos para hacerlo.`,
+      ].filter((l) => l !== null).join("\n"),
+      keyboard: [[{ text: "⬅️ Menú", callback_data: "menu" }]],
+    };
+  }
+  await setState(chat.chat_id, { await: "topup_pen_ref", intentId: r.intent.id });
   return {
     text: [
       `Yapea <b>${formatPen(amount)}</b> al <code>${e(yape.number)}</code> (${e(yape.name)}).`,
@@ -351,6 +367,13 @@ export async function handleTelegramUpdate(update) {
   const from = message?.from || callback?.from;
   const chatId = message?.chat?.id || callback?.message?.chat?.id;
   if (!from || !chatId || from.is_bot) return;
+
+  // Botones de revisión de Yape: solo el chat del admin (puede ser un grupo).
+  if (callback && String(callback.data || "").startsWith("yn:")) {
+    const r = await handleYapeAdminCallback({ data: callback.data, chatId, messageId: callback.message?.message_id, from });
+    await answerCallback(callback.id, r.toast || "").catch(() => {});
+    return;
+  }
   if ((message?.chat?.type || callback?.message?.chat?.type) !== "private") return;
 
   const chat = await upsertChat(chatId, from);

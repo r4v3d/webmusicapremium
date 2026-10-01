@@ -51,6 +51,9 @@ function CloseIcon() {
 
 const PROVIDER_LABELS = {
   manual_yape: "Yape / Plin",
+  yape_notify: "Yape",
+  mercadopago_yape: "Yape",
+  flow_qr: "QR · Yape, Plin y bancos",
   taypi: "Yape / Plin",
   binance_account: "USDT · Binance",
   wallet_pen: "Saldo en soles",
@@ -219,7 +222,9 @@ export default function ClientDashboard() {
         return;
       }
       setTopupIntent(data.intent);
-      setSuccessMsg("Recarga registrada. Cuando verifiquemos tu Yape se sumará a tu saldo.");
+      setSuccessMsg(data.intent?.ui === "yape_notify"
+        ? "Recarga lista. Yapea el monto exacto y se suma sola a tu saldo."
+        : "Recarga registrada. Cuando verifiquemos tu Yape se sumará a tu saldo.");
     } catch (err) {
       setError("Error de red. Verifica tu conexión.");
     } finally {
@@ -516,8 +521,17 @@ export default function ClientDashboard() {
               {topupMode === "PEN" && (
                 topupIntent ? (
                   <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: "12px", padding: "14px", fontSize: "0.8rem", display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <span>Yapea al <code style={{ color: "var(--accent-cyan)" }}>{topupIntent.instructions?.yape?.number}</code> ({topupIntent.instructions?.yape?.name}).</span>
-                    <span style={{ color: "var(--text-muted)" }}>Lo verificamos en nuestra app y se suma a tu saldo. {topupIntent.instructions?.reviewHours ? `Horario: ${topupIntent.instructions.reviewHours}.` : ""}</span>
+                    {topupIntent.ui === "yape_notify" ? (
+                      <>
+                        <span>Yapea <strong>exactamente S/ {Number(topupIntent.amountExpected).toFixed(2)}</strong> al <code style={{ color: "var(--accent-cyan)" }}>{topupIntent.instructions?.yape?.number}</code> ({topupIntent.instructions?.yape?.name}).</span>
+                        <span style={{ color: "var(--text-muted)" }}>Los céntimos identifican tu recarga: se suma sola a tu saldo en cuanto llega (tienes 20 minutos).</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Yapea al <code style={{ color: "var(--accent-cyan)" }}>{topupIntent.instructions?.yape?.number}</code> ({topupIntent.instructions?.yape?.name}).</span>
+                        <span style={{ color: "var(--text-muted)" }}>Lo verificamos en nuestra app y se suma a tu saldo. {topupIntent.instructions?.reviewHours ? `Horario: ${topupIntent.instructions.reviewHours}.` : ""}</span>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <form onSubmit={handleTopup} style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: "8px", alignItems: "end" }}>

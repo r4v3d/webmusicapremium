@@ -11,6 +11,7 @@ import { findWalletMismatches } from "./wallet";
 import { purgeRateLimits } from "./rateLimitDb";
 import { getProvider } from "./providers";
 import { formatMoney } from "./ledger";
+import { yapeNotifyConfig, yapeNotifyStep } from "./yapeNotify";
 
 const MIN = 60 * 1000;
 
@@ -150,6 +151,11 @@ export async function runReconciliation({ state = createWorkerState(), now = Dat
     // Solo interesa lo que cambió: los pendientes se vuelven a consultar en la próxima vuelta.
     const flow = (await pollFlow()).filter((r) => r.status !== "pending");
     if (flow.length) summary.flow = flow;
+  }
+
+  if (getProvider("yape_notify")?.enabled || yapeNotifyConfig().secret) {
+    const yape = await yapeNotifyStep();
+    if (Object.keys(yape).length) summary.yapeNotify = yape;
   }
 
   const binance = await binanceStep(state, now);

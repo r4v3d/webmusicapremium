@@ -26,6 +26,7 @@ export const STATUS_LABELS = {
 /** Proveedores de pago (§11.2) tal como se muestran en el panel. */
 export const PROVIDER_LABELS = {
   manual_yape: "Yape/Plin (verificado)",
+  yape_notify: "Yape directo",
   taypi: "Yape/Plin · TAYPI",
   mercadopago_yape: "Yape · Mercado Pago",
   flow_qr: "QR · Flow",
