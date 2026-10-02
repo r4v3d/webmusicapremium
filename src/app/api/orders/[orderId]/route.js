@@ -5,17 +5,14 @@ import { getCustomerSession } from "../../../../lib/libClientAuth";
 import { orderAccessLevel } from "../../../../lib/orderAccess";
 import { buildCheckoutView, loadOrderRow } from "../../../../lib/checkoutView";
 import { recordWebDelivery } from "../../../../lib/delivery";
-import { rateLimitDb } from "../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitDb } from "../../../../lib/rateLimitDb";
 import { getClientIp, getClientKey, rateLimitedJson } from "../../../../lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
-// El checkout consulta cada 5 s: 15 min de polling son ~180 lecturas.
-const READ_LIMIT = { limit: 240, windowMs: 15 * 60 * 1000 };
-
 export async function GET(req, { params }) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "order-read"), READ_LIMIT);
+    const limited = await rateLimitDb(getClientKey(req, "order-read"), LIMITS.orderReadIp);
     if (!limited.ok) return rateLimitedJson(limited.retryAfterMs);
 
     const { orderId } = await params;
@@ -26,8 +23,13 @@ export async function GET(req, { params }) {
 
     // Mismo 404 para "no existe" y "token incorrecto": no se filtra qué pedidos existen.
     if (!order || access === "none") {
+      const miss = await rateLimitDb(getClientKey(req, "order-miss"), LIMITS.orderMissIp);
+      if (!miss.ok) return rateLimitedJson(miss.retryAfterMs);
       return NextResponse.json({ message: "El pedido no fue encontrado." }, { status: 404 });
     }
+    // Límite por pedido (el polling del checkout), no por IP: clientes que comparten IP no chocan.
+    const perOrder = await rateLimitDb(`order-read:${order.order_id}`, LIMITS.orderReadPerOrder);
+    if (!perOrder.ok) return rateLimitedJson(perOrder.retryAfterMs);
 
     const view = await buildCheckoutView(order, { access, sessionCustomerId });
 

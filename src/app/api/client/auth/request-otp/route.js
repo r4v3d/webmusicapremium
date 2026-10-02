@@ -3,12 +3,12 @@ import crypto from "crypto";
 import { query } from "../../../../../lib/pg";
 import { sendOTPEmail } from "../../../../../lib/email";
 import { hashOtp } from "../../../../../lib/pinOtp";
-import { rateLimitDb } from "../../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitDb } from "../../../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
 
 export async function POST(req) {
   try {
-    const ipLimited = await rateLimitDb(getClientKey(req, "request-otp"), { limit: 5, windowMs: 15 * 60 * 1000 });
+    const ipLimited = await rateLimitDb(getClientKey(req, "request-otp"), LIMITS.otpRequestIp);
     if (!ipLimited.ok) {
       return rateLimitedJson(ipLimited.retryAfterMs, "Demasiadas solicitudes de código. Espera unos minutos.");
     }

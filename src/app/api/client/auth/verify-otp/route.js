@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { query } from "../../../../../lib/pg";
 import { otpCodesMatch, setCustomerSession } from "../../../../../lib/libClientAuth";
-import { rateLimitDb } from "../../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitDb } from "../../../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
 
 export async function POST(req) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "verify-otp"), { limit: 8, windowMs: 15 * 60 * 1000 });
+    const limited = await rateLimitDb(getClientKey(req, "verify-otp"), LIMITS.otpVerifyIp);
     if (!limited.ok) {
       return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos de código. Espera unos minutos.");
     }
