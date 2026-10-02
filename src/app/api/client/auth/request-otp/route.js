@@ -94,9 +94,10 @@ export async function POST(req) {
         // Production mode with EMAIL_USER set: treat SMTP failure as a hard error
         let errorMsg = "No se pudo enviar el correo de verificación. ";
         if (emailResult.error === "SMTP_NOT_CONFIGURED") {
-          errorMsg += "Las credenciales de correo (EMAIL_USER y EMAIL_PASS) no están configuradas en el servidor.";
+          errorMsg += "No hay proveedor de correo configurado en el servidor (Brevo o Gmail).";
         } else {
-          errorMsg += `Detalle del error SMTP: ${emailResult.message}. Asegúrate de usar una contraseña de aplicación (App Password) de Gmail si usas una cuenta de Gmail.`;
+          // El detalle técnico queda en el registro del servidor, no se muestra al cliente.
+          errorMsg += "Intenta de nuevo en unos minutos.";
         }
         return NextResponse.json({
           error: "Error de correo",
