@@ -29,37 +29,103 @@ export function formatDate(date) {
   return `${d}/${m}/${y}`;
 }
 
-function smtpTransport() {
-  const emailUser = process.env.EMAIL_USER;
-  const emailPass = process.env.EMAIL_PASS;
-  if (!emailUser || !emailPass) return null;
-  return {
-    from: emailUser,
-    transporter: nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: Number(process.env.SMTP_PORT || 465),
-      secure: (process.env.SMTP_PORT || "465") === "465",
-      auth: { user: emailUser, pass: emailPass },
-    }),
-  };
+// ---------------------------------------------------------------- envío
+//
+// Proveedores en orden de preferencia; si uno falla, se intenta el siguiente:
+//   1. Brevo (SMTP relay): BREVO_SMTP_LOGIN + BREVO_SMTP_KEY, remitente EMAIL_FROM
+//      (una dirección de tu dominio autenticado en Brevo, p. ej. pedidos@cheapmusic.best).
+//   2. Gmail (respaldo): EMAIL_USER + EMAIL_PASS (contraseña de aplicación).
+// Las conexiones se reutilizan (pool) y se limita la velocidad de envío: una
+// ráfaga de pedidos pagados a la vez no satura al proveedor.
+// EMAIL_REPLY_TO (opcional): a dónde llegan las respuestas de los clientes.
+const SENDER_NAME = "Música Premium Barato";
+const transportCache = new Map();
+
+function mailers() {
+  const env = process.env;
+  const list = [];
+  if (env.BREVO_SMTP_LOGIN && env.BREVO_SMTP_KEY) {
+    list.push({
+      name: "brevo",
+      from: env.EMAIL_FROM || env.EMAIL_USER || env.BREVO_SMTP_LOGIN,
+      options: {
+        host: env.BREVO_SMTP_HOST || "smtp-relay.brevo.com",
+        port: Number(env.BREVO_SMTP_PORT || 587),
+        secure: String(env.BREVO_SMTP_PORT || "587") === "465",
+        requireTLS: String(env.BREVO_SMTP_PORT || "587") !== "465",
+        auth: { user: env.BREVO_SMTP_LOGIN, pass: env.BREVO_SMTP_KEY },
+        pool: true, maxConnections: 3, rateDelta: 1000, rateLimit: 10,
+      },
+    });
+  }
+  if (env.EMAIL_USER && env.EMAIL_PASS) {
+    const port = String(env.SMTP_PORT || "465");
+    list.push({
+      name: "gmail",
+      from: env.EMAIL_USER,
+      options: {
+        host: env.SMTP_HOST || "smtp.gmail.com",
+        port: Number(port),
+        secure: port === "465",
+        auth: { user: env.EMAIL_USER, pass: env.EMAIL_PASS },
+        // Gmail corta las ráfagas («421 Try again later»): una conexión y 2 correos por segundo.
+        pool: true, maxConnections: 1, rateDelta: 1000, rateLimit: 2,
+      },
+    });
+  }
+  return list;
+}
+
+function transportFor(m) {
+  const key = `${m.name}:${m.options.auth.user}:${m.options.auth.pass.length}:${m.options.host}:${m.options.port}`;
+  if (!transportCache.has(key)) {
+    transportCache.set(key, nodemailer.createTransport({
+      ...m.options,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
+    }));
+  }
+  return transportCache.get(key);
+}
+
+export function mailConfigured() {
+  return mailers().length > 0;
+}
+
+/**
+ * Envía un correo con el primer proveedor que funcione.
+ * Devuelve { sent, skipped, provider?, error? }. `skipped` = ningún proveedor configurado.
+ */
+export async function deliverMail({ to, subject, html, text }) {
+  const list = mailers();
+  if (!list.length) return { sent: false, skipped: true };
+  let lastError = null;
+  for (const m of list) {
+    try {
+      await transportFor(m).sendMail({
+        from: `"${SENDER_NAME}" <${m.from}>`,
+        ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}),
+        to, subject, html, text,
+      });
+      return { sent: true, skipped: false, provider: m.name };
+    } catch (error) {
+      lastError = error;
+      console.error(`[correo] ${m.name} no pudo enviar a ${to}:`, error.message);
+    }
+  }
+  return { sent: false, skipped: false, error: lastError?.message || "send_failed", code: lastError?.code };
 }
 
 /** Envío simple (alertas al admin). Devuelve { sent, skipped, error }. */
 export async function sendPlainEmail({ to, subject, text, html }) {
-  const smtp = smtpTransport();
-  if (!smtp || !to) return { sent: false, skipped: true };
-  try {
-    await smtp.transporter.sendMail({
-      from: `"Música Premium Barato" <${smtp.from}>`,
-      to,
-      subject,
-      text,
-      html: html || `<pre style="font-family:monospace">${escapeHtml(text || "")}</pre>`,
-    });
-    return { sent: true, skipped: false };
-  } catch (error) {
-    return { sent: false, skipped: false, error: error.message };
-  }
+  if (!to) return { sent: false, skipped: true };
+  return deliverMail({
+    to,
+    subject,
+    text,
+    html: html || `<pre style="font-family:monospace">${escapeHtml(text || "")}</pre>`,
+  });
 }
 
 /**
@@ -68,12 +134,10 @@ export async function sendPlainEmail({ to, subject, text, html }) {
  * Devuelve { sent, skipped, error }: `skipped` = SMTP sin configurar.
  */
 export async function sendOrderEmail(order, { renewalDate = null } = {}) {
-  const smtp = smtpTransport();
-  if (!smtp) {
-    console.warn("SMTP email credentials (EMAIL_USER / EMAIL_PASS) not configured. Skipping email.");
+  if (!mailConfigured()) {
+    console.warn("[correo] sin proveedor configurado (BREVO_SMTP_* o EMAIL_USER/EMAIL_PASS): no se envía.");
     return { sent: false, skipped: true };
   }
-  const { from: emailUser, transporter } = smtp;
 
   // Calculate dates
   const purchaseDate = order.paidAt ? new Date(order.paidAt) : order.createdAt ? new Date(order.createdAt) : new Date();
@@ -229,45 +293,24 @@ export async function sendOrderEmail(order, { renewalDate = null } = {}) {
   `;
 
   const mailOptions = {
-    from: `"Música Premium Barato" <${emailUser}>`,
     to: order.email,
     subject: `🚀 Tu cuenta premium de ${serviceConfig.name} está lista - Orden #${order.orderId}`,
     html: emailHtml,
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`Order email sent successfully to ${order.email}`);
-    return { sent: true, skipped: false };
-  } catch (error) {
-    console.error("Error sending order email:", error);
-    return { sent: false, skipped: false, error: error.message };
-  }
+  const result = await deliverMail(mailOptions);
+  if (result.sent) console.log(`[correo] entrega enviada a ${order.email} (${result.provider})`);
+  return result;
 }
 
 export async function sendOTPEmail(email, code) {
-  const emailUser = process.env.EMAIL_USER;
-  const emailPass = process.env.EMAIL_PASS;
-
-  // If email credentials are not configured, skip silently
-  if (!emailUser || !emailPass) {
+  if (!mailConfigured()) {
     return {
       success: false,
       error: "SMTP_NOT_CONFIGURED",
-      message: "Las variables de entorno EMAIL_USER o EMAIL_PASS no están configuradas."
+      message: "No hay proveedor de correo configurado (BREVO_SMTP_LOGIN/BREVO_SMTP_KEY o EMAIL_USER/EMAIL_PASS).",
     };
   }
-
-  // Setup Nodemailer transporter with Gmail SMTP
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      user: emailUser,
-      pass: emailPass,
-    },
-  });
 
   const emailHtml = `
     <!DOCTYPE html>
@@ -316,23 +359,17 @@ export async function sendOTPEmail(email, code) {
   `;
 
   const mailOptions = {
-    from: `"Música Premium Barato" <${emailUser}>`,
     to: email,
     subject: "Código de verificación",
     html: emailHtml,
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log(`OTP email sent successfully to ${email}`);
-    return { success: true };
-  } catch (error) {
-    console.error("Error sending OTP email:", error);
-    return {
-      success: false,
-      error: error.code || "SMTP_ERROR",
-      message: error.message || "Error desconocido al enviar correo"
-    };
-  }
+  const result = await deliverMail(mailOptions);
+  if (result.sent) return { success: true };
+  return {
+    success: false,
+    error: result.code || "SMTP_ERROR",
+    message: result.error || "Error desconocido al enviar correo",
+  };
 }
 
