@@ -4,7 +4,7 @@ import { getIntentById } from "../../../../../lib/paymentIntents";
 import { payIntentWithYape } from "../../../../../lib/providerSync";
 import { deliverOrder } from "../../../../../lib/delivery";
 import { alertAdmin } from "../../../../../lib/notify";
-import { rateLimitDb } from "../../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitAll, rateLimitDb } from "../../../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,12 @@ export const runtime = "nodejs";
 // aprueba, se liquida el pedido al instante. Nunca se confía en montos del cliente.
 export async function POST(req) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "mp-yape"), { limit: 12, windowMs: 10 * 60 * 1000 });
-    if (!limited.ok) return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos. Espera unos minutos.");
-
     const { intentId, t, yapeToken } = await req.json().catch(() => ({}));
+    const limited = await rateLimitAll([
+      [getClientKey(req, "mp-yape"), LIMITS.mpYapeIp],
+      [`mp-yape-tries:${String(intentId).slice(0, 20)}`, LIMITS.mpYapePerIntent],
+    ]);
+    if (!limited.ok) return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos. Espera unos minutos.");
     const token = String(yapeToken || "").trim();
     if (!intentId || !token || token.length > 200) {
       return NextResponse.json({ message: "Faltan datos del pago." }, { status: 400 });

@@ -4,7 +4,7 @@ import { createOrder, getOrderById } from "../../../lib/db";
 import { findPlan } from "../../../lib/catalog";
 import { newAccessToken } from "../../../lib/orderAccess";
 import { getCustomerSession } from "../../../lib/libClientAuth";
-import { rateLimitDb } from "../../../lib/rateLimitDb";
+import { LIMITS, rateLimitAll } from "../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../lib/rateLimit";
 import { CONFIG } from "../../../data/config";
 
@@ -15,17 +15,22 @@ const LEGACY_METHOD_CURRENCY = { yape_plin: "PEN", binance_pay: "USDT" };
 
 export async function POST(req) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "create-order"), { limit: 8, windowMs: 10 * 60 * 1000 });
-    if (!limited.ok) {
-      return rateLimitedJson(limited.retryAfterMs, "Has creado demasiados pedidos seguidos. Espera unos minutos.");
-    }
-
     const body = await req.json();
     const { service, planId, fullName, email, whatsapp } = body;
     const currency = body.currency || LEGACY_METHOD_CURRENCY[body.paymentMethod] || "PEN";
 
     if (!service || !planId || !fullName || !email || !whatsapp) {
       return NextResponse.json({ message: "Faltan campos requeridos en el formulario." }, { status: 400 });
+    }
+
+    // Por cliente (WhatsApp y correo), no por IP: muchos clientes comparten IP en datos móviles.
+    const limited = await rateLimitAll([
+      [getClientKey(req, "create-order"), LIMITS.orderCreateIp],
+      [`create-order:wa:${String(whatsapp).replace(/\D/g, "")}`, LIMITS.orderCreateContact],
+      [`create-order:mail:${String(email).trim().toLowerCase()}`, LIMITS.orderCreateContact],
+    ]);
+    if (!limited.ok) {
+      return rateLimitedJson(limited.retryAfterMs, "Has creado demasiados pedidos seguidos. Espera unos minutos.");
     }
     if (!CONFIG.services[service]) {
       return NextResponse.json({ message: "Servicio no válido." }, { status: 400 });

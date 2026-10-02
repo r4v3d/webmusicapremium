@@ -5,7 +5,7 @@ import { binanceConfigured } from "../../../../../lib/binanceAccount";
 import { claimBinanceByOrderId } from "../../../../../lib/providerSync";
 import { deliverOrder } from "../../../../../lib/delivery";
 import { rateLimitDb } from "../../../../../lib/rateLimitDb";
-import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
+import { rateLimitedJson } from "../../../../../lib/rateLimit";
 import { claimMessage } from "../../../../../lib/binanceClaimMessages";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export async function POST(req) {
     if (!auth.ok) return NextResponse.json({ message: "El pedido no fue encontrado." }, { status: 404 });
 
     // Máximo 5 reclamos por cliente cada 10 min: evita probar Order IDs al azar.
-    const bucket = auth.order.customer_id ? `claim:c:${auth.order.customer_id}` : `claim:${getClientKey(req)}`;
+    const bucket = auth.order.customer_id ? `claim:c:${auth.order.customer_id}` : `claim:o:${auth.order.order_id}`;
     const limited = await rateLimitDb(bucket, { limit: 5, windowMs: 10 * 60 * 1000 });
     if (!limited.ok) return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos. Espera unos minutos.");
 

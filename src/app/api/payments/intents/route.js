@@ -3,7 +3,7 @@ import { authorizeCheckout, buildCheckoutView, loadOrderRow } from "../../../../
 import { createIntent } from "../../../../lib/paymentIntents";
 import { deliverOrder } from "../../../../lib/delivery";
 import { alertAdmin } from "../../../../lib/notify";
-import { rateLimitDb } from "../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitAll } from "../../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../../lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -21,13 +21,16 @@ const MESSAGES = {
 
 export async function POST(req) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "create-intent"), { limit: 20, windowMs: 10 * 60 * 1000 });
-    if (!limited.ok) return rateLimitedJson(limited.retryAfterMs);
-
     const { orderId, token, provider, customerReference } = await req.json();
     if (!orderId || !provider) {
       return NextResponse.json({ message: "Faltan datos del pago." }, { status: 400 });
     }
+
+    const limited = await rateLimitAll([
+      [getClientKey(req, "create-intent"), LIMITS.intentCreateIp],
+      [`create-intent:${String(orderId).slice(0, 40)}`, LIMITS.intentCreatePerOrder],
+    ]);
+    if (!limited.ok) return rateLimitedJson(limited.retryAfterMs);
 
     const auth = await authorizeCheckout(orderId, token);
     if (!auth.ok) return NextResponse.json({ message: "El pedido no fue encontrado." }, { status: 404 });

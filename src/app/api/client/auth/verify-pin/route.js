@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { query } from "../../../../../lib/pg";
 import { hashPin, setCustomerSession, verifyPin } from "../../../../../lib/libClientAuth";
 import { isLegacyPinHash } from "../../../../../lib/pinOtp";
-import { rateLimitDb } from "../../../../../lib/rateLimitDb";
+import { LIMITS, rateLimitDb } from "../../../../../lib/rateLimitDb";
 import { getClientKey, rateLimitedJson } from "../../../../../lib/rateLimit";
 
 export async function POST(req) {
   try {
-    const limited = await rateLimitDb(getClientKey(req, "verify-pin"), { limit: 8, windowMs: 15 * 60 * 1000 });
+    const limited = await rateLimitDb(getClientKey(req, "verify-pin"), LIMITS.pinVerifyIp);
     if (!limited.ok) {
       return rateLimitedJson(limited.retryAfterMs, "Demasiados intentos de PIN. Espera unos minutos.");
     }
